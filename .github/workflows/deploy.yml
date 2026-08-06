@@ -1,4 +1,20 @@
-- name: Setup Node.js
+name: Deploy to Cloudflare
+
+on:
+push:
+branches:
+- main
+- dev
+
+jobs:
+deploy-dashboard:
+name: Deploy Dashboard to Pages
+runs-on: ubuntu-latest
+steps:
+- name: Checkout code
+uses: actions/checkout@v4
+
+  - name: Setup Node.js
     uses: actions/setup-node@v4
     with:
       node-version: '20'
