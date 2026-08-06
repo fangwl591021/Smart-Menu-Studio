@@ -1,21 +1,21 @@
 {
-"name": "line-oa-saas",
-"version": "1.0.0",
-"private": true,
-"description": "LINE OA Smart Menu Studio - SaaS Foundation",
-"workspaces": [
-"apps/",
-"packages/"
-],
-"scripts": {
-"dev": "turbo run dev",
-"build": "turbo run build"
-},
-"devDependencies": {
-"turbo": "^1.13.0",
-"typescript": "^5.4.0"
-},
-"engines": {
-"node": ">=20.0.0"
-}
+  "name": "line-oa-saas",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LINE OA Smart Menu Studio - SaaS Foundation",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build"
+  },
+  "devDependencies": {
+    "turbo": "^1.13.0",
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
 }
