@@ -1,34 +1,34 @@
 name: Deploy to Cloudflare
 
 on:
-push:
-branches:
-- main
-- dev
+  push:
+    branches:
+      - main
+      - dev
 
 jobs:
-deploy-dashboard:
-name: Deploy Dashboard to Pages
-runs-on: ubuntu-latest
-steps:
-- name: Checkout code
-uses: actions/checkout@v4
+  deploy-dashboard:
+    name: Deploy Dashboard to Pages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-  - name: Setup Node.js
-    uses: actions/setup-node@v4
-    with:
-      node-version: '20'
-      cache: 'npm'
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
 
-  - name: Install Dependencies
-    run: npm install
+      - name: Install Dependencies
+        run: npm install
 
-  - name: Build Dashboard
-    run: npm run build --workspace=apps/dashboard
+      - name: Build Dashboard
+        run: npm run build --workspace=apps/dashboard
 
-  - name: Deploy Dashboard to Pages
-    uses: cloudflare/wrangler-action@v3
-    with:
-      apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      command: pages deploy apps/dashboard/dist --project-name smart-menu-dashboard --branch ${{ github.ref_name }}
+      - name: Deploy Dashboard to Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy apps/dashboard/dist --project-name smart-menu-dashboard --branch ${{ github.ref_name }}
