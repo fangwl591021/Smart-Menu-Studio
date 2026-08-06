@@ -1,7 +1,5 @@
 name: Deploy to Cloudflare
 
-STREAMING_CHUNK:設定觸發條件 (推送到 main 或 dev 分支時觸發)
-
 on:
 push:
 branches:
@@ -9,57 +7,6 @@ branches:
 - dev
 
 jobs:
-
------------------------------------------------------------------------------
-
-任務一：部署後端 API 到 Cloudflare Workers
-
------------------------------------------------------------------------------
-
-deploy-api:
-name: Deploy API to Workers
-runs-on: ubuntu-latest
-steps:
-- name: Checkout code
-uses: actions/checkout@v4
-
-  # STREAMING_CHUNK:設定 Node.js 環境
-  - name: Setup Node.js
-    uses: actions/setup-node@v4
-    with:
-      node-version: '20'
-      cache: 'npm' # 假設我們使用 npm 進行套件管理
-
-  - name: Install Dependencies
-    run: npm install
-
-  # STREAMING_CHUNK:部署到測試環境 (當 push 到 dev 分支時)
-  - name: Deploy API (Staging)
-    if: github.ref == 'refs/heads/dev'
-    uses: cloudflare/wrangler-action@v3
-    with:
-      apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      command: deploy --env staging
-      workingDirectory: apps/api
-
-  # STREAMING_CHUNK:部署到正式環境 (當 push 到 main 分支時)
-  - name: Deploy API (Production)
-    if: github.ref == 'refs/heads/main'
-    uses: cloudflare/wrangler-action@v3
-    with:
-      apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      command: deploy --env production
-      workingDirectory: apps/api
-
-
------------------------------------------------------------------------------
-
-任務二：部署前端 Dashboard 到 Cloudflare Pages
-
------------------------------------------------------------------------------
-
 deploy-dashboard:
 name: Deploy Dashboard to Pages
 runs-on: ubuntu-latest
@@ -76,15 +23,12 @@ uses: actions/checkout@v4
   - name: Install Dependencies
     run: npm install
 
-  # STREAMING_CHUNK:編譯前端 React 程式碼
   - name: Build Dashboard
     run: npm run build --workspace=apps/dashboard
 
-  # STREAMING_CHUNK:將打包後的 dist 資料夾發布到 Cloudflare Pages
   - name: Deploy Dashboard to Pages
     uses: cloudflare/wrangler-action@v3
     with:
       apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      # 這裡會根據你推測的分支名稱 (main 或 dev) 自動建立 Pages 的對應預覽或正式環境
       command: pages deploy apps/dashboard/dist --project-name smart-menu-dashboard --branch ${{ github.ref_name }}
