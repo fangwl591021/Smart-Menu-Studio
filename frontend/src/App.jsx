@@ -34,10 +34,12 @@ const NAVIGATION = [
   { id: 'settings', label: '品牌設定', icon: Settings },
 ];
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8788';
 const PRODUCTION_WORKER_BASE_URL =
   import.meta.env.VITE_PRODUCTION_WORKER_BASE_URL ||
   'https://smart-menu-backend.fangwl591021.workers.dev';
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.PROD ? PRODUCTION_WORKER_BASE_URL : 'http://127.0.0.1:8788');
 const apiUrl = (path = '') => `${API_BASE_URL}${path}`;
 
 const AUTH_TOKEN_KEY = 'smart_menu_auth_token';
