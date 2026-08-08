@@ -1,4 +1,5 @@
 import type { GuideContext } from '../types.ts';
+import type { ProposalAvailability } from '../proposals/types.ts';
 
 export type RecommendationCategory =
   | 'engagement'
@@ -35,7 +36,8 @@ export type Recommendation = {
     target?: string;
   };
   evidence: RecommendationEvidence[];
-  canGenerateProposal: false;
+  canGenerateProposal: boolean;
+  proposal: ProposalAvailability;
   explanationSource: 'rule';
 };
 
@@ -52,7 +54,7 @@ export type RecommendationResult = {
 
 export type RecommendationCandidate = Omit<
   Recommendation,
-  'id' | 'ruleCode' | 'canGenerateProposal' | 'explanationSource'
+  'id' | 'ruleCode' | 'canGenerateProposal' | 'proposal' | 'explanationSource'
 > & {
   stableKey: string;
 };

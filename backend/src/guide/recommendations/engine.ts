@@ -1,5 +1,6 @@
 import type { GuideContext } from '../types.ts';
 import { RECOMMENDATION_RULES } from './rules.ts';
+import { proposalAvailabilityForRule } from '../proposals/availability.ts';
 import type {
   Recommendation,
   RecommendationPriority,
@@ -32,11 +33,13 @@ export function evaluateRecommendations(context: GuideContext): RecommendationRe
       const { stableKey, ...fields } = candidate;
       const id = `rec:${rule.code}:${context.project.id}:${stableFingerprint(stableKey)}`;
       if (deduplicated.has(id)) continue;
+      const proposal = proposalAvailabilityForRule(rule.code);
       deduplicated.set(id, {
         id,
         ruleCode: rule.code,
         ...fields,
-        canGenerateProposal: false,
+        canGenerateProposal: proposal.available,
+        proposal,
         explanationSource: 'rule',
       });
     }

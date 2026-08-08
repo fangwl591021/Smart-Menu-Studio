@@ -155,7 +155,7 @@ test('a valid small mixed configuration can have no recommendations', () => {
   });
 });
 
-test('recommendation IDs are stable, unique, deduplicated, and proposal-disabled', () => {
+test('recommendation IDs are stable, unique, deduplicated, and expose proposal availability', () => {
   const areas = [
     uri(1, 'https://example.com/shared'),
     uri(2, 'https://example.com/shared'),
@@ -165,7 +165,9 @@ test('recommendation IDs are stable, unique, deduplicated, and proposal-disabled
   const second = resultFor(areas);
   assert.deepEqual(first.recommendations.map(item => item.id), second.recommendations.map(item => item.id));
   assert.equal(new Set(first.recommendations.map(item => item.id)).size, first.recommendations.length);
-  assert.ok(first.recommendations.every(item => item.canGenerateProposal === false));
+  assert.ok(first.recommendations.every(item => item.canGenerateProposal === item.proposal.available));
+  assert.ok(first.recommendations.some(item => item.ruleCode === 'R008' && item.proposal.available));
+  assert.ok(first.recommendations.some(item => item.ruleCode === 'R005' && !item.proposal.available));
   assert.ok(first.recommendations.every(item => item.explanationSource === 'rule'));
 });
 

@@ -18,6 +18,7 @@ import { evaluateGuide } from './guide/rules';
 import { buildGuideWorkflow } from './guide/workflow';
 import { emptyRecommendationResult, evaluateRecommendations } from './guide/recommendations/engine';
 import { explainRecommendation, findRecommendationById } from './guide/explanations/engine';
+import { buildProposal, sanitizeProposal } from './guide/proposals/engine';
 import { GEMINI_MODEL, requestGeminiContent } from './gemini';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -2391,6 +2392,59 @@ app.post('/api/projects/:projectId/guide/recommendations/:recommendationId/expla
       status: 'error',
     }));
     return c.json({ success: false, error: '目前無法取得 AI 說明。' }, 500);
+  }
+});
+
+app.post('/api/projects/:projectId/guide/recommendations/:recommendationId/proposal', async (c) => {
+  try {
+    const projectId = c.req.param('projectId');
+    const recommendationId = c.req.param('recommendationId');
+    const workspaceId = workspaceIdOf(c);
+    const context = await buildGuideContext({
+      db: c.env.smart_menu_db,
+      workspaceId,
+      userId: text(c.get('userId')),
+      route: `/projects/${projectId}`,
+      entityType: 'project',
+      entityId: projectId,
+    });
+
+    if (!context) {
+      return c.json({ success: false, error: '找不到專案。' }, 404);
+    }
+
+    const guide = evaluateGuide(context);
+    buildGuideWorkflow(context, guide);
+    const recommendationResult = evaluateRecommendations(context);
+    const recommendation = findRecommendationById(recommendationResult.recommendations, recommendationId);
+    if (!recommendation) {
+      return c.json({ success: false, error: '找不到此智慧建議。' }, 404);
+    }
+
+    const proposal = sanitizeProposal(buildProposal({ context, recommendation }));
+    if (!proposal) {
+      return c.json({
+        success: false,
+        error: '此建議目前沒有安全的改善方案草案。',
+        proposalAvailable: false,
+      }, 409);
+    }
+
+    return c.json({
+      success: true,
+      recommendation: {
+        id: recommendation.id,
+        ruleCode: recommendation.ruleCode,
+        priority: recommendation.priority,
+      },
+      proposal,
+    });
+  } catch {
+    console.error(JSON.stringify({
+      message: 'recommendation proposal endpoint failed',
+      status: 'error',
+    }));
+    return c.json({ success: false, error: '目前無法產生改善方案預覽。' }, 500);
   }
 });
 
