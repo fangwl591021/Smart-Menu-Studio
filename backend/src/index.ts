@@ -13,9 +13,10 @@ import {
   setDefaultRichMenu,
   upsertRichMenuAlias,
 } from './line-rich-menu.mjs';
-import { buildGuideContext } from './guide/context';
+import { buildGuideContext, toPublicGuideContext } from './guide/context';
 import { evaluateGuide } from './guide/rules';
 import { buildGuideWorkflow } from './guide/workflow';
+import { emptyRecommendationResult, evaluateRecommendations } from './guide/recommendations/engine';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
@@ -2314,12 +2315,25 @@ app.get('/api/projects/:projectId/guide', async (c) => {
     }
 
     const guide = evaluateGuide(context);
+    const workflow = buildGuideWorkflow(context, guide);
+    let recommendationResult = emptyRecommendationResult();
+    try {
+      recommendationResult = evaluateRecommendations(context);
+    } catch (recommendationError) {
+      console.error(JSON.stringify({
+        message: 'guide recommendation evaluation failed',
+        projectId,
+        error: recommendationError instanceof Error ? recommendationError.message : 'unknown error',
+      }));
+      recommendationResult = emptyRecommendationResult('目前無法取得智慧建議。');
+    }
 
     return c.json({
       success: true,
-      context,
+      context: toPublicGuideContext(context),
       guide,
-      workflow: buildGuideWorkflow(context, guide),
+      workflow,
+      recommendationResult,
     });
   } catch (e: any) {
     console.error('project-guide:', e);

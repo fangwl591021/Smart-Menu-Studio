@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
 import { emitGuideEvent, GUIDE_REFRESH_EVENT } from '../guide-events';
+import RecommendationSection from './RecommendationSection';
 
 const STATUS_STYLES = {
   blocked: 'border-red-200 bg-red-50 text-red-900',
@@ -176,6 +177,11 @@ export default function SmartGuide({ projectId, selectedAreaId, request, onActio
               帶我到這一步
             </button>
           )}
+
+          <RecommendationSection
+            result={state.payload?.recommendationResult}
+            onAction={onAction}
+          />
         </>
       )}
     </aside>

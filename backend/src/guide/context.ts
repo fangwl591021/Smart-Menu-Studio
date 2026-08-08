@@ -116,3 +116,29 @@ export async function buildGuideContext(input: BuildGuideContextInput): Promise<
     },
   };
 }
+
+const publicUriParts = (value: string) => {
+  try {
+    const url = new URL(value);
+    return { uriHost: url.hostname.toLowerCase(), uriPath: `${url.origin}${url.pathname}` };
+  } catch {
+    return { uriHost: '', uriPath: '' };
+  }
+};
+
+export function toPublicGuideContext(context: GuideContext) {
+  return {
+    ...context,
+    areas: context.areas.map(area => ({
+      id: area.id,
+      label: area.label,
+      actionType: area.actionType,
+      hasUri: Boolean(area.uri),
+      ...publicUriParts(area.uri),
+      messageLength: area.text.length,
+      hasPostbackData: Boolean(area.data),
+      hasDisplayText: Boolean(area.displayText),
+      targetPageId: area.targetPageId,
+    })),
+  };
+}

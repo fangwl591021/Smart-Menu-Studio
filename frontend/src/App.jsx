@@ -715,7 +715,7 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate }) =
   };
 
   const handleGuideAction = async (nextAction) => {
-    if (nextAction?.type === 'focus') return focusGuideTarget(nextAction.target);
+    if (nextAction?.type === 'focus' || nextAction?.type === 'review') return focusGuideTarget(nextAction.target);
     if (nextAction?.type === 'navigate') return Boolean(onGuideNavigate?.(nextAction.target));
     return false;
   };
