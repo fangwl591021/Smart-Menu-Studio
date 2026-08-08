@@ -32,7 +32,7 @@ class RecommendationErrorBoundary extends Component {
   }
 }
 
-function RecommendationContent({ result, onAction, request, projectId }) {
+function RecommendationContent({ result, onAction, request, projectId, userRole = 'viewer', onProposalSaved }) {
   const [expandedId, setExpandedId] = useState('');
   const [showAll, setShowAll] = useState(false);
   const [fallbackId, setFallbackId] = useState('');
@@ -132,6 +132,26 @@ function RecommendationContent({ result, onAction, request, projectId }) {
     }
   };
 
+  const saveProposal = async () => {
+    const recommendation = proposalState.recommendation;
+    if (!recommendation || proposalState.status !== 'success') return;
+    setProposalState(previous => ({ ...previous, saveStatus: 'saving', saveError: '' }));
+    try {
+      const response = await request(
+        `/api/projects/${encodeURIComponent(projectId)}/guide/recommendations/${encodeURIComponent(recommendation.id)}/proposals`,
+        { method: 'POST' },
+      );
+      const payload = await response.json();
+      if (!response.ok || !payload.success || payload.proposal?.status !== 'draft') {
+        throw new Error(payload.error || '改善方案草案儲存失敗。');
+      }
+      setProposalState(previous => ({ ...previous, saveStatus: 'success', saveError: '', savedProposal: payload.proposal }));
+      onProposalSaved?.(payload.proposal);
+    } catch (error) {
+      console.error('Proposal draft save failed', error);
+      setProposalState(previous => ({ ...previous, saveStatus: 'error', saveError: error.message || '改善方案草案儲存失敗。' }));
+    }
+  };
   const closeProposal = () => {
     proposalRequestRef.current += 1;
     setProposalState({ status: 'idle', recommendation: null, proposal: null, error: '' });
@@ -313,6 +333,24 @@ function RecommendationContent({ result, onAction, request, projectId }) {
             <div className="mt-6 rounded-lg bg-indigo-50 p-3 text-xs font-medium text-indigo-800">
               ⚠ 這只是預覽，系統尚未修改任何資料。
             </div>
+            {proposalState.saveStatus === 'success' && (
+              <div className="mt-3 rounded-lg bg-emerald-50 p-3 text-sm font-bold text-emerald-700">✓ 已儲存改善方案</div>
+            )}
+            {proposalState.saveStatus === 'error' && (
+              <div className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{proposalState.saveError}</div>
+            )}
+            {proposalState.status === 'success' && ['editor', 'admin', 'owner'].includes(String(userRole).toLowerCase()) && proposalState.saveStatus !== 'success' && (
+              <div className="mt-4 flex justify-end">
+                <button
+                  type="button"
+                  onClick={saveProposal}
+                  disabled={proposalState.saveStatus === 'saving'}
+                  className="rounded-md bg-indigo-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                >
+                  {proposalState.saveStatus === 'saving' ? '儲存中…' : '儲存為草案'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

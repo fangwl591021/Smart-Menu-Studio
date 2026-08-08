@@ -19,6 +19,16 @@ import { buildGuideWorkflow } from './guide/workflow';
 import { emptyRecommendationResult, evaluateRecommendations } from './guide/recommendations/engine';
 import { explainRecommendation, findRecommendationById } from './guide/explanations/engine';
 import { buildProposal, sanitizeProposal } from './guide/proposals/engine';
+import {
+  createProposalDraft,
+  fingerprintProposal,
+  getStoredProposal,
+  listProposalEvents,
+  listStoredProposals,
+  proposalPermissions,
+  transitionStoredProposal,
+} from './guide/proposals/persistence';
+import type { StoredProposal } from './guide/proposals/persistence';
 import { GEMINI_MODEL, requestGeminiContent } from './gemini';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -2448,6 +2458,276 @@ app.post('/api/projects/:projectId/guide/recommendations/:recommendationId/propo
   }
 });
 
+type CurrentProposalResult = {
+  proposal: NonNullable<ReturnType<typeof sanitizeProposal>>;
+  recommendation: ReturnType<typeof evaluateRecommendations>['recommendations'][number];
+  proposalType: NonNullable<ReturnType<typeof evaluateRecommendations>['recommendations'][number]['proposal']['type']>;
+};
+
+async function rebuildCurrentProposal(
+  c: any,
+  projectId: string,
+  lookup: { recommendationId?: string; ruleCode?: string; sourceEntityId?: string | null; allowFallback?: boolean },
+): Promise<CurrentProposalResult | null> {
+  const workspaceId = workspaceIdOf(c);
+  const context = await buildGuideContext({
+    db: c.env.smart_menu_db,
+    workspaceId,
+    userId: text(c.get('userId')),
+    route: `/projects/${projectId}`,
+    entityType: 'project',
+    entityId: projectId,
+  });
+  if (!context) return null;
+
+  const recommendations = evaluateRecommendations(context).recommendations;
+  let recommendation = lookup.recommendationId
+    ? findRecommendationById(recommendations, lookup.recommendationId)
+    : null;
+  if (!recommendation && lookup.allowFallback && lookup.ruleCode) {
+    recommendation = recommendations.find(item =>
+      item.ruleCode === lookup.ruleCode
+      && (!lookup.sourceEntityId || item.entityId === lookup.sourceEntityId)
+    ) || null;
+  }
+  if (!recommendation?.proposal.available || !recommendation.proposal.type) return null;
+
+  const proposal = sanitizeProposal(buildProposal({ context, recommendation }));
+  if (!proposal) return null;
+  return { proposal, recommendation, proposalType: recommendation.proposal.type };
+}
+
+function proposalResponse(proposal: StoredProposal, role: string, includeSnapshot = false) {
+  return {
+    id: proposal.id,
+    projectId: proposal.projectId,
+    recommendationId: proposal.recommendationId,
+    ruleCode: proposal.ruleCode,
+    proposalType: proposal.proposalType,
+    status: proposal.status,
+    title: proposal.title,
+    summary: proposal.summary,
+    generatedBy: proposal.generatedBy,
+    createdBy: { id: proposal.createdByUserId, name: proposal.createdByName },
+    reviewedBy: proposal.reviewedByUserId ? { id: proposal.reviewedByUserId, name: proposal.reviewedByName } : null,
+    approvedBy: proposal.approvedByUserId ? { id: proposal.approvedByUserId, name: proposal.approvedByName } : null,
+    rejectedBy: proposal.rejectedByUserId ? { id: proposal.rejectedByUserId, name: proposal.rejectedByName } : null,
+    createdAt: proposal.createdAt,
+    updatedAt: proposal.updatedAt,
+    reviewedAt: proposal.reviewedAt,
+    approvedAt: proposal.approvedAt,
+    rejectedAt: proposal.rejectedAt,
+    permissions: proposalPermissions(role, proposal.status),
+    ...(includeSnapshot ? { snapshot: proposal.snapshot } : {}),
+  };
+}
+
+async function refreshStaleStatus(c: any, proposal: StoredProposal): Promise<StoredProposal> {
+  if (!['draft', 'reviewed', 'approved'].includes(proposal.status)) return proposal;
+  const current = await rebuildCurrentProposal(c, proposal.projectId, {
+    recommendationId: proposal.recommendationId,
+  });
+  const currentFingerprint = current && current.proposalType === proposal.proposalType
+    ? await fingerprintProposal(current.proposal, current.proposalType, current.recommendation.evidence)
+    : '';
+  if (currentFingerprint === proposal.sourceFingerprint) return proposal;
+
+  try {
+    await transitionStoredProposal(c.env.smart_menu_db, {
+      proposal,
+      toStatus: 'stale',
+      eventType: 'STALE_DETECTED',
+    });
+  } catch (error: any) {
+    if (!['PROPOSAL_CONFLICT', 'INVALID_PROPOSAL_TRANSITION'].includes(error?.message)) throw error;
+  }
+  return await getStoredProposal(
+    c.env.smart_menu_db,
+    workspaceIdOf(c),
+    proposal.projectId,
+    proposal.id,
+  ) || proposal;
+}
+
+function proposalApiError(c: any, error: any, fallback: string) {
+  if (error?.message === 'FORBIDDEN_ROLE') {
+    return c.json({ success: false, error: '權限不足。' }, 403);
+  }
+  if (error?.message === 'INVALID_PROPOSAL_TRANSITION') {
+    return c.json({ success: false, error: '此改善方案目前不能執行該狀態操作。' }, 409);
+  }
+  if (error?.message === 'PROPOSAL_CONFLICT') {
+    return c.json({ success: false, error: '改善方案狀態已變更，請重新載入。' }, 409);
+  }
+  console.error(JSON.stringify({ message: 'proposal approval workflow failed', status: 'error' }));
+  return c.json({ success: false, error: fallback }, 500);
+}
+
+app.post('/api/projects/:projectId/guide/recommendations/:recommendationId/proposals', async (c) => {
+  try {
+    requireRole(c, 'editor');
+    const projectId = c.req.param('projectId');
+    const current = await rebuildCurrentProposal(c, projectId, {
+      recommendationId: c.req.param('recommendationId'),
+    });
+    if (!current) return c.json({ success: false, error: '找不到可儲存的改善方案。' }, 404);
+
+    const proposalId = await createProposalDraft(c.env.smart_menu_db, {
+      proposal: current.proposal,
+      proposalType: current.proposalType,
+      sourceEntityId: current.recommendation.entityId,
+      actorUserId: text(c.get('userId')),
+      sourceFacts: current.recommendation.evidence,
+    });
+    const stored = await getStoredProposal(c.env.smart_menu_db, workspaceIdOf(c), projectId, proposalId);
+    if (!stored) throw new Error('PROPOSAL_CREATE_READ_FAILED');
+    return c.json({ success: true, proposal: proposalResponse(stored, text(c.get('userRole')), true) }, 201);
+  } catch (error: any) {
+    return proposalApiError(c, error, '改善方案草案儲存失敗。');
+  }
+});
+
+app.get('/api/projects/:projectId/proposals', async (c) => {
+  try {
+    const projectId = c.req.param('projectId');
+    const workspaceId = workspaceIdOf(c);
+    const project = await c.env.smart_menu_db.prepare(`
+      SELECT id FROM projects WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL LIMIT 1
+    `).bind(projectId, workspaceId).first();
+    if (!project) return c.json({ success: false, error: '找不到專案。' }, 404);
+    const proposals = await listStoredProposals(c.env.smart_menu_db, workspaceId, projectId);
+    return c.json({
+      success: true,
+      proposals: proposals.map(item => proposalResponse(item, text(c.get('userRole')))),
+      permissions: proposalPermissions(text(c.get('userRole'))),
+    });
+  } catch (error: any) {
+    return proposalApiError(c, error, '改善方案列表讀取失敗。');
+  }
+});
+
+app.get('/api/projects/:projectId/proposals/:proposalId', async (c) => {
+  try {
+    const projectId = c.req.param('projectId');
+    const workspaceId = workspaceIdOf(c);
+    let proposal = await getStoredProposal(c.env.smart_menu_db, workspaceId, projectId, c.req.param('proposalId'));
+    if (!proposal) return c.json({ success: false, error: '找不到改善方案。' }, 404);
+    proposal = await refreshStaleStatus(c, proposal);
+    const events = await listProposalEvents(c.env.smart_menu_db, workspaceId, proposal.id);
+    return c.json({
+      success: true,
+      proposal: proposalResponse(proposal, text(c.get('userRole')), true),
+      events,
+    });
+  } catch (error: any) {
+    return proposalApiError(c, error, '改善方案讀取失敗。');
+  }
+});
+
+app.post('/api/projects/:projectId/proposals/:proposalId/review', async (c) => {
+  try {
+    requireRole(c, 'editor');
+    const projectId = c.req.param('projectId');
+    const workspaceId = workspaceIdOf(c);
+    let proposal = await getStoredProposal(c.env.smart_menu_db, workspaceId, projectId, c.req.param('proposalId'));
+    if (!proposal) return c.json({ success: false, error: '找不到改善方案。' }, 404);
+    proposal = await refreshStaleStatus(c, proposal);
+    if (proposal.status === 'stale') return c.json({ success: false, error: '此改善方案已失效，請重新產生。' }, 409);
+    await transitionStoredProposal(c.env.smart_menu_db, {
+      proposal,
+      toStatus: 'reviewed',
+      eventType: 'REVIEWED',
+      actorUserId: text(c.get('userId')),
+    });
+    const updated = await getStoredProposal(c.env.smart_menu_db, workspaceId, projectId, proposal.id);
+    return c.json({ success: true, proposal: proposalResponse(updated!, text(c.get('userRole')), true) });
+  } catch (error: any) {
+    return proposalApiError(c, error, '改善方案檢視狀態更新失敗。');
+  }
+});
+
+app.post('/api/projects/:projectId/proposals/:proposalId/approve', async (c) => {
+  try {
+    requireRole(c, 'admin');
+    const projectId = c.req.param('projectId');
+    const workspaceId = workspaceIdOf(c);
+    let proposal = await getStoredProposal(c.env.smart_menu_db, workspaceId, projectId, c.req.param('proposalId'));
+    if (!proposal) return c.json({ success: false, error: '找不到改善方案。' }, 404);
+    proposal = await refreshStaleStatus(c, proposal);
+    if (proposal.status === 'stale') return c.json({ success: false, error: '此改善方案已失效，不能核准。' }, 409);
+    await transitionStoredProposal(c.env.smart_menu_db, {
+      proposal,
+      toStatus: 'approved',
+      eventType: 'APPROVED',
+      actorUserId: text(c.get('userId')),
+    });
+    const updated = await getStoredProposal(c.env.smart_menu_db, workspaceId, projectId, proposal.id);
+    return c.json({ success: true, proposal: proposalResponse(updated!, text(c.get('userRole')), true) });
+  } catch (error: any) {
+    return proposalApiError(c, error, '改善方案核准失敗。');
+  }
+});
+
+app.post('/api/projects/:projectId/proposals/:proposalId/reject', async (c) => {
+  try {
+    requireRole(c, 'admin');
+    const body: any = await c.req.json();
+    const rejectReason = text(body.rejectReason).replace(/[\u0000-\u001f\u007f]/g, '');
+    if (rejectReason.length < 3 || rejectReason.length > 300) {
+      return c.json({ success: false, error: '請輸入 3–300 字的拒絕原因。' }, 400);
+    }
+    const projectId = c.req.param('projectId');
+    const workspaceId = workspaceIdOf(c);
+    let proposal = await getStoredProposal(c.env.smart_menu_db, workspaceId, projectId, c.req.param('proposalId'));
+    if (!proposal) return c.json({ success: false, error: '找不到改善方案。' }, 404);
+    proposal = await refreshStaleStatus(c, proposal);
+    if (proposal.status === 'stale') return c.json({ success: false, error: '此改善方案已失效，請重新產生。' }, 409);
+    await transitionStoredProposal(c.env.smart_menu_db, {
+      proposal,
+      toStatus: 'rejected',
+      eventType: 'REJECTED',
+      actorUserId: text(c.get('userId')),
+      eventMetadata: { rejectReason },
+    });
+    const updated = await getStoredProposal(c.env.smart_menu_db, workspaceId, projectId, proposal.id);
+    return c.json({ success: true, proposal: proposalResponse(updated!, text(c.get('userRole')), true) });
+  } catch (error: any) {
+    return proposalApiError(c, error, '改善方案拒絕失敗。');
+  }
+});
+
+app.post('/api/projects/:projectId/proposals/:proposalId/regenerate', async (c) => {
+  try {
+    requireRole(c, 'editor');
+    const projectId = c.req.param('projectId');
+    const workspaceId = workspaceIdOf(c);
+    const previous = await getStoredProposal(c.env.smart_menu_db, workspaceId, projectId, c.req.param('proposalId'));
+    if (!previous) return c.json({ success: false, error: '找不到改善方案。' }, 404);
+    if (previous.status !== 'stale') return c.json({ success: false, error: '只有已失效方案可以重新產生。' }, 409);
+    const current = await rebuildCurrentProposal(c, projectId, {
+      recommendationId: previous.recommendationId,
+      ruleCode: previous.ruleCode,
+      sourceEntityId: previous.sourceEntityId,
+      allowFallback: true,
+    });
+    if (!current) return c.json({ success: false, error: '目前已沒有可重新產生的對應建議。' }, 409);
+
+    const proposalId = await createProposalDraft(c.env.smart_menu_db, {
+      proposal: current.proposal,
+      proposalType: current.proposalType,
+      sourceEntityId: current.recommendation.entityId,
+      actorUserId: text(c.get('userId')),
+      sourceFacts: current.recommendation.evidence,
+      regeneratedFromId: previous.id,
+    });
+    const stored = await getStoredProposal(c.env.smart_menu_db, workspaceId, projectId, proposalId);
+    if (!stored) throw new Error('PROPOSAL_REGENERATE_READ_FAILED');
+    return c.json({ success: true, proposal: proposalResponse(stored, text(c.get('userRole')), true) }, 201);
+  } catch (error: any) {
+    return proposalApiError(c, error, '改善方案重新產生失敗。');
+  }
+});
+
 app.post('/api/projects/:projectId/publish', async (c) => {
   const projectId = c.req.param('projectId');
 
@@ -4356,6 +4636,7 @@ app.post('/api/system/workspaces/:workspaceId/data-migration', async (c) => {
 
     // Templates first so Projects can remap template_id.
     for (const sourceTemplateId of templateIds) {
+      const normalizedSourceTemplateId = text(sourceTemplateId);
       const sourceTemplate: any = await c.env.smart_menu_db.prepare(`
         SELECT *
         FROM templates
@@ -4363,7 +4644,7 @@ app.post('/api/system/workspaces/:workspaceId/data-migration', async (c) => {
           AND workspace_id = ?
           AND deleted_at IS NULL
         LIMIT 1
-      `).bind(sourceTemplateId, sourceWorkspaceId).first();
+      `).bind(normalizedSourceTemplateId, sourceWorkspaceId).first();
 
       if (!sourceTemplate) continue;
 
@@ -4393,7 +4674,7 @@ app.post('/api/system/workspaces/:workspaceId/data-migration', async (c) => {
       }
 
       const newTemplateId = id('tpl');
-      templateMap.set(sourceTemplateId, newTemplateId);
+      templateMap.set(normalizedSourceTemplateId, newTemplateId);
 
       await c.env.smart_menu_db.prepare(`
         INSERT INTO templates (
@@ -4421,7 +4702,7 @@ app.post('/api/system/workspaces/:workspaceId/data-migration', async (c) => {
         WHERE template_id = ?
           AND workspace_id = ?
         ORDER BY area_index ASC
-      `).bind(sourceTemplateId, sourceWorkspaceId).all();
+      `).bind(normalizedSourceTemplateId, sourceWorkspaceId).all();
 
       const statements = ((areas.results || []) as any[]).map((row: any, index: number) =>
         areaInsertStatement(

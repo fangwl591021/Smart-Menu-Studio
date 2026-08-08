@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import SmartGuide from './components/SmartGuide';
+import ProposalManagement from './components/ProposalManagement';
 import { emitGuideEvent } from './guide-events';
 import { 
   LayoutDashboard, 
@@ -529,13 +530,14 @@ const PROJECT_ACTION_BADGES = {
   richmenuswitch: '↔ 切換頁',
 };
 
-const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate }) => {
+const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, userRole }) => {
   const [project, setProject] = useState(null);
   const [switchTargets, setSwitchTargets] = useState([]);
   const [activeArea, setActiveArea] = useState(null);
   const [loading, setLoading] = useState(true);
   const [changingImage, setChangingImage] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [proposalRefreshKey, setProposalRefreshKey] = useState(0);
   const projectImageInputRef = useRef(null);
 
   useEffect(() => {
@@ -926,6 +928,11 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate }) =
               )}
             </div>
           )}
+          <ProposalManagement
+            projectId={projectId}
+            request={authFetch}
+            refreshKey={proposalRefreshKey}
+          />
         </div>
 
         <div className="bg-gray-100 p-8 flex items-center justify-center overflow-y-auto">
@@ -958,6 +965,8 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate }) =
         selectedAreaId={activeArea}
         request={authFetch}
         onAction={handleGuideAction}
+        userRole={userRole}
+        onProposalSaved={() => setProposalRefreshKey(value => value + 1)}
       />
     </div>
   );
@@ -4916,6 +4925,7 @@ export default function App() {
             {currentView === 'project-editor' && (
               <ProjectEditorView
                 projectId={currentProjectId}
+                userRole={activeRole}
                 onStartNew={startNewProject}
                 onBack={() => setCurrentView('projects')}
                 onGuideNavigate={(target) => {

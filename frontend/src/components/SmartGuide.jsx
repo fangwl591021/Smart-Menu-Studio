@@ -22,7 +22,7 @@ const STEP_SYMBOLS = {
   blocked: '!',
 };
 
-export default function SmartGuide({ projectId, selectedAreaId, request, onAction }) {
+export default function SmartGuide({ projectId, selectedAreaId, request, onAction, userRole, onProposalSaved }) {
   const [state, setState] = useState({ loading: true, error: '', payload: null });
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [toast, setToast] = useState('');
@@ -183,6 +183,8 @@ export default function SmartGuide({ projectId, selectedAreaId, request, onActio
             onAction={onAction}
             request={request}
             projectId={projectId}
+            userRole={userRole}
+            onProposalSaved={onProposalSaved}
           />
         </>
       )}
