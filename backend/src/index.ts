@@ -2,6 +2,11 @@ import { timingSafeEqual } from 'node:crypto';
 import { pbkdf2 } from 'hash-wasm';
 import type { IHasher } from 'hash-wasm/dist/lib/WASMInterface';
 import sha256Wasm from './sha256.wasm';
+import {
+  normalizeProjectAreaAction,
+  projectAreaActionFromRow,
+  richMenuAliasIdForProject,
+} from './project-actions.mjs';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
@@ -863,47 +868,35 @@ function areaStyle(x: number, y: number, width: number, height: number) {
 
 
 function buildLineAction(action: any) {
-  const type = text(action?.type || 'none').toLowerCase();
+  const normalizedAction: any = normalizeProjectAreaAction(action);
+  const type = normalizedAction.type;
 
   if (type === 'uri') {
-    const uri = text(action?.uri);
-    if (!uri) throw new Error('URI Action 缺少網址');
-    return { type: 'uri', uri };
+    if (!normalizedAction.uri) throw new Error('URI Action 缺少網址');
+    return { type: 'uri', uri: normalizedAction.uri };
   }
 
   if (type === 'message') {
-    const messageText = text(action?.text);
-    if (!messageText) throw new Error('Message Action 缺少文字');
-    return { type: 'message', text: messageText };
+    if (!normalizedAction.text) throw new Error('Message Action 缺少文字');
+    return { type: 'message', text: normalizedAction.text };
   }
 
   if (type === 'postback') {
-    const data = text(action?.data);
-    if (!data) throw new Error('Postback Action 缺少 data');
-
-    const result: any = { type: 'postback', data };
-    const displayText = text(action?.displayText);
-    if (displayText) result.displayText = displayText;
-
+    if (!normalizedAction.data) throw new Error('Postback Action 缺少 data');
+    const result: any = { type: 'postback', data: normalizedAction.data };
+    if (normalizedAction.displayText) result.displayText = normalizedAction.displayText;
     return result;
   }
 
-  if (type === 'richmenuswitch') {
-    const aliasId = text(action?.richMenuAliasId || action?.targetAliasId);
-    const data = text(action?.data || 'switch=menu');
-
-    if (!aliasId) {
-      throw new Error('Rich Menu Switch 尚未建立目標 Alias');
-    }
-
-    return {
-      type: 'richmenuswitch',
-      richMenuAliasId: aliasId,
-      data,
-    };
+  if (!normalizedAction.richMenuAliasId) {
+    throw new Error('Rich Menu Switch 尚未建立目標 Alias');
   }
 
-  throw new Error('停用區塊不可發布為 LINE Action');
+  return {
+    type: 'richmenuswitch',
+    richMenuAliasId: normalizedAction.richMenuAliasId,
+    data: normalizedAction.data,
+  };
 }
 
 async function getProjectForPublish(env: Bindings, workspaceId: string, projectId: string) {
@@ -930,14 +923,7 @@ async function getProjectForPublish(env: Bindings, workspaceId: string, projectI
     y: num(row.y),
     width: num(row.width),
     height: num(row.height),
-    action: {
-      type: row.action_type || 'none',
-      uri: row.action_uri || '',
-      text: row.action_text || '',
-      data: row.action_data || '',
-      displayText: row.action_display_text || '',
-      targetPageId: row.target_page_id || '',
-    },
+    action: projectAreaActionFromRow(row),
   }));
 
   return { ...project, areas };
@@ -1888,7 +1874,7 @@ app.get('/api/templates/:templateId', async (c) => {
 // =====================================================
 
 function projectAreaInsertStatement(env: Bindings, workspaceId: string, projectId: string, area: any, index: number) {
-  const action: any = normalizeAction(area.action);
+  const action: any = normalizeProjectAreaAction(area);
   const x = Math.max(0, Math.round(num(area.x)));
   const y = Math.max(0, Math.round(num(area.y)));
   const width = Math.max(1, Math.round(num(area.width, 1)));
@@ -2019,6 +2005,7 @@ app.get('/api/projects', async (c) => {
 
     const projects = (result.results || []).map((row: any) => ({
       id: row.id,
+      richMenuAliasId: richMenuAliasIdForProject(row.id),
       templateId: row.template_id,
       name: row.name,
       status: row.status,
@@ -2150,6 +2137,35 @@ app.patch('/api/projects/:projectId', async (c) => {
       return c.json({ success: false, error: '專案至少需要一個熱區。' }, 400);
     }
 
+    const switchAreas = areas.filter(
+      (area: any) => text(area?.action?.type).toLowerCase() === 'richmenuswitch'
+    );
+    const switchTargetIds = [...new Set(
+      switchAreas.map((area: any) => text(area?.action?.targetPageId)).filter(Boolean)
+    )] as string[];
+
+    if (switchAreas.some((area: any) => !text(area?.action?.targetPageId))) {
+      return c.json({ success: false, error: '切換頁 Action 必須選擇目標頁面。' }, 400);
+    }
+
+    if (switchTargetIds.length) {
+      const placeholders = switchTargetIds.map(() => '?').join(', ');
+      const targetResult = await c.env.smart_menu_db.prepare(`
+        SELECT id
+        FROM projects
+        WHERE workspace_id = ?
+          AND deleted_at IS NULL
+          AND id IN (${placeholders})
+      `).bind(workspaceId, ...switchTargetIds).all();
+
+      const allowedSwitchTargetIds = new Set(
+        ((targetResult.results || []) as any[]).map((row: any) => text(row.id))
+      );
+      if (allowedSwitchTargetIds.size !== switchTargetIds.length) {
+        return c.json({ success: false, error: '切換目標不存在或不屬於目前 Workspace。' }, 400);
+      }
+    }
+
     const statements: D1PreparedStatement[] = [
       c.env.smart_menu_db.prepare(`
         UPDATE projects
@@ -2206,18 +2222,15 @@ app.get('/api/projects/:projectId', async (c) => {
       ORDER BY area_index ASC
     `).bind(projectId, workspaceId).all();
 
+    const switchTargetResult = await c.env.smart_menu_db.prepare(`
+      SELECT id, name, status
+      FROM projects
+      WHERE workspace_id = ? AND deleted_at IS NULL
+      ORDER BY updated_at DESC, created_at DESC
+    `).bind(workspaceId).all();
+
     const areas = (areaResult.results || []).map((row: any) => {
-      const action: any = { type: row.action_type || 'none' };
-      if (action.type === 'uri') action.uri = row.action_uri || '';
-      if (action.type === 'message') action.text = row.action_text || '';
-      if (action.type === 'postback') {
-        action.data = row.action_data || '';
-        action.displayText = row.action_display_text || '';
-      }
-      if (action.type === 'richmenuswitch') {
-        action.data = row.action_data || '';
-        action.targetPageId = row.target_page_id || '';
-      }
+      const action: any = projectAreaActionFromRow(row);
 
       const x = num(row.x);
       const y = num(row.y);
@@ -2248,6 +2261,12 @@ app.get('/api/projects/:projectId', async (c) => {
         imageUrl: project.asset_id ? `/api/assets/${project.asset_id}` : null,
         areas,
       },
+      switchTargets: (switchTargetResult.results || []).map((row: any) => ({
+        id: row.id,
+        name: row.name,
+        status: row.status,
+        richMenuAliasId: richMenuAliasIdForProject(row.id),
+      })),
     });
   } catch (e: any) {
     console.error('get-project:', e);
@@ -3611,14 +3630,14 @@ function transferAreaShape(row: any) {
     y: row.y,
     width: row.width,
     height: row.height,
-    action: {
+    action: normalizeAction({
       type: row.action_type || 'none',
       uri: row.action_uri || '',
       text: row.action_text || '',
       data: row.action_data || '',
       displayText: row.action_display_text || '',
       targetPageId: row.target_page_id || '',
-    },
+    }),
   };
 }
 

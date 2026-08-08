@@ -445,8 +445,23 @@ const ProjectBuilderView = ({ onBack, onCreated }) => {
   );
 };
 
+const PROJECT_ACTION_OPTIONS = [
+  { value: 'uri', label: '網址' },
+  { value: 'message', label: '文字' },
+  { value: 'postback', label: 'Postback' },
+  { value: 'richmenuswitch', label: '切換頁' },
+];
+
+const PROJECT_ACTION_BADGES = {
+  uri: '🔗 網址',
+  message: '💬 文字',
+  postback: '⚙ Postback',
+  richmenuswitch: '↔ 切換頁',
+};
+
 const ProjectEditorView = ({ projectId, onBack }) => {
   const [project, setProject] = useState(null);
+  const [switchTargets, setSwitchTargets] = useState([]);
   const [activeArea, setActiveArea] = useState(null);
   const [loading, setLoading] = useState(true);
   const [changingImage, setChangingImage] = useState(false);
@@ -461,6 +476,7 @@ const ProjectEditorView = ({ projectId, onBack }) => {
         const data = await res.json();
         if (!res.ok || !data.success) throw new Error(data.error || '專案讀取失敗');
         setProject(data.project);
+        setSwitchTargets(data.switchTargets || []);
         setActiveArea(data.project.areas?.[0]?.id || null);
       } catch (e) {
         console.error(e);
@@ -516,13 +532,54 @@ const ProjectEditorView = ({ projectId, onBack }) => {
           ? {
               ...area,
               action: {
-                ...(area.action || { type: 'none' }),
+                ...(area.action || { type: 'uri', uri: '' }),
                 ...patch,
               },
             }
           : area
       ),
     }));
+  };
+
+  const replaceProjectAreaAction = (areaId, action) => {
+    setProject(prev => ({
+      ...prev,
+      areas: (prev.areas || []).map(area =>
+        area.id === areaId ? { ...area, action } : area
+      ),
+    }));
+  };
+
+  const changeProjectAreaActionType = (areaId, type) => {
+    if (type === 'message') {
+      replaceProjectAreaAction(areaId, { type, text: '' });
+      return;
+    }
+    if (type === 'postback') {
+      replaceProjectAreaAction(areaId, { type, data: '', displayText: '' });
+      return;
+    }
+    if (type === 'richmenuswitch') {
+      const target = switchTargets.find(item => item.id !== projectId) || switchTargets[0];
+      replaceProjectAreaAction(areaId, {
+        type,
+        targetPageId: target?.id || '',
+        richMenuAliasId: target?.richMenuAliasId || '',
+        data: target?.richMenuAliasId ? `switch:${target.richMenuAliasId}` : '',
+      });
+      return;
+    }
+    replaceProjectAreaAction(areaId, { type: 'uri', uri: '' });
+  };
+
+  const changeRichMenuSwitchTarget = (areaId, targetPageId) => {
+    const target = switchTargets.find(item => item.id === targetPageId);
+    replaceProjectAreaAction(areaId, {
+      type: 'richmenuswitch',
+      targetPageId: target?.id || '',
+      richMenuAliasId: target?.richMenuAliasId || '',
+      data: target?.richMenuAliasId ? `switch:${target.richMenuAliasId}` : '',
+    });
   };
 
   const saveProject = async () => {
@@ -564,14 +621,16 @@ const ProjectEditorView = ({ projectId, onBack }) => {
   }
 
   const currentArea = project.areas?.find(a => a.id === activeArea);
-  const action = currentArea?.action || { type: 'none' };
+  const action = currentArea?.action || { type: 'uri', uri: '' };
+  const otherSwitchTargets = switchTargets.filter(item => item.id !== project.id);
+  const availableSwitchTargets = otherSwitchTargets.length ? otherSwitchTargets : switchTargets;
 
   const fieldDescription = (() => {
-    if (action.type === 'uri') return '請填入客戶實際要開啟的網址';
-    if (action.type === 'message') return '請填入使用者點擊後要送出的文字';
-    if (action.type === 'postback') return '模板已設定為流程觸發，正式參數將在下一階段接入';
-    if (action.type === 'richmenuswitch') return '此按鈕會切換到模板指定頁面';
-    return '此區塊目前沒有動作';
+    if (action.type === 'uri') return '開啟客戶指定網址';
+    if (action.type === 'message') return '點擊後傳送指定文字';
+    if (action.type === 'postback') return '送出流程 Data，可選擇是否顯示文字';
+    if (action.type === 'richmenuswitch') return '切換到同一 Workspace 的另一個 Project 頁面';
+    return '請選擇此區域的動作類型';
   })();
 
   return (
@@ -622,7 +681,7 @@ const ProjectEditorView = ({ projectId, onBack }) => {
         <div className="bg-white border-r border-gray-200 overflow-y-auto p-6 space-y-6">
           <div>
             <h3 className="font-bold text-gray-900 mb-2">請完成客戶內容</h3>
-            <p className="text-sm text-gray-500">模板已決定座標與動作類型，這裡只填實際內容，不需要重新設定技術參數。</p>
+            <p className="text-sm text-gray-500">模板提供圖片、座標、區域名稱與預設 Action；此專案可獨立調整每個區域的最終動作，不會回寫模板。</p>
           </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
@@ -646,6 +705,19 @@ const ProjectEditorView = ({ projectId, onBack }) => {
               <div>
                 <div className="font-bold text-gray-900">設定【{currentArea.label}】</div>
                 <div className="text-xs text-gray-500 mt-1">{fieldDescription}</div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">動作類型</label>
+                <select
+                  value={action.type || 'uri'}
+                  onChange={(e) => changeProjectAreaActionType(currentArea.id, e.target.value)}
+                  className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  {PROJECT_ACTION_OPTIONS.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
               </div>
 
               {action.type === 'uri' && (
@@ -677,15 +749,21 @@ const ProjectEditorView = ({ projectId, onBack }) => {
 
               {action.type === 'postback' && (
                 <div className="space-y-3">
-                  <div className="rounded-md bg-indigo-50 border border-indigo-100 p-3 text-sm text-indigo-800">
-                    此按鈕使用流程觸發。一般客戶不需理解 Postback，只需要修改顯示文字。
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Data</label>
+                    <input
+                      value={action.data || ''}
+                      onChange={(e) => updateProjectAreaAction(currentArea.id, { data: e.target.value })}
+                      placeholder="action=security_info"
+                      className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">顯示文字</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">顯示文字（選填）</label>
                     <input
                       value={action.displayText || ''}
                       onChange={(e) => updateProjectAreaAction(currentArea.id, { displayText: e.target.value })}
-                      placeholder="例如：我要查詢點數"
+                      placeholder="例如：查看中騰保全"
                       className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                     />
                   </div>
@@ -693,8 +771,31 @@ const ProjectEditorView = ({ projectId, onBack }) => {
               )}
 
               {action.type === 'richmenuswitch' && (
-                <div className="rounded-md bg-green-50 border border-green-100 p-3 text-sm text-green-800">
-                  切換目標：{action.targetPageId || '模板預設頁面'}。頁面切換技術參數由系統保留。
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">目標頁面</label>
+                    <select
+                      value={action.targetPageId || ''}
+                      onChange={(e) => changeRichMenuSwitchTarget(currentArea.id, e.target.value)}
+                      className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                    >
+                      <option value="">請選擇目標頁面</option>
+                      {availableSwitchTargets.map(target => (
+                        <option key={target.id} value={target.id}>
+                          {target.name}{target.id === project.id ? '（目前專案）' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {availableSwitchTargets.length === 0 ? (
+                    <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
+                      目前 Workspace 尚無可切換的 Project 頁面。
+                    </div>
+                  ) : (
+                    <div className="rounded-md bg-green-50 border border-green-100 p-3 text-xs text-green-800">
+                      系統會自動建立目標 alias 與 switch data，不需要手動輸入技術參數。
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -720,8 +821,12 @@ const ProjectEditorView = ({ projectId, onBack }) => {
                   className={`absolute border border-red-500 ${
                     activeArea === area.id ? 'bg-red-500/35' : 'bg-red-500/10 hover:bg-red-500/20'
                   }`}
-                  title={area.label}
-                />
+                  title={`${area.label} · ${PROJECT_ACTION_BADGES[area.action?.type] || '未設定'}`}
+                >
+                  <span className="absolute left-1 top-1 max-w-[calc(100%-8px)] truncate rounded bg-black/70 px-1.5 py-0.5 text-[9px] leading-tight text-white pointer-events-none">
+                    {area.label} · {PROJECT_ACTION_BADGES[area.action?.type] || '未設定'}
+                  </span>
+                </button>
               ))}
             </div>
             <div className="h-10 border-t border-gray-200 flex items-center justify-center text-sm text-gray-700">選單</div>

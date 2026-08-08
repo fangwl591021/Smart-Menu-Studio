@@ -2,6 +2,7 @@
   "name": "smart-menu-backend",
   "type": "module",
   "scripts": {
+    "test": "node --test test/*.test.mjs",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy --minify",
     "cf-typegen": "wrangler types --env-interface CloudflareBindings"
