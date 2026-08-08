@@ -2042,6 +2042,7 @@ app.get('/api/projects', async (c) => {
 app.post('/api/projects/:projectId/upload-image', async (c) => {
   try {
     const projectId = c.req.param('projectId');
+    const workspaceId = workspaceIdOf(c);
 
     const project: any = await c.env.smart_menu_db.prepare(`
       SELECT id, asset_id
@@ -2124,6 +2125,7 @@ app.post('/api/projects/:projectId/upload-image', async (c) => {
 app.patch('/api/projects/:projectId', async (c) => {
   try {
     const projectId = c.req.param('projectId');
+    const workspaceId = workspaceIdOf(c);
 
     const existing: any = await c.env.smart_menu_db.prepare(`
       SELECT id
@@ -2184,6 +2186,7 @@ app.patch('/api/projects/:projectId', async (c) => {
 app.get('/api/projects/:projectId', async (c) => {
   try {
     const projectId = c.req.param('projectId');
+    const workspaceId = workspaceIdOf(c);
 
     const project: any = await c.env.smart_menu_db.prepare(`
       SELECT *
