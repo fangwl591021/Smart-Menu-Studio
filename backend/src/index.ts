@@ -1,4 +1,7 @@
-import { pbkdf2, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
+import { pbkdf2 } from 'hash-wasm';
+import type { IHasher } from 'hash-wasm/dist/lib/WASMInterface';
+import sha256Wasm from './sha256.wasm';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
@@ -230,6 +233,73 @@ function base64ToBytes(value: string): Uint8Array {
   return bytes;
 }
 
+const SHA256_WASM_BUFFER_SIZE = 0x4000;
+
+type Sha256WasmExports = WebAssembly.Exports & {
+  memory: WebAssembly.Memory;
+  Hash_GetBuffer: () => number;
+  Hash_Init: (bits: number) => void;
+  Hash_Update: (length: number) => void;
+  Hash_Final: (padding: number) => void;
+};
+
+function passwordHashInputBytes(data: string | ArrayBufferView): Uint8Array {
+  if (typeof data === 'string') return new TextEncoder().encode(data);
+  return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+}
+
+async function createCloudflareSha256(): Promise<IHasher> {
+  const instance = await WebAssembly.instantiate(sha256Wasm, {});
+  const wasm = instance.exports as Sha256WasmExports;
+  let initialized = false;
+
+  const memory = () => new Uint8Array(
+    wasm.memory.buffer,
+    wasm.Hash_GetBuffer(),
+    SHA256_WASM_BUFFER_SIZE
+  );
+
+  function digest(outputType: 'binary'): Uint8Array;
+  function digest(outputType?: 'hex'): string;
+  function digest(outputType: 'hex' | 'binary' = 'hex'): string | Uint8Array {
+    if (!initialized) throw new Error('SHA-256 digest called before init');
+    wasm.Hash_Final(0);
+    initialized = false;
+    const result = memory().slice(0, PBKDF2_KEY_LENGTH_BYTES);
+    if (outputType === 'binary') return result;
+    return Array.from(result).map(byte => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  const hasher: IHasher = {
+    init: () => {
+      wasm.Hash_Init(256);
+      initialized = true;
+      return hasher;
+    },
+    update: (data) => {
+      if (!initialized) throw new Error('SHA-256 update called before init');
+      const bytes = passwordHashInputBytes(data);
+      for (let offset = 0; offset < bytes.length; offset += SHA256_WASM_BUFFER_SIZE) {
+        const chunk = bytes.subarray(offset, offset + SHA256_WASM_BUFFER_SIZE);
+        memory().set(chunk);
+        wasm.Hash_Update(chunk.length);
+      }
+      return hasher;
+    },
+    digest,
+    save: () => {
+      throw new Error('SHA-256 save is not supported');
+    },
+    load: () => {
+      throw new Error('SHA-256 load is not supported');
+    },
+    blockSize: 64,
+    digestSize: PBKDF2_KEY_LENGTH_BYTES,
+  };
+
+  return hasher.init();
+}
+
 const PBKDF2_ITERATIONS = 210000;
 const PBKDF2_KEY_LENGTH_BYTES = 32;
 
@@ -238,22 +308,15 @@ async function derivePasswordHash(
   saltBase64: string,
   iterations = PBKDF2_ITERATIONS
 ): Promise<string> {
-  return new Promise((resolve, reject) => {
-    pbkdf2(
-      password,
-      base64ToBytes(saltBase64),
-      iterations,
-      PBKDF2_KEY_LENGTH_BYTES,
-      'sha256',
-      (error, derivedKey) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve(bytesToBase64(derivedKey));
-      }
-    );
+  const derivedKey = await pbkdf2({
+    password,
+    salt: base64ToBytes(saltBase64),
+    iterations,
+    hashLength: PBKDF2_KEY_LENGTH_BYTES,
+    hashFunction: createCloudflareSha256(),
+    outputType: 'binary',
   });
+  return bytesToBase64(derivedKey);
 }
 
 async function createPasswordRecord(password: string) {
