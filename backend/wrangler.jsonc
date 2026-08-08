@@ -17,10 +17,10 @@
 			"database_id": "b047ae1b-af71-412c-a06f-1b60d2d2d16f",
 			"remote": true
 		}
+	],
+	"compatibility_flags": [
+		"nodejs_compat"
 	]
-	// "compatibility_flags": [
-	//   "nodejs_compat"
-	// ],
 	// "vars": {
 	//   "MY_VAR": "my-variable"
 	// },

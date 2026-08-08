@@ -1,3 +1,4 @@
+import { pbkdf2, timingSafeEqual } from 'node:crypto';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
@@ -229,39 +230,37 @@ function base64ToBytes(value: string): Uint8Array {
   return bytes;
 }
 
+const PBKDF2_ITERATIONS = 210000;
+const PBKDF2_KEY_LENGTH_BYTES = 32;
+
 async function derivePasswordHash(
   password: string,
   saltBase64: string,
-  iterations = 210000
+  iterations = PBKDF2_ITERATIONS
 ): Promise<string> {
-  const keyMaterial = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(password),
-    'PBKDF2',
-    false,
-    ['deriveBits']
-  );
-
-  const bits = await crypto.subtle.deriveBits(
-    {
-      name: 'PBKDF2',
-      hash: 'SHA-256',
-      salt: base64ToBytes(saltBase64),
+  return new Promise((resolve, reject) => {
+    pbkdf2(
+      password,
+      base64ToBytes(saltBase64),
       iterations,
-    },
-    keyMaterial,
-    256
-  );
-
-  return bytesToBase64(new Uint8Array(bits));
+      PBKDF2_KEY_LENGTH_BYTES,
+      'sha256',
+      (error, derivedKey) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(bytesToBase64(derivedKey));
+      }
+    );
+  });
 }
 
 async function createPasswordRecord(password: string) {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const saltBase64 = bytesToBase64(salt);
-  const iterations = 210000;
-  const hash = await derivePasswordHash(password, saltBase64, iterations);
-  return { hash, salt: saltBase64, iterations };
+  const hash = await derivePasswordHash(password, saltBase64);
+  return { hash, salt: saltBase64, iterations: PBKDF2_ITERATIONS };
 }
 
 async function verifyPassword(
@@ -270,14 +269,9 @@ async function verifyPassword(
   salt: string,
   iterations: number
 ) {
-  const actualHash = await derivePasswordHash(password, salt, iterations);
-  if (actualHash.length !== expectedHash.length) return false;
-
-  let mismatch = 0;
-  for (let i = 0; i < actualHash.length; i++) {
-    mismatch |= actualHash.charCodeAt(i) ^ expectedHash.charCodeAt(i);
-  }
-  return mismatch === 0;
+  const actualBytes = base64ToBytes(await derivePasswordHash(password, salt, iterations));
+  const expectedBytes = base64ToBytes(expectedHash);
+  return actualBytes.length === expectedBytes.length && timingSafeEqual(actualBytes, expectedBytes);
 }
 
 function createSessionToken(): string {
