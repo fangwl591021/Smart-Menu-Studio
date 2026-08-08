@@ -264,11 +264,7 @@ const ProjectsView = ({ onStartNew, onEditProject }) => {
                 <div className="flex items-center gap-4">
                   <div className="w-20 h-14 rounded-lg bg-gray-100 overflow-hidden border border-gray-200 flex items-center justify-center text-gray-400">
                     {project.imageUrl ? (
-                      <img
-                        src={apiUrl(project.imageUrl)}
-                        alt={project.name}
-                        className="w-full h-full object-cover"
-                      />
+                      <AuthImage src={project.imageUrl} alt={project.name} className="w-full h-full object-cover" />
                     ) : (
                       <Smartphone size={20} />
                     )}
@@ -392,7 +388,7 @@ const ProjectBuilderView = ({ onBack, onCreated }) => {
                 >
                   <div className="aspect-[2500/1686] bg-gray-100 overflow-hidden">
                     {template.imageUrl ? (
-                      <img src={apiUrl(template.imageUrl)} alt={template.name} className="w-full h-full object-cover" />
+                      <AuthImage src={template.imageUrl} alt={template.name} className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-gray-300">
                         <ImageIcon size={32} />
@@ -569,7 +565,6 @@ const ProjectEditorView = ({ projectId, onBack }) => {
 
   const currentArea = project.areas?.find(a => a.id === activeArea);
   const action = currentArea?.action || { type: 'none' };
-  const imageSrc = project.imageUrl ? apiUrl(project.imageUrl) : '';
 
   const fieldDescription = (() => {
     if (action.type === 'uri') return '請填入客戶實際要開啟的網址';
@@ -716,7 +711,7 @@ const ProjectEditorView = ({ projectId, onBack }) => {
           <div className="w-[350px] bg-white rounded-[40px] shadow-2xl border-[8px] border-gray-800 overflow-hidden">
             <div className="h-16 bg-[#06C755] px-4 flex items-center text-white font-bold">LINE 預覽</div>
             <div className="aspect-[2500/1686] relative bg-gray-200">
-              {imageSrc && <img src={imageSrc} alt={project.name} className="w-full h-full object-contain" />}
+              {project.imageUrl && <AuthImage src={project.imageUrl} alt={project.name} className="w-full h-full object-contain" />}
               {(project.areas || []).map(area => (
                 <button
                   key={area.id}
@@ -3777,7 +3772,7 @@ const TemplatesView = ({ onNavigate, onEditTemplate }) => {
                 <div className="flex items-center gap-4 min-w-0">
                   <div className="w-16 h-12 rounded-lg bg-indigo-50 overflow-hidden flex items-center justify-center shrink-0">
                     {template.imageUrl ? (
-                      <img src={apiUrl(template.imageUrl)} alt={template.name} className="w-full h-full object-cover" />
+                      <AuthImage src={template.imageUrl} alt={template.name} className="w-full h-full object-cover" />
                     ) : (
                       <LayoutTemplate size={20} className="text-indigo-600" />
                     )}
