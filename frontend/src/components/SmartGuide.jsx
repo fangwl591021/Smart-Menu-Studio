@@ -181,6 +181,8 @@ export default function SmartGuide({ projectId, selectedAreaId, request, onActio
           <RecommendationSection
             result={state.payload?.recommendationResult}
             onAction={onAction}
+            request={request}
+            projectId={projectId}
           />
         </>
       )}

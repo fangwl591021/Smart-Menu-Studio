@@ -17,6 +17,8 @@ import { buildGuideContext, toPublicGuideContext } from './guide/context';
 import { evaluateGuide } from './guide/rules';
 import { buildGuideWorkflow } from './guide/workflow';
 import { emptyRecommendationResult, evaluateRecommendations } from './guide/recommendations/engine';
+import { explainRecommendation, findRecommendationById } from './guide/explanations/engine';
+import { GEMINI_MODEL, requestGeminiContent } from './gemini';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
@@ -1433,10 +1435,9 @@ app.post('/api/detect-layout', async (c) => {
     const mimeType = image.type || 'image/png';
     const prompt = `你是一個 LINE 官方帳號 Rich Menu 專業座標分析器。分析圖片中的可點擊功能區塊。整張圖片固定換算為 2500x1686，左上角為 0,0。每個區塊回傳 id,label,x,y,width,height。座標使用整數，區塊不得超界或重疊，label 使用繁體中文，可辨識規則或不規則版型。只輸出符合 JSON Schema 的資料。`;
 
-    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': c.env.GEMINI_API_KEY },
-      body: JSON.stringify({
+    const response = await requestGeminiContent({
+      apiKey: c.env.GEMINI_API_KEY,
+      body: {
         contents: [{ role: 'user', parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: base64Image } }] }],
         generationConfig: {
           responseMimeType: 'application/json',
@@ -1459,7 +1460,7 @@ app.post('/api/detect-layout', async (c) => {
             required: ['areas'],
           },
         },
-      }),
+      },
     });
 
     const result: any = await response.json();
@@ -1478,7 +1479,7 @@ app.post('/api/detect-layout', async (c) => {
       return { id: num(area.id, index + 1), label: text(area.label || `區塊 ${index + 1}`), x, y, width, height, style: areaStyle(x, y, width, height) };
     });
 
-    return c.json({ success: true, provider: 'gemini', model: 'gemini-3.6-flash', areas });
+    return c.json({ success: true, provider: 'gemini', model: GEMINI_MODEL, areas });
   } catch (e: any) {
     console.error('detect-layout:', e);
     return c.json({ success: false, error: e?.message || 'Gemini 圖片辨識失敗' }, 500);
@@ -2338,6 +2339,58 @@ app.get('/api/projects/:projectId/guide', async (c) => {
   } catch (e: any) {
     console.error('project-guide:', e);
     return c.json({ success: false, error: '目前無法取得引導狀態。' }, 500);
+  }
+});
+
+app.post('/api/projects/:projectId/guide/recommendations/:recommendationId/explain', async (c) => {
+  try {
+    const projectId = c.req.param('projectId');
+    const recommendationId = c.req.param('recommendationId');
+    const workspaceId = workspaceIdOf(c);
+    const context = await buildGuideContext({
+      db: c.env.smart_menu_db,
+      workspaceId,
+      userId: text(c.get('userId')),
+      route: `/projects/${projectId}`,
+      entityType: 'project',
+      entityId: projectId,
+    });
+
+    if (!context) {
+      return c.json({ success: false, error: '找不到專案。' }, 404);
+    }
+
+    const guide = evaluateGuide(context);
+    buildGuideWorkflow(context, guide);
+    const recommendationResult = evaluateRecommendations(context);
+    const recommendation = findRecommendationById(recommendationResult.recommendations, recommendationId);
+    if (!recommendation) {
+      return c.json({ success: false, error: '找不到此智慧建議。' }, 404);
+    }
+
+    const explanation = await explainRecommendation(recommendation, {
+      apiKey: c.env.GEMINI_API_KEY,
+      timeoutMs: 8000,
+      logger: event => console.log(JSON.stringify(event)),
+    });
+
+    return c.json({
+      success: true,
+      recommendation: {
+        id: recommendation.id,
+        ruleCode: recommendation.ruleCode,
+        priority: recommendation.priority,
+        category: recommendation.category,
+        canGenerateProposal: recommendation.canGenerateProposal,
+      },
+      explanation,
+    });
+  } catch (error) {
+    console.error(JSON.stringify({
+      message: 'recommendation explanation endpoint failed',
+      status: 'error',
+    }));
+    return c.json({ success: false, error: '目前無法取得 AI 說明。' }, 500);
   }
 });
 

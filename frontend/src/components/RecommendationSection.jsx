@@ -25,10 +25,11 @@ class RecommendationErrorBoundary extends Component {
   }
 }
 
-function RecommendationContent({ result, onAction }) {
+function RecommendationContent({ result, onAction, request, projectId }) {
   const [expandedId, setExpandedId] = useState('');
   const [showAll, setShowAll] = useState(false);
   const [fallbackId, setFallbackId] = useState('');
+  const [explanationStates, setExplanationStates] = useState({});
   const recommendations = Array.isArray(result?.recommendations) ? result.recommendations : [];
   const visible = showAll ? recommendations : recommendations.slice(0, 5);
   const groups = useMemo(() => ['high', 'medium', 'low'].map(priority => ({
@@ -50,6 +51,41 @@ function RecommendationContent({ result, onAction }) {
     if (handled === false) setFallbackId(recommendation.id);
   };
 
+  const loadExplanation = async recommendation => {
+    setExplanationStates(previous => ({ ...previous, [recommendation.id]: { status: 'loading' } }));
+    try {
+      const response = await request(
+        `/api/projects/${encodeURIComponent(projectId)}/guide/recommendations/${encodeURIComponent(recommendation.id)}/explain`,
+        { method: 'POST' },
+      );
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.error || '目前無法取得 AI 說明。');
+      if (
+        payload.recommendation?.id !== recommendation.id
+        || payload.recommendation?.ruleCode !== recommendation.ruleCode
+        || payload.recommendation?.priority !== recommendation.priority
+      ) {
+        throw new Error('AI 說明與目前建議不一致。');
+      }
+      const explanation = payload.explanation;
+      if (
+        !explanation
+        || !['generated', 'fallback'].includes(explanation.status)
+        || typeof explanation.summary !== 'string'
+        || typeof explanation.whyItMatters !== 'string'
+        || typeof explanation.suggestedApproach !== 'string'
+      ) {
+        throw new Error('AI 說明格式無效。');
+      }
+      setExplanationStates(previous => ({
+        ...previous,
+        [recommendation.id]: { status: explanation.status === 'fallback' ? 'fallback' : 'success', explanation },
+      }));
+    } catch (error) {
+      console.error('Smart Guide explanation request failed', error);
+      setExplanationStates(previous => ({ ...previous, [recommendation.id]: { status: 'error' } }));
+    }
+  };
   return (
     <section className="mt-4 border-t border-current/15 pt-3" aria-label="智慧建議">
       <div className="flex items-center justify-between gap-3">
@@ -71,6 +107,7 @@ function RecommendationContent({ result, onAction }) {
                     const expanded = expandedId === recommendation.id;
                     const actionType = recommendation.suggestedAction?.type;
                     const canNavigate = actionType && actionType !== 'none';
+                    const explanationState = explanationStates[recommendation.id] || { status: 'idle' };
                     return (
                       <article key={recommendation.id} className={`rounded-lg border p-3 text-xs ${meta.style}`}>
                         <div className="flex items-start gap-2">
@@ -100,10 +137,34 @@ function RecommendationContent({ result, onAction }) {
                         {fallbackId === recommendation.id && (
                           <div className="mt-2 font-medium text-red-700">請前往對應設定頁完成此步驟。</div>
                         )}
+                        {explanationState.status !== 'idle' && (
+                          <div className="mt-2 rounded-md border border-current/15 bg-white/70 p-2 leading-5" aria-live="polite">
+                            {explanationState.status === 'loading' && <div className="font-medium">AI 說明載入中…</div>}
+                            {explanationState.status === 'error' && <div className="font-medium text-red-700">目前無法取得 AI 說明，請稍後再試。</div>}
+                            {(explanationState.status === 'success' || explanationState.status === 'fallback') && (
+                              <>
+                                <div className="font-bold">{explanationState.status === 'success' ? 'AI 說明' : '規則說明（AI 暫不可用）'}</div>
+                                <div className="mt-1">{explanationState.explanation.summary}</div>
+                                <div className="mt-1"><span className="font-bold">為什麼重要：</span>{explanationState.explanation.whyItMatters}</div>
+                                {explanationState.explanation.suggestedApproach && (
+                                  <div className="mt-1"><span className="font-bold">建議方向：</span>{explanationState.explanation.suggestedApproach}</div>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        )}
 
                         <div className="mt-2 flex justify-end gap-3">
                           <button type="button" onClick={() => setExpandedId(expanded ? '' : recommendation.id)} className="font-bold underline">
                             {expanded ? '收合' : '查看'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => loadExplanation(recommendation)}
+                            disabled={explanationState.status === 'loading'}
+                            className="font-bold underline disabled:cursor-wait disabled:opacity-60"
+                          >
+                            {explanationState.status === 'loading' ? '載入中…' : 'AI 說明'}
                           </button>
                           {canNavigate && (
                             <button type="button" onClick={() => viewSetting(recommendation)} className="font-bold underline">
