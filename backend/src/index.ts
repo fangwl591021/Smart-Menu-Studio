@@ -461,7 +461,7 @@ async function membershipForUser(env: Bindings, userId: string, requestedWorkspa
 }
 
 async function resolveTenantContext(c: any) {
-  const mode = text(c.env.TENANT_MODE || 'development').toLowerCase();
+  const mode = text(c.env.TENANT_MODE || 'session').toLowerCase();
   const requestedWorkspaceId = text(c.req.header('X-Workspace-Id'));
   const token = bearerToken(c);
 
