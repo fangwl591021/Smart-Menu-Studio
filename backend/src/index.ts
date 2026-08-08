@@ -15,6 +15,7 @@ import {
 } from './line-rich-menu.mjs';
 import { buildGuideContext } from './guide/context';
 import { evaluateGuide } from './guide/rules';
+import { buildGuideWorkflow } from './guide/workflow';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
@@ -2312,10 +2313,13 @@ app.get('/api/projects/:projectId/guide', async (c) => {
       return c.json({ success: false, error: '找不到專案。' }, 404);
     }
 
+    const guide = evaluateGuide(context);
+
     return c.json({
       success: true,
       context,
-      guide: evaluateGuide(context),
+      guide,
+      workflow: buildGuideWorkflow(context, guide),
     });
   } catch (e: any) {
     console.error('project-guide:', e);

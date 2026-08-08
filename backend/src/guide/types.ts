@@ -84,6 +84,49 @@ export type GuideEvaluation = {
   recommendations: string[];
 };
 
+export type GuideWorkflowStatus = 'in_progress' | 'complete';
+
+export type GuideWorkflowStepStatus = 'pending' | 'active' | 'complete' | 'blocked';
+
+export type GuideWorkflowStepId =
+  | 'PROJECT_IMAGE'
+  | 'PROJECT_ACTIONS'
+  | 'LINE_ACCOUNT'
+  | 'LINE_BOT_TOKEN'
+  | 'BASIC_VALIDATION';
+
+export type GuideWorkflowStepDefinition = {
+  id: GuideWorkflowStepId;
+  title: string;
+  optional: boolean;
+  issueCodes: string[];
+};
+
+export type GuideWorkflowDefinition = {
+  id: string;
+  title: string;
+  steps: GuideWorkflowStepDefinition[];
+};
+
+export type GuideWorkflowStep = GuideWorkflowStepDefinition & {
+  status: GuideWorkflowStepStatus;
+  action: GuideNextAction;
+};
+
+export type GuideWorkflow = {
+  id: string;
+  title: string;
+  status: GuideWorkflowStatus;
+  currentStepId: GuideWorkflowStepId;
+  progress: {
+    completed: number;
+    total: number;
+    percent: number;
+  };
+  steps: GuideWorkflowStep[];
+  message: string;
+};
+
 export type BuildGuideContextInput = {
   db: D1Database;
   workspaceId: string;

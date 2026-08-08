@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import SmartGuide from './components/SmartGuide';
+import { emitGuideEvent } from './guide-events';
 import { 
   LayoutDashboard, 
   FolderKanban, 
@@ -535,7 +536,6 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate }) =
   const [loading, setLoading] = useState(true);
   const [changingImage, setChangingImage] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [guideRefreshKey, setGuideRefreshKey] = useState(0);
   const projectImageInputRef = useRef(null);
 
   useEffect(() => {
@@ -580,7 +580,11 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate }) =
         assetId: data.asset.id,
         imageUrl: data.asset.imageUrl,
       }));
-      setGuideRefreshKey(key => key + 1);
+      emitGuideEvent({
+        type: 'guide-refresh',
+        workflowId: 'rich-menu-project-setup',
+        stepId: 'PROJECT_IMAGE',
+      });
     } catch (e) {
       console.error(e);
       alert('更換圖片失敗：' + e.message);
@@ -674,7 +678,11 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate }) =
         throw new Error(data.error || '專案儲存失敗');
       }
 
-      setGuideRefreshKey(key => key + 1);
+      emitGuideEvent({
+        type: 'guide-refresh',
+        workflowId: 'rich-menu-project-setup',
+        stepId: 'PROJECT_ACTIONS',
+      });
       alert('專案內容已儲存。');
     } catch (e) {
       console.error(e);
@@ -691,20 +699,25 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate }) =
       if (targetArea) setActiveArea(targetArea.id);
     }
 
-    const focus = () => {
-      const element = document.querySelector(`[data-guide-target="${target}"]`);
-      if (!element) return;
-      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      element.classList.add('ring-4', 'ring-amber-300', 'ring-offset-2');
-      window.setTimeout(() => element.classList.remove('ring-4', 'ring-amber-300', 'ring-offset-2'), 1800);
-    };
-
-    requestAnimationFrame(() => requestAnimationFrame(focus));
+    return new Promise(resolve => {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const element = document.querySelector(`[data-guide-target="${target}"]`);
+        if (!element) {
+          resolve(false);
+          return;
+        }
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        element.classList.add('ring-4', 'ring-amber-300', 'ring-offset-2');
+        window.setTimeout(() => element.classList.remove('ring-4', 'ring-amber-300', 'ring-offset-2'), 1800);
+        resolve(true);
+      }));
+    });
   };
 
-  const handleGuideAction = (nextAction) => {
-    if (nextAction?.type === 'focus') focusGuideTarget(nextAction.target);
-    if (nextAction?.type === 'navigate') onGuideNavigate?.(nextAction.target);
+  const handleGuideAction = async (nextAction) => {
+    if (nextAction?.type === 'focus') return focusGuideTarget(nextAction.target);
+    if (nextAction?.type === 'navigate') return Boolean(onGuideNavigate?.(nextAction.target));
+    return false;
   };
 
   if (loading) {
@@ -943,7 +956,6 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate }) =
       <SmartGuide
         projectId={projectId}
         selectedAreaId={activeArea}
-        refreshKey={guideRefreshKey}
         request={authFetch}
         onAction={handleGuideAction}
       />
@@ -1162,7 +1174,7 @@ const AccountView = ({ session, onSessionChanged }) => {
 };
 
 
-const LineHubView = ({ member, onBack }) => {
+const LineHubView = ({ member, onBack, projectId }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [savingAccount, setSavingAccount] = useState(false);
@@ -1245,6 +1257,11 @@ const LineHubView = ({ member, onBack }) => {
       if (!res.ok || !json.success) throw new Error(json.error || 'LINE OA 設定失敗');
 
       await loadHub();
+      emitGuideEvent({
+        type: 'guide-refresh',
+        workflowId: 'rich-menu-project-setup',
+        stepId: accountForm.lineBotChannelAccessToken ? 'LINE_BOT_TOKEN' : 'LINE_ACCOUNT',
+      });
       alert('LINE OA 設定已儲存。');
     } catch (e) {
       console.error(e);
@@ -1370,7 +1387,19 @@ const LineHubView = ({ member, onBack }) => {
     }
   };
 
-  if (loading) {
+  const handleLineHubGuideAction = (action) => {
+    const isLineAccountAction = action?.target === 'line-hub' || action?.target === 'line-account-settings';
+    if (!isLineAccountAction) return false;
+
+    const element = document.querySelector('[data-guide-target="line-account-settings"]');
+    if (!element) return false;
+    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    element.classList.add('ring-4', 'ring-amber-300', 'ring-offset-2');
+    window.setTimeout(() => element.classList.remove('ring-4', 'ring-amber-300', 'ring-offset-2'), 1800);
+    return true;
+  };
+
+  if (loading && !data) {
     return (
       <div className="py-20 flex items-center justify-center gap-2 text-gray-500">
         <Loader2 size={18} className="animate-spin" />
@@ -1630,6 +1659,13 @@ const LineHubView = ({ member, onBack }) => {
           )}
         </div>
       </section>
+      {projectId && (
+        <SmartGuide
+          projectId={projectId}
+          request={authFetch}
+          onAction={handleLineHubGuideAction}
+        />
+      )}
     </div>
   );
 };
@@ -4883,7 +4919,9 @@ export default function App() {
                 onStartNew={startNewProject}
                 onBack={() => setCurrentView('projects')}
                 onGuideNavigate={(target) => {
-                  if (target === 'line-hub') setCurrentView('member-linehub');
+                  if (target !== 'line-hub') return false;
+                  setCurrentView('member-linehub');
+                  return true;
                 }}
               />
             )}
@@ -4921,6 +4959,7 @@ export default function App() {
             {currentView === 'member-linehub' && (
               <LineHubView
                 member={selectedMember}
+                projectId={currentProjectId}
                 onBack={() => {
                   setSelectedMember(null);
                   setCurrentView('members');
