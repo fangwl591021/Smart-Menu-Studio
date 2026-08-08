@@ -3,6 +3,7 @@ import type { BuildGuideContextInput, GuideArea, GuideContext } from './types.ts
 const clean = (value: unknown) => String(value ?? '').trim();
 
 const toGuideArea = (row: Record<string, unknown>): GuideArea => ({
+  recordId: clean(row.id),
   id: clean(row.area_index),
   label: clean(row.label) || `區域 ${clean(row.area_index)}`,
   actionType: clean(row.action_type).toLowerCase(),
@@ -45,7 +46,7 @@ export async function buildGuideContext(input: BuildGuideContextInput): Promise<
     `).bind(workspaceId).first<Record<string, unknown>>(),
     db.prepare(`
       SELECT
-        area_index, label, action_type, action_uri, action_text,
+        id, area_index, label, action_type, action_uri, action_text,
         action_data, action_display_text, target_page_id
       FROM project_areas
       WHERE project_id = ? AND workspace_id = ?

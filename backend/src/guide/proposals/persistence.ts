@@ -2,7 +2,16 @@ import { sanitizeProposal } from './engine.ts';
 import type { Proposal, ProposalType } from './types.ts';
 
 export type ProposalStatus = 'draft' | 'reviewed' | 'approved' | 'rejected' | 'executed' | 'stale';
-export type ProposalEventType = 'CREATED' | 'REVIEWED' | 'APPROVED' | 'REJECTED' | 'STALE_DETECTED' | 'REGENERATED';
+export type ProposalEventType =
+  | 'CREATED'
+  | 'REVIEWED'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'STALE_DETECTED'
+  | 'REGENERATED'
+  | 'EXECUTION_STARTED'
+  | 'EXECUTION_SUCCEEDED'
+  | 'EXECUTION_FAILED';
 export type WorkspaceRole = 'viewer' | 'editor' | 'admin' | 'owner';
 
 export type ProposalPermissions = {
@@ -11,6 +20,7 @@ export type ProposalPermissions = {
   canApprove: boolean;
   canReject: boolean;
   canRegenerate: boolean;
+  canExecute: boolean;
 };
 
 export type StoredProposal = {
@@ -40,6 +50,7 @@ export type StoredProposal = {
   reviewedAt: string | null;
   approvedAt: string | null;
   rejectedAt: string | null;
+  executedAt: string | null;
 };
 
 export type ProposalEvent = {
@@ -77,7 +88,11 @@ async function sha256(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-export function proposalPermissions(roleValue: string, status?: ProposalStatus): ProposalPermissions {
+export function proposalPermissions(
+  roleValue: string,
+  status?: ProposalStatus,
+  executable = false,
+): ProposalPermissions {
   const role = (clean(roleValue).toLowerCase() || 'viewer') as WorkspaceRole;
   const level = ROLE_LEVEL[role] || 0;
   return {
@@ -86,6 +101,7 @@ export function proposalPermissions(roleValue: string, status?: ProposalStatus):
     canApprove: level >= ROLE_LEVEL.admin && status === 'reviewed',
     canReject: level >= ROLE_LEVEL.admin && (status === 'draft' || status === 'reviewed'),
     canRegenerate: level >= ROLE_LEVEL.editor && status === 'stale',
+    canExecute: level >= ROLE_LEVEL.admin && status === 'approved' && executable,
   };
 }
 
@@ -187,6 +203,7 @@ function fromRow(row: any): StoredProposal | null {
     reviewedAt: clean(row.reviewed_at) || null,
     approvedAt: clean(row.approved_at) || null,
     rejectedAt: clean(row.rejected_at) || null,
+    executedAt: clean(row.executed_at) || null,
   };
 }
 
@@ -223,7 +240,7 @@ export async function listStoredProposals(
   projectId: string,
 ): Promise<StoredProposal[]> {
   const result = await db.prepare(`${PROPOSAL_SELECT}
-    WHERE p.workspace_id = ? AND p.project_id = ? AND p.status <> 'executed'
+    WHERE p.workspace_id = ? AND p.project_id = ?
     ORDER BY p.created_at DESC, p.id DESC
   `).bind(workspaceId, projectId).all();
   return (result.results || []).map(fromRow).filter(Boolean) as StoredProposal[];

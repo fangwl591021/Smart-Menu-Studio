@@ -7,6 +7,7 @@ export type GuidePriority = 'high' | 'medium' | 'low';
 export type GuideIssueSeverity = 'blocking' | 'warning';
 
 export type GuideArea = {
+  recordId: string;
   id: string;
   label: string;
   actionType: string;

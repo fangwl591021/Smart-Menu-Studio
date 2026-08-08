@@ -694,6 +694,30 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
     }
   };
 
+  const handleProposalExecuted = (operation) => {
+    const plan = operation?.plan;
+    if (plan?.operationType === 'SET_PROJECT_AREA_DISPLAY_TEXT') {
+      setProject(previous => ({
+        ...previous,
+        areas: (previous?.areas || []).map(area => String(area.id) === String(plan.target?.areaIndex)
+          ? {
+              ...area,
+              action: {
+                ...(area.action || {}),
+                displayText: plan.mutation?.after || '',
+              },
+            }
+          : area),
+      }));
+    }
+    setProposalRefreshKey(value => value + 1);
+    emitGuideEvent({
+      type: 'guide-refresh',
+      workflowId: 'rich-menu-project-setup',
+      stepId: 'PROJECT_ACTIONS',
+    });
+  };
+
   const focusGuideTarget = (target) => {
     const areaTarget = /^project-area-(.+)-(action-type|uri|message|postback-data|switch-target)$/.exec(target);
     if (areaTarget) {
@@ -930,8 +954,11 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
           )}
           <ProposalManagement
             projectId={projectId}
+            project={project}
+            userRole={userRole}
             request={authFetch}
             refreshKey={proposalRefreshKey}
+            onExecuted={handleProposalExecuted}
           />
         </div>
 

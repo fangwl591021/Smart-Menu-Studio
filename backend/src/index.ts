@@ -29,6 +29,15 @@ import {
   transitionStoredProposal,
 } from './guide/proposals/persistence';
 import type { StoredProposal } from './guide/proposals/persistence';
+import {
+  buildOperationPlan,
+  executeOperationPlan,
+  listOperationLogs,
+  operationErrorMessage,
+  operationLogEvents,
+  OperationExecutionError,
+  proposalExecutionContract,
+} from './guide/proposals/execution';
 import { GEMINI_MODEL, requestGeminiContent } from './gemini';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -2462,6 +2471,7 @@ type CurrentProposalResult = {
   proposal: NonNullable<ReturnType<typeof sanitizeProposal>>;
   recommendation: ReturnType<typeof evaluateRecommendations>['recommendations'][number];
   proposalType: NonNullable<ReturnType<typeof evaluateRecommendations>['recommendations'][number]['proposal']['type']>;
+  context: NonNullable<Awaited<ReturnType<typeof buildGuideContext>>>;
 };
 
 async function rebuildCurrentProposal(
@@ -2494,10 +2504,11 @@ async function rebuildCurrentProposal(
 
   const proposal = sanitizeProposal(buildProposal({ context, recommendation }));
   if (!proposal) return null;
-  return { proposal, recommendation, proposalType: recommendation.proposal.type };
+  return { proposal, recommendation, proposalType: recommendation.proposal.type, context };
 }
 
 function proposalResponse(proposal: StoredProposal, role: string, includeSnapshot = false) {
+  const execution = proposalExecutionContract(proposal.proposalType, proposal.sourceEntityId);
   return {
     id: proposal.id,
     projectId: proposal.projectId,
@@ -2517,7 +2528,9 @@ function proposalResponse(proposal: StoredProposal, role: string, includeSnapsho
     reviewedAt: proposal.reviewedAt,
     approvedAt: proposal.approvedAt,
     rejectedAt: proposal.rejectedAt,
-    permissions: proposalPermissions(role, proposal.status),
+    executedAt: proposal.executedAt,
+    execution,
+    permissions: proposalPermissions(role, proposal.status, execution.executable),
     ...(includeSnapshot ? { snapshot: proposal.snapshot } : {}),
   };
 }
@@ -2613,11 +2626,17 @@ app.get('/api/projects/:projectId/proposals/:proposalId', async (c) => {
     let proposal = await getStoredProposal(c.env.smart_menu_db, workspaceId, projectId, c.req.param('proposalId'));
     if (!proposal) return c.json({ success: false, error: '找不到改善方案。' }, 404);
     proposal = await refreshStaleStatus(c, proposal);
-    const events = await listProposalEvents(c.env.smart_menu_db, workspaceId, proposal.id);
+    const [proposalEvents, operationLogs] = await Promise.all([
+      listProposalEvents(c.env.smart_menu_db, workspaceId, proposal.id),
+      listOperationLogs(c.env.smart_menu_db, workspaceId, projectId, proposal.id),
+    ]);
+    const events = [...proposalEvents, ...operationLogEvents(operationLogs)]
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
     return c.json({
       success: true,
       proposal: proposalResponse(proposal, text(c.get('userRole')), true),
       events,
+      operationLogs,
     });
   } catch (error: any) {
     return proposalApiError(c, error, '改善方案讀取失敗。');
@@ -2725,6 +2744,112 @@ app.post('/api/projects/:projectId/proposals/:proposalId/regenerate', async (c) 
     return c.json({ success: true, proposal: proposalResponse(stored, text(c.get('userRole')), true) }, 201);
   } catch (error: any) {
     return proposalApiError(c, error, '改善方案重新產生失敗。');
+  }
+});
+
+function operationApiError(c: any, error: unknown) {
+  const code = error instanceof OperationExecutionError ? error.code : 'EXECUTION_FAILED';
+  const status = code === 'FORBIDDEN_ROLE'
+    ? 403
+    : code === 'PROPOSAL_NOT_FOUND' || code === 'TARGET_NOT_FOUND'
+      ? 404
+      : code === 'EXECUTION_FAILED' || code === 'VERIFICATION_FAILED'
+        ? 500
+        : 409;
+  if (status === 500) {
+    console.error(JSON.stringify({ message: 'proposal operation failed', code }));
+  }
+  return c.json({ success: false, code, error: operationErrorMessage(code) }, status);
+}
+
+async function markExecutionProposalStale(c: any, proposal: StoredProposal, reason: string): Promise<void> {
+  if (proposal.status !== 'approved') return;
+  try {
+    await transitionStoredProposal(c.env.smart_menu_db, {
+      proposal,
+      toStatus: 'stale',
+      eventType: 'STALE_DETECTED',
+      eventMetadata: { reason },
+    });
+  } catch (error: any) {
+    if (!['PROPOSAL_CONFLICT', 'INVALID_PROPOSAL_TRANSITION'].includes(error?.message)) throw error;
+  }
+}
+
+app.post('/api/projects/:projectId/proposals/:proposalId/execute', async (c) => {
+  try {
+    requireRole(c, 'admin');
+    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    if (body.confirmation !== true) {
+      return c.json({ success: false, code: 'CONFIRMATION_REQUIRED', error: '請先確認套用正式專案資料。' }, 400);
+    }
+
+    const projectId = c.req.param('projectId');
+    const workspaceId = workspaceIdOf(c);
+    let proposal = await getStoredProposal(
+      c.env.smart_menu_db,
+      workspaceId,
+      projectId,
+      c.req.param('proposalId'),
+    );
+    if (!proposal) throw new OperationExecutionError('PROPOSAL_NOT_FOUND');
+    if (proposal.status === 'executed') throw new OperationExecutionError('PROPOSAL_ALREADY_EXECUTED');
+    if (proposal.status === 'stale') throw new OperationExecutionError('PROPOSAL_STALE');
+    if (proposal.status !== 'approved') throw new OperationExecutionError('PROPOSAL_NOT_APPROVED');
+    if (!proposalExecutionContract(proposal.proposalType).executable) {
+      throw new OperationExecutionError('PROPOSAL_NOT_EXECUTABLE');
+    }
+
+    const current = await rebuildCurrentProposal(c, projectId, {
+      recommendationId: proposal.recommendationId,
+    });
+    if (!current || current.proposalType !== proposal.proposalType) {
+      await markExecutionProposalStale(c, proposal, 'CURRENT_PROPOSAL_NOT_FOUND');
+      throw new OperationExecutionError('PROPOSAL_STALE');
+    }
+    const currentFingerprint = await fingerprintProposal(
+      current.proposal,
+      current.proposalType,
+      current.recommendation.evidence,
+    );
+    if (currentFingerprint !== proposal.sourceFingerprint) {
+      await markExecutionProposalStale(c, proposal, 'SOURCE_FINGERPRINT_MISMATCH');
+      throw new OperationExecutionError('PROPOSAL_STALE');
+    }
+
+    const operationPlan = buildOperationPlan({
+      proposal,
+      currentProposal: current.proposal,
+      context: current.context,
+      actor: {
+        userId: text(c.get('userId')),
+        role: text(c.get('userRole')),
+      },
+    });
+    const operationLog = await executeOperationPlan(
+      c.env.smart_menu_db,
+      operationPlan,
+      currentFingerprint,
+    );
+    proposal = await getStoredProposal(c.env.smart_menu_db, workspaceId, projectId, proposal.id);
+    if (!proposal || proposal.status !== 'executed') {
+      throw new OperationExecutionError('VERIFICATION_FAILED');
+    }
+    const [proposalEvents, operationLogs] = await Promise.all([
+      listProposalEvents(c.env.smart_menu_db, workspaceId, proposal.id),
+      listOperationLogs(c.env.smart_menu_db, workspaceId, projectId, proposal.id),
+    ]);
+    const events = [...proposalEvents, ...operationLogEvents(operationLogs)]
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+    return c.json({
+      success: true,
+      proposal: proposalResponse(proposal, text(c.get('userRole')), true),
+      operation: { plan: operationPlan, log: operationLog },
+      operationLogs,
+      events,
+    });
+  } catch (error: unknown) {
+    return operationApiError(c, error);
   }
 });
 

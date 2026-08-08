@@ -72,7 +72,7 @@ const stored = status => ({
   reviewedByUserId: null, reviewedByName: null, approvedByUserId: null,
   approvedByName: null, rejectedByUserId: null, rejectedByName: null,
   createdAt: '2026-08-09', updatedAt: '2026-08-09', reviewedAt: null,
-  approvedAt: null, rejectedAt: null,
+  approvedAt: null, rejectedAt: null, executedAt: null,
 });
 
 test('create draft persists only a sanitized Proposal snapshot and CREATED event', async () => {
@@ -139,7 +139,7 @@ test('transition writes status and matching audit event without project writes',
 
 test('RBAC follows existing viewer/editor/admin/owner hierarchy', () => {
   assert.deepEqual(proposalPermissions('viewer', 'draft'), {
-    canCreate: false, canReview: false, canApprove: false, canReject: false, canRegenerate: false,
+    canCreate: false, canReview: false, canApprove: false, canReject: false, canRegenerate: false, canExecute: false,
   });
   assert.equal(proposalPermissions('editor', 'draft').canReview, true);
   assert.equal(proposalPermissions('editor', 'reviewed').canApprove, false);
@@ -197,10 +197,11 @@ test('frontend covers save, list, detail, review, approval, rejection, stale, re
   const preview = await readFile(new URL('../../frontend/src/components/RecommendationSection.jsx', import.meta.url), 'utf8');
   const management = await readFile(new URL('../../frontend/src/components/ProposalManagement.jsx', import.meta.url), 'utf8');
   assert.match(preview, /儲存為草案/);
-  for (const marker of ['改善方案詳情', '標記已檢視', '確認核准', '拒絕原因', '已失效', '重新產生方案']) {
+  for (const marker of ['改善方案詳情', '標記已檢視', '確認核准', '拒絕原因', '已失效', '重新產生方案', '套用已核准方案']) {
     assert.match(management, new RegExp(marker));
   }
-  assert.doesNotMatch(preview + management, /一鍵套用|立即執行|執行方案/);
+  assert.doesNotMatch(preview, /套用已核准方案|確認套用/);
+  assert.doesNotMatch(management, /強制執行|force apply/i);
 });
 
 test('persistence workflow does not call R2, LINE, Gemini, or project mutation APIs', async () => {
