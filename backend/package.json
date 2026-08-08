@@ -1,0 +1,16 @@
+{
+  "name": "smart-menu-backend",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy --minify",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings"
+  },
+  "dependencies": {
+    "hono": "^4.13.1",
+    "openai": "^7.4.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.110.0"
+  }
+}

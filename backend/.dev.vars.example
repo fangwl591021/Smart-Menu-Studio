@@ -1,0 +1,4 @@
+﻿# Local development only. Copy this file to .dev.vars and fill secrets locally.
+GEMINI_API_KEY=
+TENANT_MODE=session
+DEV_WORKSPACE_ID=default

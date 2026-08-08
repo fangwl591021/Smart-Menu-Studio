@@ -1,0 +1,2615 @@
+﻿import React, { useState, useRef, useEffect } from 'react';
+import { 
+  LayoutDashboard, 
+  FolderKanban, 
+  LayoutTemplate, 
+  Users, 
+  Settings, 
+  Menu, 
+  Bell, 
+  Search, 
+  Plus,
+  ChevronDown,
+  LogOut,
+  Smartphone,
+  ArrowLeft,
+  Image as ImageIcon,
+  Link,
+  MessageSquare,
+  MousePointerClick,
+  Sparkles,
+  UploadCloud,
+  CheckCircle2,
+  Loader2
+} from 'lucide-react';
+
+const NAVIGATION = [
+  { id: 'dashboard', label: '總覽', icon: LayoutDashboard },
+  { id: 'projects', label: '圖文選單專案', icon: FolderKanban },
+  { id: 'templates', label: '模板中心', icon: LayoutTemplate },
+  { id: 'members', label: '團隊成員', icon: Users },
+  { id: 'linehub', label: 'LINE OA / Webhook Hub', icon: Link },
+  { id: 'settings', label: '品牌設定', icon: Settings },
+];
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8788';
+const apiUrl = (path = '') => `${API_BASE_URL}${path}`;
+
+const AUTH_TOKEN_KEY = 'smart_menu_auth_token';
+
+const getAuthToken = () => localStorage.getItem(AUTH_TOKEN_KEY) || '';
+
+const authFetch = (path, options = {}) => {
+  const token = getAuthToken();
+  const headers = new Headers(options.headers || {});
+
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  return fetch(apiUrl(path), {
+    ...options,
+    headers,
+  });
+};
+
+const DashboardView = ({ onNavigate }) => (
+  <div className="space-y-6 animate-in fade-in duration-500">
+    <div className="flex justify-between items-center">
+      <h2 className="text-2xl font-bold tracking-tight text-gray-900">品牌營運總覽</h2>
+      <button 
+        onClick={() => onNavigate('projects')}
+        className="bg-black hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
+        <Plus size={16} />
+        建立新選單
+      </button>
+    </div>
+    
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      {[
+        { title: '啟用中的選單', value: '3', desc: '包含 12 個頁面' },
+        { title: '本月發布次數', value: '18', desc: '剩餘 82 次' },
+        { title: '綁定官方帳號', value: '1', desc: '正常連線中' }
+      ].map((stat, i) => (
+        <div key={i} className="p-6 bg-white border border-gray-200 rounded-xl shadow-sm">
+          <h3 className="text-sm font-medium text-gray-500 mb-2">{stat.title}</h3>
+          <div className="text-3xl font-bold text-gray-900">{stat.value}</div>
+          <p className="text-sm text-gray-500 mt-1">{stat.desc}</p>
+        </div>
+      ))}
+    </div>
+
+    <div className="mt-8 p-8 bg-blue-50 rounded-xl border border-blue-100 flex flex-col md:flex-row items-center justify-between">
+      <div>
+        <h3 className="text-lg font-bold text-blue-900 mb-2">準備好迎接即將到來的母親節了嗎？</h3>
+        <p className="text-blue-700 max-w-xl">使用我們的「節慶營運套組」模板，5 分鐘內建立包含首頁、活動頁與商品展示的多頁圖文選單。</p>
+      </div>
+      <button className="mt-4 md:mt-0 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-medium transition-colors shadow-sm">
+        前往模板中心
+      </button>
+    </div>
+  </div>
+);
+
+
+const ProjectsView = ({ onStartNew, onEditProject }) => {
+  const [projects, setProjects] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState('');
+
+  const loadProjects = async () => {
+    setLoading(true);
+    try {
+      const res = await authFetch('/api/projects');
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || '專案查詢失敗');
+      setProjects(data.projects || []);
+    } catch (e) {
+      console.error(e);
+      setProjects([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadProjects();
+  }, []);
+
+  const rows = projects.filter(p =>
+    String(p.name || '').toLowerCase().includes(query.trim().toLowerCase())
+  );
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-500">
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight text-gray-900">圖文選單專案</h2>
+          <p className="text-gray-500 text-sm mt-1">從已驗證模板建立客戶專案，不再重新執行 AI 座標辨識。</p>
+        </div>
+        <button
+          onClick={onStartNew}
+          className="bg-black hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2"
+        >
+          <Plus size={16} />
+          新增專案
+        </button>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="border-b border-gray-200 px-6 py-4 flex items-center gap-4">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="搜尋專案名稱..."
+              className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+            />
+          </div>
+          <button onClick={loadProjects} className="text-sm text-blue-600 hover:text-blue-800 font-medium">重新整理</button>
+        </div>
+
+        {loading ? (
+          <div className="py-16 flex items-center justify-center text-gray-500 gap-2">
+            <Loader2 size={18} className="animate-spin" />
+            載入專案中...
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="py-16 text-center">
+            <FolderKanban size={36} className="mx-auto text-gray-300 mb-3" />
+            <div className="font-bold text-gray-700">目前還沒有專案</div>
+            <div className="text-sm text-gray-500 mt-1">點「新增專案」，從模板快速建立第一個客戶專案。</div>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-200">
+            {rows.map((project) => (
+              <button
+                key={project.id}
+                onClick={() => onEditProject(project.id)}
+                className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors group text-left"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-20 h-14 rounded-lg bg-gray-100 overflow-hidden border border-gray-200 flex items-center justify-center text-gray-400">
+                    {project.imageUrl ? (
+                      <img
+                        src={apiUrl(project.imageUrl)}
+                        alt={project.name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <Smartphone size={20} />
+                    )}
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-semibold text-gray-900">{project.name}</h4>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {project.areaCount || 0} 個熱區 · {project.pageCount || 1} 頁
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
+                    project.status === 'published'
+                      ? 'bg-green-100 text-green-700'
+                      : 'bg-gray-100 text-gray-700'
+                  }`}>
+                    {project.status === 'published' ? '已發布' : '草稿'}
+                  </span>
+                  <span className="text-blue-600 group-hover:text-blue-800 text-sm font-medium">編輯</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const ProjectBuilderView = ({ onBack, onCreated }) => {
+  const [templates, setTemplates] = useState([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [projectName, setProjectName] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await authFetch('/api/templates');
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || '模板查詢失敗');
+        setTemplates(data.templates || []);
+      } catch (e) {
+        console.error(e);
+        alert('模板讀取失敗：' + e.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const selectedTemplate = templates.find(t => t.id === selectedTemplateId);
+
+  const createProject = async () => {
+    if (!selectedTemplateId) return alert('請先選擇一套模板。');
+    if (!projectName.trim()) return alert('請輸入專案名稱。');
+
+    setCreating(true);
+    try {
+      const res = await authFetch('/api/projects/from-template', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          templateId: selectedTemplateId,
+          name: projectName.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || '建立專案失敗');
+      onCreated(data.project.id);
+    } catch (e) {
+      console.error(e);
+      alert('建立專案失敗：' + e.message);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-300">
+      <div className="flex items-center gap-4">
+        <button onClick={onBack} className="p-2 rounded-full hover:bg-gray-100 text-gray-600">
+          <ArrowLeft size={20} />
+        </button>
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">新增圖文選單專案</h2>
+          <p className="text-sm text-gray-500 mt-1">先選模板，再建立獨立專案副本。這一步不會呼叫 Gemini。</p>
+        </div>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
+        <div className="text-sm font-bold text-gray-900 mb-4">① 選擇模板</div>
+
+        {loading ? (
+          <div className="py-10 flex justify-center text-gray-500 gap-2">
+            <Loader2 size={18} className="animate-spin" />
+            載入模板...
+          </div>
+        ) : templates.length === 0 ? (
+          <div className="p-6 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+            模板庫目前沒有可用模板，請先到「模板中心」建立模板。
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {templates.map(template => {
+              const active = selectedTemplateId === template.id;
+              return (
+                <button
+                  key={template.id}
+                  onClick={() => {
+                    setSelectedTemplateId(template.id);
+                    if (!projectName.trim()) setProjectName(`${template.name} - 新專案`);
+                  }}
+                  className={`text-left border rounded-xl overflow-hidden transition-all ${
+                    active
+                      ? 'border-blue-500 ring-2 ring-blue-100 shadow-sm'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="aspect-[2500/1686] bg-gray-100 overflow-hidden">
+                    {template.imageUrl ? (
+                      <img src={apiUrl(template.imageUrl)} alt={template.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-gray-300">
+                        <ImageIcon size={32} />
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-4">
+                    <div className="font-bold text-gray-900 text-sm">{template.name}</div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      {template.areaCount || 0} 個熱區 · {template.pageCount || 1} 頁
+                    </div>
+                    <div className="mt-3">
+                      <span className={`text-xs px-2 py-1 rounded-full ${
+                        active ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
+                      }`}>
+                        {active ? '已選擇' : '使用此模板'}
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
+        <div className="text-sm font-bold text-gray-900 mb-4">② 專案基本資料</div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">專案名稱</label>
+        <input
+          value={projectName}
+          onChange={(e) => setProjectName(e.target.value)}
+          placeholder="例如：ABC Coffee 會員選單"
+          className="w-full border border-gray-300 rounded-md py-2.5 px-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+        />
+        {selectedTemplate && (
+          <p className="text-xs text-gray-500 mt-2">
+            來源模板：{selectedTemplate.name}。建立後會複製座標與 Action 結構，日後母版修改不會影響此專案。
+          </p>
+        )}
+      </div>
+
+      <div className="flex justify-end">
+        <button
+          onClick={createProject}
+          disabled={creating || !selectedTemplateId || !projectName.trim()}
+          className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-md text-sm font-bold flex items-center gap-2"
+        >
+          {creating && <Loader2 size={16} className="animate-spin" />}
+          建立專案並進入內容設定
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const ProjectEditorView = ({ projectId, onBack }) => {
+  const [project, setProject] = useState(null);
+  const [activeArea, setActiveArea] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [changingImage, setChangingImage] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const projectImageInputRef = useRef(null);
+
+  useEffect(() => {
+    if (!projectId) return;
+    (async () => {
+      try {
+        const res = await authFetch(`/api/projects/${projectId}`);
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || '專案讀取失敗');
+        setProject(data.project);
+        setActiveArea(data.project.areas?.[0]?.id || null);
+      } catch (e) {
+        console.error(e);
+        alert('專案讀取失敗：' + e.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [projectId]);
+
+
+  const changeProjectImage = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setChangingImage(true);
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+
+      const res = await authFetch(`/api/projects/${projectId}/upload-image`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || '圖片更新失敗');
+
+      setProject(prev => ({
+        ...prev,
+        assetId: data.asset.id,
+        imageUrl: data.asset.imageUrl,
+      }));
+    } catch (e) {
+      console.error(e);
+      alert('更換圖片失敗：' + e.message);
+    } finally {
+      setChangingImage(false);
+      event.target.value = '';
+    }
+  };
+
+
+  const updateProjectName = (name) => {
+    setProject(prev => ({ ...prev, name }));
+  };
+
+  const updateProjectAreaAction = (areaId, patch) => {
+    setProject(prev => ({
+      ...prev,
+      areas: (prev.areas || []).map(area =>
+        area.id === areaId
+          ? {
+              ...area,
+              action: {
+                ...(area.action || { type: 'none' }),
+                ...patch,
+              },
+            }
+          : area
+      ),
+    }));
+  };
+
+  const saveProject = async () => {
+    if (!project?.name?.trim()) {
+      return alert('請輸入專案名稱。');
+    }
+
+    setSaving(true);
+    try {
+      const res = await authFetch(`/api/projects/${projectId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: project.name.trim(),
+          areas: project.areas || [],
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || '專案儲存失敗');
+      }
+
+      alert('專案內容已儲存。');
+    } catch (e) {
+      console.error(e);
+      alert('專案儲存失敗：' + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return <div className="py-20 flex justify-center items-center gap-2 text-gray-500"><Loader2 size={20} className="animate-spin" />載入專案...</div>;
+  }
+
+  if (!project) {
+    return <div className="p-8 text-center text-gray-500">找不到專案。</div>;
+  }
+
+  const currentArea = project.areas?.find(a => a.id === activeArea);
+  const action = currentArea?.action || { type: 'none' };
+  const imageSrc = project.imageUrl ? apiUrl(project.imageUrl) : '';
+
+  const fieldDescription = (() => {
+    if (action.type === 'uri') return '請填入客戶實際要開啟的網址';
+    if (action.type === 'message') return '請填入使用者點擊後要送出的文字';
+    if (action.type === 'postback') return '模板已設定為流程觸發，正式參數將在下一階段接入';
+    if (action.type === 'richmenuswitch') return '此按鈕會切換到模板指定頁面';
+    return '此區塊目前沒有動作';
+  })();
+
+  return (
+    <div className="h-full flex flex-col bg-gray-50">
+      <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <button onClick={onBack} className="p-2 rounded-full hover:bg-gray-100 text-gray-600">
+            <ArrowLeft size={20} />
+          </button>
+          <div>
+            <input
+              value={project.name || ''}
+              onChange={(e) => updateProjectName(e.target.value)}
+              className="font-bold text-gray-900 border-b border-transparent hover:border-gray-300 focus:border-blue-500 outline-none bg-transparent px-0 py-0.5 min-w-[280px]"
+            />
+            <div className="text-xs text-gray-500 mt-1">專案內容設定 · 已從模板建立獨立快照</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <input
+            ref={projectImageInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            className="hidden"
+            onChange={changeProjectImage}
+          />
+          <button
+            onClick={() => projectImageInputRef.current?.click()}
+            disabled={changingImage}
+            className="border border-gray-300 hover:bg-gray-50 disabled:opacity-50 px-3 py-2 rounded-md text-sm font-medium text-gray-700 flex items-center gap-2"
+          >
+            {changingImage ? <Loader2 size={15} className="animate-spin" /> : <ImageIcon size={15} />}
+            更換專案圖片
+          </button>
+          <button
+            onClick={saveProject}
+            disabled={saving}
+            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2"
+          >
+            {saving && <Loader2 size={15} className="animate-spin" />}
+            儲存專案
+          </button>
+          <span className="text-xs px-2.5 py-1 rounded-full bg-gray-100 text-gray-700">草稿</span>
+        </div>
+      </div>
+
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 overflow-hidden">
+        <div className="bg-white border-r border-gray-200 overflow-y-auto p-6 space-y-6">
+          <div>
+            <h3 className="font-bold text-gray-900 mb-2">請完成客戶內容</h3>
+            <p className="text-sm text-gray-500">模板已決定座標與動作類型，這裡只填實際內容，不需要重新設定技術參數。</p>
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
+            {(project.areas || []).map(area => (
+              <button
+                key={area.id}
+                onClick={() => setActiveArea(area.id)}
+                className={`py-2 px-2 text-xs font-medium rounded-md border ${
+                  activeArea === area.id
+                    ? 'bg-blue-50 border-blue-500 text-blue-700'
+                    : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                {area.label}
+              </button>
+            ))}
+          </div>
+
+          {currentArea && (
+            <div className="border border-gray-200 rounded-xl p-5 space-y-4 shadow-sm">
+              <div>
+                <div className="font-bold text-gray-900">設定【{currentArea.label}】</div>
+                <div className="text-xs text-gray-500 mt-1">{fieldDescription}</div>
+              </div>
+
+              {action.type === 'uri' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">網址</label>
+                  <input
+                    value={action.uri || ''}
+                    onChange={(e) => updateProjectAreaAction(currentArea.id, { uri: e.target.value })}
+                    placeholder="https://..."
+                    className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                  <p className="text-xs text-gray-500 mt-2">只修改此專案，不會影響模板母版。</p>
+                </div>
+              )}
+
+              {action.type === 'message' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">傳送文字</label>
+                  <textarea
+                    value={action.text || ''}
+                    onChange={(e) => updateProjectAreaAction(currentArea.id, { text: e.target.value })}
+                    placeholder="例如：我要預約"
+                    rows={3}
+                    className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                  />
+                  <p className="text-xs text-gray-500 mt-2">只修改此專案，不會影響模板母版。</p>
+                </div>
+              )}
+
+              {action.type === 'postback' && (
+                <div className="space-y-3">
+                  <div className="rounded-md bg-indigo-50 border border-indigo-100 p-3 text-sm text-indigo-800">
+                    此按鈕使用流程觸發。一般客戶不需理解 Postback，只需要修改顯示文字。
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">顯示文字</label>
+                    <input
+                      value={action.displayText || ''}
+                      onChange={(e) => updateProjectAreaAction(currentArea.id, { displayText: e.target.value })}
+                      placeholder="例如：我要查詢點數"
+                      className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {action.type === 'richmenuswitch' && (
+                <div className="rounded-md bg-green-50 border border-green-100 p-3 text-sm text-green-800">
+                  切換目標：{action.targetPageId || '模板預設頁面'}。頁面切換技術參數由系統保留。
+                </div>
+              )}
+
+              {action.type === 'none' && (
+                <div className="rounded-md bg-gray-50 border border-gray-200 p-3 text-sm text-gray-600">
+                  此區塊不建立點擊動作。
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="bg-gray-100 p-8 flex items-center justify-center overflow-y-auto">
+          <div className="w-[350px] bg-white rounded-[40px] shadow-2xl border-[8px] border-gray-800 overflow-hidden">
+            <div className="h-16 bg-[#06C755] px-4 flex items-center text-white font-bold">LINE 預覽</div>
+            <div className="aspect-[2500/1686] relative bg-gray-200">
+              {imageSrc && <img src={imageSrc} alt={project.name} className="w-full h-full object-contain" />}
+              {(project.areas || []).map(area => (
+                <button
+                  key={area.id}
+                  onClick={() => setActiveArea(area.id)}
+                  style={area.style}
+                  className={`absolute border border-red-500 ${
+                    activeArea === area.id ? 'bg-red-500/35' : 'bg-red-500/10 hover:bg-red-500/20'
+                  }`}
+                  title={area.label}
+                />
+              ))}
+            </div>
+            <div className="h-10 border-t border-gray-200 flex items-center justify-center text-sm text-gray-700">選單</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
+
+
+const LoginView = ({ onLoggedIn }) => {
+  const [login, setLogin] = useState('');
+  const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setError('');
+
+    if (!login.trim() || !password) {
+      setError('請輸入帳號與密碼。');
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      const res = await fetch(apiUrl('/auth/login'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          login: login.trim(),
+          password,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || '登入失敗');
+      }
+
+      localStorage.setItem(AUTH_TOKEN_KEY, data.token);
+      onLoggedIn();
+    } catch (e) {
+      console.error(e);
+      setError(e.message || '登入失敗');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-6">
+      <div className="w-full max-w-md bg-white border border-gray-200 rounded-2xl shadow-xl overflow-hidden">
+        <div className="px-8 py-8 border-b border-gray-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-black text-white rounded-lg flex items-center justify-center font-bold">SM</div>
+            <div>
+              <div className="font-bold text-xl text-gray-900">Smart Menu Studio</div>
+              <div className="text-sm text-gray-500 mt-0.5">Workspace 登入</div>
+            </div>
+          </div>
+        </div>
+
+        <form onSubmit={submit} className="p-8 space-y-5">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">帳號或 Email</label>
+            <input
+              autoFocus
+              value={login}
+              onChange={(e) => setLogin(e.target.value)}
+              placeholder="輸入帳號或 Email"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">密碼</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="輸入密碼"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+          </div>
+
+          {error && (
+            <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm p-3">
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={submitting}
+            className="w-full bg-black hover:bg-gray-800 disabled:opacity-50 text-white rounded-lg py-2.5 font-bold text-sm flex items-center justify-center gap-2"
+          >
+            {submitting && <Loader2 size={16} className="animate-spin" />}
+            登入
+          </button>
+
+          <p className="text-xs text-gray-500 leading-relaxed">
+            新成員請使用管理員建立的帳號與初始密碼登入；LINE UID 之後再進行綁定。
+          </p>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+const AccountView = ({ session, onSessionChanged }) => {
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const changePassword = async () => {
+    if (newPassword.length < 8) return alert('新密碼至少需要 8 個字元。');
+    if (newPassword !== confirmPassword) return alert('兩次輸入的新密碼不一致。');
+
+    setSaving(true);
+    try {
+      const res = await authFetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || '密碼修改失敗');
+
+      if (data.token) localStorage.setItem(AUTH_TOKEN_KEY, data.token);
+
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      await onSessionChanged?.();
+      alert('密碼已更新。');
+    } catch (e) {
+      console.error(e);
+      alert('密碼修改失敗：' + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-300">
+      <div>
+        <h2 className="text-2xl font-bold text-gray-900">我的帳號</h2>
+        <p className="text-sm text-gray-500 mt-1">查看目前登入身份並管理密碼。</p>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div>
+            <div className="text-xs text-gray-500">使用者</div>
+            <div className="font-semibold text-gray-900 mt-1">{session?.user?.display_name || '—'}</div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-500">Workspace</div>
+            <div className="font-semibold text-gray-900 mt-1">
+              {session?.memberships?.find(x => x.workspace_id === session?.activeWorkspaceId)?.workspace_name || session?.activeWorkspaceId || '—'}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-500">角色</div>
+            <div className="font-semibold text-gray-900 mt-1">{session?.activeRole || '—'}</div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-500">LINE UID</div>
+            <div className="font-semibold text-gray-900 mt-1">{session?.user?.line_user_id || '尚未綁定'}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6 max-w-2xl">
+        <h3 className="font-bold text-gray-900">修改密碼</h3>
+        <div className="mt-4 space-y-4">
+          <input
+            type="password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+            placeholder="目前密碼"
+            className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm"
+          />
+          <input
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            placeholder="新密碼，至少 8 個字元"
+            className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm"
+          />
+          <input
+            type="password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            placeholder="再次輸入新密碼"
+            className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm"
+          />
+          <button
+            onClick={changePassword}
+            disabled={saving}
+            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2"
+          >
+            {saving && <Loader2 size={15} className="animate-spin" />}
+            更新密碼
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
+const LineHubView = () => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [savingAccount, setSavingAccount] = useState(false);
+  const [savingTarget, setSavingTarget] = useState('');
+  const [keywordForm, setKeywordForm] = useState({
+    keyword: '',
+    matchType: 'exact',
+    targetId: '',
+  });
+  const [checking, setChecking] = useState(false);
+  const [conflict, setConflict] = useState(null);
+  const [creatingKeyword, setCreatingKeyword] = useState(false);
+
+  const [accountForm, setAccountForm] = useState({
+    oaName: '',
+    lineLoginChannelId: '',
+    lineLoginChannelSecret: '',
+    lineBotChannelId: '',
+    lineBotChannelAccessToken: '',
+    lineBotChannelSecret: '',
+    lineBotBasicId: '',
+    status: 'disconnected',
+    webhookEnabled: true,
+  });
+
+  const loadHub = async () => {
+    setLoading(true);
+    try {
+      const res = await authFetch('/api/line-hub');
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || 'LINE Hub 讀取失敗');
+
+      setData(json);
+
+      const a = json.lineAccount || {};
+      setAccountForm({
+        oaName: a.oaName || '',
+        lineLoginChannelId: a.lineLoginChannelId || '',
+        lineLoginChannelSecret: '',
+        lineBotChannelId: a.lineBotChannelId || '',
+        lineBotChannelAccessToken: '',
+        lineBotChannelSecret: '',
+        lineBotBasicId: a.lineBotBasicId || '',
+        status: a.status || 'disconnected',
+        webhookEnabled: a.webhookEnabled !== false,
+      });
+
+      if (!keywordForm.targetId && json.targets?.length) {
+        setKeywordForm(prev => ({
+          ...prev,
+          targetId: json.targets[0].id,
+        }));
+      }
+    } catch (e) {
+      console.error(e);
+      alert('LINE Hub 讀取失敗：' + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadHub();
+  }, []);
+
+  const saveAccount = async () => {
+    setSavingAccount(true);
+    try {
+      const res = await authFetch('/api/line-hub/account', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(accountForm),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || 'LINE OA 設定失敗');
+
+      await loadHub();
+      alert('LINE OA 設定已儲存。');
+    } catch (e) {
+      console.error(e);
+      alert('LINE OA 設定失敗：' + e.message);
+    } finally {
+      setSavingAccount(false);
+    }
+  };
+
+  const updateTarget = async (target, patch) => {
+    setSavingTarget(target.id);
+    try {
+      const res = await authFetch(`/api/line-hub/targets/${target.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: patch.name ?? target.name,
+          targetType: patch.target_type ?? target.target_type,
+          endpointUrl: patch.endpoint_url ?? target.endpoint_url,
+          enabled: patch.enabled ?? Boolean(target.enabled),
+          canReply: patch.can_reply ?? Boolean(target.can_reply),
+          forwardSignature: patch.forward_signature ?? Boolean(target.forward_signature),
+          timeoutMs: patch.timeout_ms ?? target.timeout_ms,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || 'Target 更新失敗');
+
+      setData(prev => ({
+        ...prev,
+        targets: prev.targets.map(t =>
+          t.id === target.id ? { ...t, ...patch } : t
+        ),
+      }));
+    } catch (e) {
+      console.error(e);
+      alert('Target 更新失敗：' + e.message);
+    } finally {
+      setSavingTarget('');
+    }
+  };
+
+  const checkKeyword = async () => {
+    if (!keywordForm.keyword.trim()) {
+      setConflict(null);
+      return;
+    }
+
+    setChecking(true);
+    try {
+      const res = await authFetch('/api/line-hub/keywords/check-conflict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          keyword: keywordForm.keyword.trim(),
+          matchType: keywordForm.matchType,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || '衝突檢查失敗');
+      setConflict(json.conflict || null);
+    } catch (e) {
+      console.error(e);
+      alert('關鍵字衝突檢查失敗：' + e.message);
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const createKeyword = async () => {
+    if (!keywordForm.keyword.trim()) return alert('請輸入關鍵字。');
+    if (!keywordForm.targetId) return alert('請選擇目標系統。');
+
+    setCreatingKeyword(true);
+    try {
+      const res = await authFetch('/api/line-hub/keywords', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          keyword: keywordForm.keyword.trim(),
+          matchType: keywordForm.matchType,
+          targetId: keywordForm.targetId,
+          priority: 100,
+          enabled: true,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        if (json.conflict) setConflict(json.conflict);
+        throw new Error(json.error || '關鍵字建立失敗');
+      }
+
+      setKeywordForm(prev => ({
+        ...prev,
+        keyword: '',
+      }));
+      setConflict(null);
+      await loadHub();
+    } catch (e) {
+      console.error(e);
+      alert('關鍵字建立失敗：' + e.message);
+    } finally {
+      setCreatingKeyword(false);
+    }
+  };
+
+  const deleteKeyword = async (route) => {
+    if (!confirm(`確定刪除關鍵字「${route.keyword}」？`)) return;
+
+    try {
+      const res = await authFetch(`/api/line-hub/keywords/${route.id}`, {
+        method: 'DELETE',
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || '刪除失敗');
+      await loadHub();
+    } catch (e) {
+      console.error(e);
+      alert('刪除失敗：' + e.message);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="py-20 flex items-center justify-center gap-2 text-gray-500">
+        <Loader2 size={18} className="animate-spin" />
+        載入 LINE Hub...
+      </div>
+    );
+  }
+
+  const gatewayPath = data?.lineAccount?.webhookPath || '';
+  const gatewayUrl = gatewayPath
+    ? `${window.location.origin.includes('localhost') ? 'https://你的正式Worker網域' : window.location.origin}${gatewayPath}`
+    : '';
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-300">
+      <div>
+        <h2 className="text-2xl font-bold text-gray-900">LINE OA / Webhook Hub</h2>
+        <p className="text-sm text-gray-500 mt-1">
+          LINE 只連到一個 Gateway；System A / B 由 Smart Menu 中央路由，避免關鍵字競爭。
+        </p>
+      </div>
+
+      <section className="bg-white border border-gray-200 rounded-xl shadow-sm p-6 space-y-5">
+        <div>
+          <h3 className="font-bold text-gray-900">LINE OA 串接</h3>
+          <p className="text-xs text-gray-500 mt-1">Secret / Token 留空時不會覆蓋既有值。</p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {[
+            ['LINE OA 名稱', 'oaName', '例如：ABC Coffee'],
+            ['LINE Bot @帳號', 'lineBotBasicId', '@xxxxxxx'],
+            ['LINE Login Channel ID', 'lineLoginChannelId', 'Channel ID'],
+            ['LINE Login Channel Secret', 'lineLoginChannelSecret', '留空代表不修改'],
+            ['LINE Bot Channel ID', 'lineBotChannelId', 'Messaging API Channel ID'],
+            ['LINE Bot Channel Access Token', 'lineBotChannelAccessToken', '留空代表不修改'],
+            ['LINE Bot Channel Secret', 'lineBotChannelSecret', '留空代表不修改'],
+          ].map(([label, key, placeholder]) => (
+            <div key={key}>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+              <input
+                type={key.toLowerCase().includes('secret') || key.toLowerCase().includes('token') ? 'password' : 'text'}
+                value={accountForm[key]}
+                onChange={(e) => setAccountForm(prev => ({ ...prev, [key]: e.target.value }))}
+                placeholder={placeholder}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+            </div>
+          ))}
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            onClick={saveAccount}
+            disabled={savingAccount}
+            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2"
+          >
+            {savingAccount && <Loader2 size={15} className="animate-spin" />}
+            儲存 LINE OA 設定
+          </button>
+        </div>
+      </section>
+
+      <section className="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
+        <h3 className="font-bold text-gray-900">LINE Gateway Webhook</h3>
+        <p className="text-xs text-gray-500 mt-1">
+          LINE Developers 只設定這一個 Webhook。System A / B 不直接暴露給 LINE。
+        </p>
+
+        <div className="mt-4 flex gap-2">
+          <input
+            readOnly
+            value={gatewayUrl || '尚未產生'}
+            className="flex-1 bg-gray-50 border border-gray-300 rounded-md px-3 py-2 text-sm font-mono"
+          />
+          <button
+            onClick={() => gatewayUrl && navigator.clipboard?.writeText(gatewayUrl)}
+            className="border border-gray-300 hover:bg-gray-50 px-4 py-2 rounded-md text-sm font-medium"
+          >
+            複製
+          </button>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        {(data?.targets || []).map(target => (
+          <div key={target.id} className="bg-white border border-gray-200 rounded-xl shadow-sm p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-gray-900">{target.name}</h3>
+                <div className="text-xs text-gray-500 mt-1">
+                  {target.position === 1 ? '主系統' : '第二系統 / 備援'}
+                </div>
+              </div>
+              <span className={`text-xs px-2 py-1 rounded-full ${target.enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                {target.enabled ? '啟用' : '停用'}
+              </span>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">系統名稱</label>
+              <input
+                value={target.name || ''}
+                onChange={(e) => setData(prev => ({
+                  ...prev,
+                  targets: prev.targets.map(t => t.id === target.id ? { ...t, name: e.target.value } : t),
+                }))}
+                onBlur={() => updateTarget(target, { name: target.name })}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Webhook URL</label>
+              <input
+                value={target.endpoint_url || ''}
+                onChange={(e) => setData(prev => ({
+                  ...prev,
+                  targets: prev.targets.map(t => t.id === target.id ? { ...t, endpoint_url: e.target.value } : t),
+                }))}
+                onBlur={() => updateTarget(target, { endpoint_url: target.endpoint_url })}
+                placeholder="https://..."
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div className="flex flex-wrap gap-4 text-sm">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={Boolean(target.enabled)}
+                  onChange={(e) => updateTarget(target, { enabled: e.target.checked })}
+                />
+                啟用
+              </label>
+
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={Boolean(target.can_reply)}
+                  onChange={(e) => updateTarget(target, { can_reply: e.target.checked })}
+                />
+                可提出回覆內容
+              </label>
+
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={Boolean(target.forward_signature)}
+                  onChange={(e) => updateTarget(target, { forward_signature: e.target.checked })}
+                />
+                轉發 LINE Signature
+              </label>
+            </div>
+
+            {savingTarget === target.id && (
+              <div className="text-xs text-blue-600 flex items-center gap-1">
+                <Loader2 size={12} className="animate-spin" />
+                儲存中...
+              </div>
+            )}
+          </div>
+        ))}
+      </section>
+
+      <section className="bg-white border border-gray-200 rounded-xl shadow-sm p-6 space-y-5">
+        <div>
+          <h3 className="font-bold text-gray-900">中央關鍵字路由</h3>
+          <p className="text-xs text-gray-500 mt-1">
+            同一 Workspace 的關鍵字不可互相競爭；建立前會先檢查 exact / prefix / contains 衝突。
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <input
+            value={keywordForm.keyword}
+            onChange={(e) => {
+              setKeywordForm(prev => ({ ...prev, keyword: e.target.value }));
+              setConflict(null);
+            }}
+            onBlur={checkKeyword}
+            placeholder="例如：分享好友"
+            className="border border-gray-300 rounded-md px-3 py-2 text-sm"
+          />
+
+          <select
+            value={keywordForm.matchType}
+            onChange={(e) => {
+              setKeywordForm(prev => ({ ...prev, matchType: e.target.value }));
+              setConflict(null);
+            }}
+            className="border border-gray-300 rounded-md px-3 py-2 text-sm"
+          >
+            <option value="exact">完全符合</option>
+            <option value="prefix">開頭符合</option>
+            <option value="contains">包含</option>
+          </select>
+
+          <select
+            value={keywordForm.targetId}
+            onChange={(e) => setKeywordForm(prev => ({ ...prev, targetId: e.target.value }))}
+            className="border border-gray-300 rounded-md px-3 py-2 text-sm"
+          >
+            {(data?.targets || []).map(t => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+
+          <button
+            onClick={createKeyword}
+            disabled={creatingKeyword || checking || Boolean(conflict)}
+            className="bg-black hover:bg-gray-800 disabled:opacity-50 text-white rounded-md px-4 py-2 text-sm font-bold"
+          >
+            {checking ? '檢查中...' : creatingKeyword ? '建立中...' : '新增關鍵字'}
+          </button>
+        </div>
+
+        {keywordForm.keyword && (
+          <div>
+            {checking ? (
+              <div className="text-xs text-gray-500">正在檢查衝突...</div>
+            ) : conflict ? (
+              <div className="rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+                衝突：目前「{conflict.keyword}」({conflict.matchType}) 已由 {conflict.targetName} 使用。
+              </div>
+            ) : (
+              <div className="rounded-md bg-green-50 border border-green-200 p-3 text-sm text-green-700">
+                此規則目前未發現競爭衝突。
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="divide-y divide-gray-100 border border-gray-200 rounded-lg overflow-hidden">
+          {(data?.keywordRoutes || []).length === 0 ? (
+            <div className="p-8 text-center text-sm text-gray-500">目前尚未建立關鍵字路由。</div>
+          ) : (
+            data.keywordRoutes.map(route => (
+              <div key={route.id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div>
+                  <div className="font-medium text-gray-900">{route.keyword}</div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    {route.match_type} → {route.target_name}
+                  </div>
+                </div>
+                <button
+                  onClick={() => deleteKeyword(route)}
+                  className="text-sm text-red-600 hover:text-red-800 font-medium"
+                >
+                  刪除
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+    </div>
+  );
+};
+
+const MembersView = () => {
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [form, setForm] = useState({
+    displayName: '',
+    username: '',
+    password: '',
+    email: '',
+    role: 'editor',
+  });
+
+  const loadMembers = async () => {
+    setLoading(true);
+    try {
+      const res = await authFetch('/api/members');
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || '成員查詢失敗');
+      setMembers(data.members || []);
+    } catch (e) {
+      console.error(e);
+      alert('成員讀取失敗：' + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadMembers();
+  }, []);
+
+  const addMember = async () => {
+    if (!form.username.trim() && !form.email.trim()) {
+      return alert('至少填寫帳號或 Email。');
+    }
+    if (form.password.length < 8) {
+      return alert('初始密碼至少需要 8 個字元。');
+    }
+
+    setSaving(true);
+    try {
+      const res = await authFetch('/api/members', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          displayName: form.displayName.trim(),
+          username: form.username.trim(),
+          password: form.password,
+          email: form.email.trim(),
+          role: form.role,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || '新增成員失敗');
+
+      setForm({
+        displayName: '',
+        username: '',
+        password: '',
+        email: '',
+        role: 'editor',
+      });
+      setFormOpen(false);
+      await loadMembers();
+    } catch (e) {
+      console.error(e);
+      alert('新增成員失敗：' + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateMember = async (member, patch) => {
+    if (member.role === 'owner') return;
+
+    const nextRole = patch.role ?? member.role;
+    const nextStatus = patch.status ?? member.status;
+
+    try {
+      const res = await authFetch(`/api/members/${member.membership_id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          role: nextRole,
+          status: nextStatus,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || '成員更新失敗');
+
+      setMembers(prev =>
+        prev.map(item =>
+          item.membership_id === member.membership_id
+            ? { ...item, role: nextRole, status: nextStatus }
+            : item
+        )
+      );
+    } catch (e) {
+      console.error(e);
+      alert('成員更新失敗：' + e.message);
+    }
+  };
+
+  const deleteMember = async (member) => {
+    if (member.role === 'owner') {
+      return alert('Owner 不可移除。');
+    }
+
+    if (!confirm(`確定要移除「${member.display_name || member.email || '此成員'}」嗎？`)) {
+      return;
+    }
+
+    try {
+      const res = await authFetch(`/api/members/${member.membership_id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || '移除成員失敗');
+
+      setMembers(prev =>
+        prev.filter(item => item.membership_id !== member.membership_id)
+      );
+    } catch (e) {
+      console.error(e);
+      alert('移除成員失敗：' + e.message);
+    }
+  };
+
+  const roleLabel = (role) => {
+    if (role === 'owner') return '擁有者';
+    if (role === 'admin') return '管理員';
+    if (role === 'editor') return '編輯者';
+    return '檢視者';
+  };
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-500">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight text-gray-900">團隊成員</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            管理這個 Workspace 的使用者與權限。成員只會存取自己所屬 Workspace 的資料。
+          </p>
+        </div>
+        <button
+          onClick={() => setFormOpen(true)}
+          className="bg-black hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2"
+        >
+          <Plus size={16} />
+          新增成員
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        {[
+          ['擁有者', members.filter(m => m.role === 'owner' && m.status === 'active').length],
+          ['管理員', members.filter(m => m.role === 'admin' && m.status === 'active').length],
+          ['編輯者', members.filter(m => m.role === 'editor' && m.status === 'active').length],
+          ['檢視者', members.filter(m => m.role === 'viewer' && m.status === 'active').length],
+        ].map(([label, value]) => (
+          <div key={label} className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
+            <div className="text-xs text-gray-500">{label}</div>
+            <div className="text-2xl font-bold text-gray-900 mt-1">{value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-gray-900">Workspace 成員</h3>
+            <p className="text-xs text-gray-500 mt-1">Owner 不可由一般成員管理 API 降權或刪除。</p>
+          </div>
+          <button onClick={loadMembers} className="text-sm text-blue-600 hover:text-blue-800 font-medium">
+            重新整理
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="py-16 flex justify-center items-center gap-2 text-gray-500">
+            <Loader2 size={18} className="animate-spin" />
+            載入成員中...
+          </div>
+        ) : members.length === 0 ? (
+          <div className="py-16 text-center text-gray-500">目前沒有成員資料。</div>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {members.map(member => {
+              const isOwner = member.role === 'owner';
+              const disabled = member.status !== 'active';
+
+              return (
+                <div key={member.membership_id} className="px-6 py-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <div className="font-semibold text-gray-900">
+                        {member.display_name || '未命名使用者'}
+                      </div>
+                      {isOwner && (
+                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-bold">
+                          Owner
+                        </span>
+                      )}
+                      {disabled && (
+                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                          已停用
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1 space-x-2">
+                      {member.email && <span>{member.email}</span>}
+                      {member.line_user_id && <span>LINE UID：{member.line_user_id}</span>}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={member.role}
+                      disabled={isOwner}
+                      onChange={(e) => updateMember(member, { role: e.target.value })}
+                      className="border border-gray-300 rounded-md py-2 px-3 text-sm disabled:bg-gray-100 disabled:text-gray-500"
+                    >
+                      {isOwner && <option value="owner">擁有者</option>}
+                      <option value="admin">管理員</option>
+                      <option value="editor">編輯者</option>
+                      <option value="viewer">檢視者</option>
+                    </select>
+
+                    {!isOwner && (
+                      <button
+                        onClick={() => updateMember(member, { status: disabled ? 'active' : 'disabled' })}
+                        className="border border-gray-300 hover:bg-gray-50 px-3 py-2 rounded-md text-sm font-medium text-gray-700"
+                      >
+                        {disabled ? '啟用' : '停用'}
+                      </button>
+                    )}
+
+                    {!isOwner && (
+                      <button
+                        onClick={() => deleteMember(member)}
+                        className="border border-red-200 hover:bg-red-50 text-red-600 px-3 py-2 rounded-md text-sm font-medium"
+                      >
+                        移除
+                      </button>
+                    )}
+
+                    <span className="text-xs text-gray-400 min-w-[56px] text-right">
+                      {roleLabel(member.role)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {formOpen && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-gray-200">
+            <div className="px-6 py-5 border-b border-gray-200 flex items-center justify-between">
+              <div>
+                <div className="font-bold text-gray-900">新增 Workspace 成員</div>
+                <div className="text-xs text-gray-500 mt-1">先建立帳號與初始密碼；LINE UID 後續由綁定流程取得。</div>
+              </div>
+              <button onClick={() => setFormOpen(false)} className="text-gray-400 hover:text-gray-700 text-xl leading-none">×</button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">顯示名稱</label>
+                <input
+                  value={form.displayName}
+                  onChange={(e) => setForm(prev => ({ ...prev, displayName: e.target.value }))}
+                  placeholder="例如：王小明"
+                  className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">登入帳號</label>
+                <input
+                  value={form.username}
+                  onChange={(e) => setForm(prev => ({ ...prev, username: e.target.value }))}
+                  placeholder="例如：tony01"
+                  className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+                <p className="text-xs text-gray-500 mt-1">可使用帳號或 Email 登入。</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">初始密碼</label>
+                <input
+                  type="password"
+                  value={form.password}
+                  onChange={(e) => setForm(prev => ({ ...prev, password: e.target.value }))}
+                  placeholder="至少 8 個字元"
+                  className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+                <p className="text-xs text-gray-500 mt-1">首次登入後可再修改密碼。</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <input
+                  value={form.email}
+                  onChange={(e) => setForm(prev => ({ ...prev, email: e.target.value }))}
+                  placeholder="name@example.com"
+                  className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+
+              <div className="rounded-md bg-gray-50 border border-gray-200 p-3 text-xs text-gray-600">
+                LINE UID 尚未綁定。使用者日後完成 LINE 登入／綁定後，系統會自動寫入 UID。
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">角色</label>
+                <select
+                  value={form.role}
+                  onChange={(e) => setForm(prev => ({ ...prev, role: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  <option value="editor">編輯者</option>
+                  <option value="viewer">檢視者</option>
+                  <option value="admin">管理員</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+              <button
+                onClick={() => setFormOpen(false)}
+                className="border border-gray-300 hover:bg-gray-50 px-4 py-2 rounded-md text-sm font-medium"
+              >
+                取消
+              </button>
+              <button
+                onClick={addMember}
+                disabled={saving}
+                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2"
+              >
+                {saving && <Loader2 size={15} className="animate-spin" />}
+                新增成員
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+
+const TemplatesView = ({ onNavigate, onEditTemplate }) => {
+  const [templates, setTemplates] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const loadTemplates = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await authFetch('/api/templates');
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || '模板查詢失敗');
+      setTemplates(data.templates || []);
+    } catch (e) {
+      console.error(e);
+      setError(e.message || '模板查詢失敗');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadTemplates();
+  }, []);
+
+  const deleteTemplate = async (template) => {
+    if (!confirm(`確定要刪除「${template.name}」嗎？`)) return;
+    try {
+      const res = await authFetch(`/api/templates/${template.id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || '刪除失敗');
+      await loadTemplates();
+    } catch (e) {
+      alert(e.message || '刪除失敗');
+    }
+  };
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-500">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight text-gray-900">模板中心</h2>
+          <p className="text-gray-500 text-sm mt-1">模板圖片存 R2，座標與 Action 存 D1；建立一次即可重複套用。</p>
+        </div>
+        <button
+          onClick={onNavigate}
+          className="bg-black hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2"
+        >
+          <Plus size={16} />
+          建立新模板
+        </button>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-gray-900">可重複使用模板</h3>
+            <p className="text-xs text-gray-500 mt-1">直接從 D1 查詢；圖片由 R2 提供。</p>
+          </div>
+          <span className="text-xs px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 font-medium">{templates.length} 套</span>
+        </div>
+
+        {loading && <div className="p-8 text-sm text-gray-500">模板載入中...</div>}
+        {!loading && error && <div className="p-8 text-sm text-red-600">{error}</div>}
+        {!loading && !error && templates.length === 0 && (
+          <div className="p-10 text-center text-sm text-gray-500">目前沒有模板，請先建立第一套模板。</div>
+        )}
+
+        {!loading && !error && templates.length > 0 && (
+          <div className="divide-y divide-gray-100">
+            {templates.map((template) => (
+              <div key={template.id} className="px-6 py-4 flex items-center justify-between hover:bg-gray-50">
+                <div className="flex items-center gap-4 min-w-0">
+                  <div className="w-16 h-12 rounded-lg bg-indigo-50 overflow-hidden flex items-center justify-center shrink-0">
+                    {template.imageUrl ? (
+                      <img src={apiUrl(template.imageUrl)} alt={template.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <LayoutTemplate size={20} className="text-indigo-600" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-semibold text-sm text-gray-900 truncate">{template.name}</div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      {template.industry || '待分類'} · {template.areaCount ?? 0} 個熱區 · {template.pageCount ?? 1} 頁
+                    </div>
+                    <div className="text-[11px] text-gray-400 mt-1">ID: {template.id}</div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${template.status === 'verified' || template.status === '已驗證' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                    {template.status === 'verified' ? '已驗證' : (template.status || '草稿')}
+                  </span>
+                  <button
+                    onClick={() => onEditTemplate(template.id)}
+                    className="text-sm font-medium text-blue-600 hover:text-blue-800"
+                  >
+                    編輯模板
+                  </button>
+                  <button
+                    onClick={() => deleteTemplate(template)}
+                    className="text-sm font-medium text-red-600 hover:text-red-800"
+                  >
+                    刪除
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const EditorView = ({ onBack, mode = 'project', templateId = null }) => {
+  const [activeArea, setActiveArea] = useState(1);
+  const [activeTab, setActiveTab] = useState('image');
+  
+  const [isUploading, setIsUploading] = useState(false);
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [bgImage, setBgImage] = useState(null);
+  const [areas, setAreas] = useState([]);
+  const [templateName, setTemplateName] = useState('');
+  const [templateStatus, setTemplateStatus] = useState('draft');
+  const [assetId, setAssetId] = useState(null);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [isLoadingTemplate, setIsLoadingTemplate] = useState(false);
+  const fileInputRef = useRef(null);
+  const isTemplateMode = mode === 'template';
+
+
+  useEffect(() => {
+    if (!isTemplateMode || !templateId) {
+      if (isTemplateMode && !templateId) {
+        setTemplateName('');
+        setTemplateStatus('draft');
+        setBgImage(null);
+        setAreas([]);
+        setAssetId(null);
+        setSelectedFile(null);
+      }
+      return;
+    }
+
+    let cancelled = false;
+    const loadTemplate = async () => {
+      setIsLoadingTemplate(true);
+      try {
+        const res = await authFetch(`/api/templates/${templateId}`);
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || '模板讀取失敗');
+        if (cancelled) return;
+        const tpl = data.template;
+        setTemplateName(tpl.name || '');
+        setTemplateStatus(tpl.status || 'draft');
+        setAssetId(tpl.assetId || null);
+        setBgImage(tpl.imageUrl ? apiUrl(tpl.imageUrl) : null);
+        setAreas(tpl.areas || []);
+        setActiveArea(tpl.areas?.[0]?.id || 1);
+        setActiveTab(tpl.areas?.length ? 'action' : 'image');
+        setSelectedFile(null);
+      } catch (e) {
+        console.error(e);
+        alert(e.message || '模板讀取失敗');
+      } finally {
+        if (!cancelled) setIsLoadingTemplate(false);
+      }
+    };
+    loadTemplate();
+    return () => { cancelled = true; };
+  }, [isTemplateMode, templateId]);
+
+  const ACTION_TYPES = [
+    { value: 'uri', label: '開啟網頁 (URI)' },
+    { value: 'message', label: '傳送文字 (Message)' },
+    { value: 'postback', label: '觸發後端流程 (Postback)' },
+    { value: 'richmenuswitch', label: '切換其他選單頁面 (Rich Menu Switch)' },
+    { value: 'none', label: '停用 / 無動作' },
+  ];
+
+  const PAGES = [
+    { id: 'page_home', label: '首頁' },
+    { id: 'page_menu', label: '本週菜單' },
+    { id: 'page_booking', label: '預約服務' },
+    { id: 'page_member', label: '會員中心' },
+  ];
+
+  const suggestAction = (label = '') => {
+    const text = String(label).trim();
+    if (/返回|首頁/.test(text)) {
+      return { type: 'richmenuswitch', targetPageId: 'page_home', data: 'switch=home' };
+    }
+    if (/客服|諮詢|聯絡/.test(text)) {
+      return { type: 'message', text: '我要聯絡客服' };
+    }
+    if (/預約/.test(text)) {
+      return { type: 'message', text: '我要預約' };
+    }
+    if (/菜單|最新|活動|有禮|兌換|註冊|調查|通知|查詢/.test(text)) {
+      return { type: 'uri', uri: 'https://example.com/' };
+    }
+    return { type: 'uri', uri: 'https://example.com/' };
+  };
+
+  const fillTemplatePlaceholderAction = (area) => {
+    const label = String(area?.label || '功能').trim() || '功能';
+    const action = area?.action || suggestAction(label);
+
+    if (action.type === 'uri') {
+      return { ...area, action: { ...action, uri: String(action.uri || '').trim() || `https://example.com/?source=${encodeURIComponent(label)}` } };
+    }
+    if (action.type === 'message') {
+      return { ...area, action: { ...action, text: String(action.text || '').trim() || `我要了解${label}` } };
+    }
+    if (action.type === 'postback') {
+      return { ...area, action: { ...action, data: String(action.data || '').trim() || `action=template_demo&area=${encodeURIComponent(label)}`, displayText: String(action.displayText || '').trim() || label } };
+    }
+    if (action.type === 'richmenuswitch') {
+      return { ...area, action: { ...action, targetPageId: String(action.targetPageId || '').trim() || 'page_home', data: String(action.data || '').trim() || 'switch=home' } };
+    }
+    return area;
+  };
+
+  const normalizeDetectedArea = (area) => ({
+    ...area,
+    action: area.action || suggestAction(area.label),
+  });
+
+  const updateAreaAction = (areaId, patch) => {
+    setAreas(prev => prev.map(area => (
+      area.id === areaId
+        ? { ...area, action: { ...(area.action || suggestAction(area.label)), ...patch } }
+        : area
+    )));
+  };
+
+  const setAreaActionType = (areaId, type) => {
+    const defaults = {
+      uri: { type: 'uri', uri: '' },
+      message: { type: 'message', text: '' },
+      postback: { type: 'postback', data: '', displayText: '' },
+      richmenuswitch: { type: 'richmenuswitch', targetPageId: 'page_home', data: '' },
+      none: { type: 'none' },
+    };
+    setAreas(prev => prev.map(area => (
+      area.id === areaId
+        ? { ...area, action: defaults[type] || { type: 'uri', uri: '' } }
+        : area
+    )));
+  };
+
+  const saveTemplate = async (targetStatus = 'verified') => {
+    if (!isTemplateMode) return;
+    if (!templateName.trim()) {
+      alert('請先輸入模板名稱。');
+      return;
+    }
+    if (!bgImage || areas.length === 0) {
+      alert('請先上傳圖片並完成 AI 熱區偵測。');
+      return;
+    }
+
+    // 建立「模板」時不要求填入客戶正式參數。
+    // 空白 URI / Message / Postback / Switch 會先自動補測試參數，讓模板可以完成驗證與入庫。
+    const preparedAreas = areas.map(fillTemplatePlaceholderAction);
+
+    try {
+      let finalAssetId = assetId;
+
+      if (selectedFile) {
+        const formData = new FormData();
+        formData.append('image', selectedFile);
+        const uploadRes = await authFetch('/api/templates/upload-image', {
+          method: 'POST',
+          body: formData,
+        });
+        const uploadData = await uploadRes.json();
+        if (!uploadRes.ok || !uploadData.success) throw new Error(uploadData.error || '圖片寫入 R2 失敗');
+        finalAssetId = uploadData.asset.id;
+        setAssetId(finalAssetId);
+      }
+
+      if (!finalAssetId) throw new Error('缺少模板圖片 Asset，請重新上傳圖片。');
+
+      const payload = {
+        name: templateName.trim(),
+        industry: '待分類',
+        status: targetStatus,
+        assetId: finalAssetId,
+        pageCount: 1,
+        aiProvider: 'gemini',
+        aiModel: 'gemini-3.6-flash',
+        areas: preparedAreas.map(({ style, ...area }) => area),
+      };
+
+      const editing = Boolean(templateId);
+      const res = await fetch(apiUrl(editing ? `/api/templates/${templateId}` : '/api/templates'), {
+        method: editing ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || '模板儲存失敗');
+
+      setAreas(preparedAreas);
+      setTemplateStatus(targetStatus);
+      alert(targetStatus === 'verified' ? '模板已驗證並寫入 D1 / R2。尚未填寫的 Action 已自動使用測試參數，客戶套用時再替換正式內容。' : '模板草稿已寫入 D1 / R2。');
+      onBack();
+    } catch (e) {
+      console.error(e);
+      alert(e.message || '模板儲存失敗。');
+    }
+  };
+
+  const handleUploadAndDetect = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    console.log('1. 檔案已選取:', file.name, file.size);
+    const previewUrl = URL.createObjectURL(file);
+    setSelectedFile(file);
+    setBgImage(previewUrl);
+    setIsUploading(true);
+    setIsDetecting(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+
+      console.log(`2. 準備發送 fetch 請求至 ${API_BASE_URL}/api/detect-layout ...`);
+      const response = await fetch(`${API_BASE_URL}/api/detect-layout`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      console.log('3. 收到後端回應狀態:', response.status);
+      const data = await response.json();
+      console.log('4. 解析後的 JSON 資料:', data);
+      
+      if (data.success) {
+        const normalizedAreas = (data.areas || []).map(normalizeDetectedArea);
+        setAreas(normalizedAreas);
+        setActiveArea(normalizedAreas[0]?.id || 1);
+        setActiveTab('action');
+      } else {
+        alert('AI 偵測失敗: ' + (data.error || '未知錯誤'));
+        setAreas([]);
+        setActiveTab('image');
+        // 保留 bgImage，讓使用者仍可看到並繼續編輯圖片預覽
+      }
+    } catch (error) {
+      console.error('❌ 發生例外錯誤:', error);
+      alert('圖片已載入，但 AI 座標偵測服務目前無法連線。您仍可看到圖片預覽，稍後再重新偵測。');
+      setAreas([]);
+      setActiveTab('image');
+      // 不清除 bgImage：AI 失敗不應影響圖片預覽
+    } finally {
+      setIsUploading(false);
+      setIsDetecting(false);
+      event.target.value = ''; 
+    }
+  };
+
+  return (
+    <div className="h-full flex flex-col bg-gray-50 animate-in fade-in duration-300">
+      {isLoadingTemplate && <div className="absolute inset-0 z-50 bg-white/70 flex items-center justify-center"><Loader2 className="animate-spin mr-2" size={20} />載入模板中...</div>}
+      <div className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 shrink-0 shadow-sm z-10">
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={onBack}
+            className="p-2 hover:bg-gray-100 rounded-full text-gray-600 transition-colors"
+          >
+            <ArrowLeft size={20} />
+          </button>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="font-bold text-gray-900">{isTemplateMode ? templateName : '2024 春季新品導覽'}</h2>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${templateStatus === 'verified' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-800'}`}>{templateStatus === 'verified' ? '已驗證模板' : '草稿'}</span>
+            </div>
+            <p className="text-xs text-gray-500">{isTemplateMode ? '模板製作模式：座標、Action 與導航規則只需設定一次' : '正在編輯：首頁 (1/4)'}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          {isTemplateMode ? (
+            <>
+              <button onClick={() => saveTemplate('draft')} className="text-sm font-medium text-gray-600 hover:text-gray-900 px-4 py-2">儲存模板草稿</button>
+              <button onClick={() => saveTemplate('verified')} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-md text-sm font-medium transition-colors shadow-sm">驗證並加入模板庫</button>
+            </>
+          ) : (
+            <>
+              <button className="text-sm font-medium text-gray-600 hover:text-gray-900 px-4 py-2">儲存草稿</button>
+              <button className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-md text-sm font-medium transition-colors shadow-sm">發布至 LINE</button>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 flex overflow-hidden">
+        <div className="w-1/2 min-w-[400px] border-r border-gray-200 bg-white flex flex-col overflow-y-auto">
+          <div className="flex border-b border-gray-200 sticky top-0 bg-white z-10">
+            <button 
+              onClick={() => setActiveTab('image')}
+              className={`flex-1 py-4 text-sm font-bold flex items-center justify-center gap-2 ${activeTab === 'image' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/30' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
+            >
+              <ImageIcon size={16} />
+              1. 圖片與版型
+            </button>
+            <button 
+              onClick={() => setActiveTab('action')}
+              disabled={areas.length === 0}
+              className={`flex-1 py-4 text-sm font-bold flex items-center justify-center gap-2 ${areas.length === 0 ? 'opacity-50 cursor-not-allowed' : ''} ${activeTab === 'action' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/30' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
+            >
+              <Settings size={16} />
+              2. 動作設定
+            </button>
+          </div>
+
+          <div className="p-6">
+            {activeTab === 'image' && (
+              <div className="space-y-6">
+                {isTemplateMode && (
+                  <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
+                    <label className="block text-sm font-bold text-gray-900 mb-2">模板名稱</label>
+                    <input value={templateName} onChange={(e) => setTemplateName(e.target.value)} className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="例如：餐飲 12 格功能版" />
+                    <p className="text-xs text-gray-500 mt-2">這裡建立的是「母版」；客戶日後選用時只替換內容，不重新計算座標。</p>
+                  </div>
+                )}
+                <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-6 rounded-xl border border-indigo-100">
+                  <div className="flex items-start gap-4">
+                    <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 shrink-0 mt-1">
+                      <Sparkles size={20} />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-gray-900">AI 智能建立模板座標 (Gemini)</h3>
+                      <p className="text-xs text-gray-600 mt-1 mb-4 leading-relaxed">
+                        上傳您設計好的選單底圖，只在建立新模板時呼叫 AI 分析圖片，確認後座標會寫入模板庫，之後相同版型直接重複使用。
+                      </p>
+                      
+                      <input 
+                        type="file" 
+                        accept="image/jpeg, image/png, image/webp" 
+                        className="hidden" 
+                        ref={fileInputRef}
+                        onChange={handleFileChange}
+                      />
+
+                      {!bgImage ? (
+                        <button 
+                          onClick={handleUploadAndDetect}
+                          disabled={isUploading}
+                          className="w-full bg-white border-2 border-dashed border-indigo-300 rounded-lg p-8 flex flex-col items-center justify-center text-indigo-600 hover:bg-indigo-50/50 hover:border-indigo-400 transition-colors cursor-pointer disabled:opacity-70 disabled:cursor-wait"
+                        >
+                          {isUploading ? (
+                            <>
+                              <Loader2 size={24} className="animate-spin mb-2" />
+                              <span className="text-sm font-medium">圖片上傳中...</span>
+                            </>
+                          ) : (
+                            <>
+                              <UploadCloud size={28} className="mb-2" />
+                              <span className="text-sm font-bold">點擊上傳圖文選單圖片</span>
+                              <span className="text-xs text-indigo-400 font-normal mt-1">建議尺寸 2500x1686 JPG/PNG</span>
+                            </>
+                          )}
+                        </button>
+                      ) : (
+                        <div className="bg-white p-4 rounded-lg border border-indigo-200">
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-sm font-medium text-gray-700 flex items-center gap-2">
+                              <CheckCircle2 size={16} className="text-green-500" />
+                              圖片已就緒
+                            </span>
+                            <button className="text-xs text-red-500 hover:text-red-700 font-medium" onClick={() => { setBgImage(null); setAreas([]); setSelectedFile(null); setAssetId(null); }}>移除圖片</button>
+                          </div>
+                          
+                          {isDetecting ? (
+                            <div className="flex flex-col items-center py-4 text-indigo-600">
+                              <Loader2 size={24} className="animate-spin mb-2" />
+                              <span className="text-sm font-bold">AI 視覺分析中... 正在尋找按鈕區塊</span>
+                            </div>
+                          ) : (
+                            <div className="bg-green-50 text-green-800 text-sm p-3 rounded-md border border-green-200 flex flex-col gap-2">
+                              <div className="font-bold">✅ AI 偵測完成！</div>
+                              <p className="text-xs opacity-90">成功辨識出 {areas.length} 個可點擊區塊，已自動切換至「動作設定」頁籤。</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'action' && areas.length > 0 && (
+              <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
+                    <MousePointerClick size={16} className="text-blue-600"/>
+                    選擇要編輯的區塊
+                  </h3>
+                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
+                    {areas.map(area => (
+                      <button
+                        key={area.id}
+                        onClick={() => setActiveArea(area.id)}
+                        className={`py-2 px-2 text-xs font-medium rounded-md border transition-all truncate ${
+                          activeArea === area.id 
+                            ? 'bg-blue-50 border-blue-500 text-blue-700 ring-1 ring-blue-500 shadow-sm' 
+                            : 'border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300'
+                        }`}
+                      >
+                        {area.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {(() => {
+                  const currentArea = areas.find(a => a.id === activeArea);
+                  const action = currentArea?.action || { type: 'uri', uri: '' };
+                  if (!currentArea) return null;
+
+                  return (
+                    <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-5 space-y-4">
+                      <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                        <div>
+                          <h4 className="font-bold text-gray-900">設定【{currentArea.label}】的行為</h4>
+                          <p className="text-xs text-gray-500 mt-1">這是模板的預設行為；日後使用此模板的專案會直接繼承。</p>
+                        </div>
+                        <span className="text-[11px] px-2 py-1 rounded-full bg-indigo-50 text-indigo-700 font-medium">模板預設</span>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">動作類型</label>
+                        <select
+                          value={action.type || 'uri'}
+                          onChange={(e) => setAreaActionType(currentArea.id, e.target.value)}
+                          className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                        >
+                          {ACTION_TYPES.map(item => (
+                            <option key={item.value} value={item.value}>{item.label}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {action.type === 'uri' && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">網址 (URI)</label>
+                          <div className="relative">
+                            <Link size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <input
+                              type="text"
+                              value={action.uri || ''}
+                              onChange={(e) => updateAreaAction(currentArea.id, { uri: e.target.value })}
+                              placeholder="https:// 或 tel: / mailto:"
+                              className="w-full border border-gray-300 rounded-md py-2 pl-9 pr-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {action.type === 'message' && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">傳送文字</label>
+                          <textarea
+                            value={action.text || ''}
+                            onChange={(e) => updateAreaAction(currentArea.id, { text: e.target.value })}
+                            placeholder="例如：我要預約"
+                            rows={3}
+                            className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
+                          />
+                        </div>
+                      )}
+
+                      {action.type === 'postback' && (
+                        <>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Postback Data</label>
+                            <input
+                              type="text"
+                              value={action.data || ''}
+                              onChange={(e) => updateAreaAction(currentArea.id, { data: e.target.value })}
+                              placeholder="例如：action=booking"
+                              className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">顯示文字（選填）</label>
+                            <input
+                              type="text"
+                              value={action.displayText || ''}
+                              onChange={(e) => updateAreaAction(currentArea.id, { displayText: e.target.value })}
+                              placeholder="例如：我要預約"
+                              className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      {action.type === 'richmenuswitch' && (
+                        <>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">切換目標頁面</label>
+                            <select
+                              value={action.targetPageId || 'page_home'}
+                              onChange={(e) => updateAreaAction(currentArea.id, { targetPageId: e.target.value })}
+                              className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                            >
+                              {PAGES.map(page => (
+                                <option key={page.id} value={page.id}>{page.label}</option>
+                              ))}
+                            </select>
+                            <p className="text-xs text-gray-500 mt-1">Alias 將由發布引擎自動建立，這裡只選頁面。</p>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Postback Data（選填）</label>
+                            <input
+                              type="text"
+                              value={action.data || ''}
+                              onChange={(e) => updateAreaAction(currentArea.id, { data: e.target.value })}
+                              placeholder="例如：switch=member"
+                              className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      {action.type === 'none' && (
+                        <div className="rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">
+                          此區塊將保留在模板中，但發布時不建立可點擊 Action。
+                        </div>
+                      )}
+
+                      <div className="rounded-md bg-slate-50 border border-slate-200 p-3">
+                        <div className="text-xs font-bold text-slate-700 mb-1">目前設定</div>
+                        <pre className="text-[11px] text-slate-600 whitespace-pre-wrap break-all">{JSON.stringify(action, null, 2)}</pre>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="w-1/2 bg-gray-100 flex items-center justify-center p-8 relative overflow-y-auto">
+          <div className="w-[350px] h-[700px] bg-white rounded-[40px] shadow-2xl border-[8px] border-gray-800 relative overflow-hidden flex flex-col">
+            
+            <div className="h-16 bg-[#06C755] flex items-center px-4 text-white font-bold shrink-0">
+              <ArrowLeft size={20} className="mr-3" />
+              <div className="flex flex-col">
+                <span className="text-sm">Coffee Shop 總店</span>
+                <span className="text-[10px] opacity-80">官方帳號</span>
+              </div>
+            </div>
+
+            <div className="flex-1 bg-[#849EB2] p-4 flex flex-col justify-end">
+              <div className="bg-white text-gray-800 text-sm p-3 rounded-2xl rounded-tl-none self-start max-w-[80%] mb-4 shadow-sm relative">
+                歡迎來到 Coffee Shop！點擊下方選單查看最新優惠。
+              </div>
+            </div>
+
+            <div className="bg-white border-t border-gray-300 relative group">
+              <div className="w-full aspect-[2500/1686] bg-gray-200 relative overflow-hidden flex items-center justify-center">
+                
+                {bgImage ? (
+                  <img src={bgImage} alt="Rich Menu Background" className={`w-full h-full object-contain transition-opacity duration-1000 ${isDetecting ? 'opacity-50 blur-sm' : 'opacity-100'}`} />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-gray-400 flex-col gap-2">
+                    <ImageIcon size={32} />
+                    <span className="text-xs">尚無圖片</span>
+                  </div>
+                )}
+
+                {areas.length > 0 && !isDetecting && (
+                  <div className="absolute inset-0 z-10 pointer-events-none">
+                    {areas.map(area => (
+                      <div 
+                        key={area.id}
+                        onClick={() => setActiveArea(area.id)}
+                        style={area.style}
+                        className={`absolute border-[1px] border-red-500 pointer-events-auto flex flex-col items-center justify-center cursor-pointer transition-all ${
+                          activeArea === area.id 
+                            ? 'bg-red-500/40 ring-2 ring-inset ring-red-500 z-10' 
+                            : 'bg-red-500/20 hover:bg-red-500/30'
+                        }`}
+                      >
+                        <span className="bg-red-600 text-white text-[10px] font-bold px-1 rounded shadow">
+                          {area.label}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              
+              <div className="h-10 border-t border-gray-200 flex items-center justify-center text-gray-700 text-sm font-medium bg-gray-50">
+                選單
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default function App() {
+  const [currentView, setCurrentView] = useState('dashboard');
+  const [currentTemplateId, setCurrentTemplateId] = useState(null);
+  const [currentProjectId, setCurrentProjectId] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [session, setSession] = useState(null);
+
+  const loadSession = async () => {
+    const token = getAuthToken();
+
+    if (!token) {
+      setSession(null);
+      setAuthReady(true);
+      return;
+    }
+
+    try {
+      const res = await authFetch('/api/auth/me');
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || '登入狀態失效');
+      }
+
+      setSession(data);
+    } catch (e) {
+      console.error(e);
+      localStorage.removeItem(AUTH_TOKEN_KEY);
+      setSession(null);
+    } finally {
+      setAuthReady(true);
+    }
+  };
+
+  useEffect(() => {
+    loadSession();
+  }, []);
+
+  const logout = async () => {
+    try {
+      await authFetch('/api/auth/logout', { method: 'POST' });
+    } catch {}
+
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    setSession(null);
+    setCurrentView('dashboard');
+  };
+
+  const createTemplate = () => {
+    setCurrentTemplateId(null);
+    setCurrentView('template-builder');
+  };
+
+  const editTemplate = (templateId) => {
+    setCurrentTemplateId(templateId);
+    setCurrentView('template-builder');
+  };
+
+  const startNewProject = () => {
+    setCurrentProjectId(null);
+    setCurrentView('project-builder');
+  };
+
+  const editProject = (projectId) => {
+    setCurrentProjectId(projectId);
+    setCurrentView('project-editor');
+  };
+
+  if (!authReady) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center gap-2 text-gray-600">
+        <Loader2 size={20} className="animate-spin" />
+        驗證登入狀態...
+      </div>
+    );
+  }
+
+  if (!session) {
+    return (
+      <LoginView
+        onLoggedIn={async () => {
+          setAuthReady(false);
+          await loadSession();
+          setCurrentView('dashboard');
+        }}
+      />
+    );
+  }
+
+  const activeWorkspace =
+    session.memberships?.find(x => x.workspace_id === session.activeWorkspaceId);
+
+  return (
+    <div className="flex h-screen bg-gray-50 font-sans">
+      <aside className="hidden md:flex flex-col w-64 bg-white border-r border-gray-200">
+        <div className="h-16 flex items-center px-6 border-b border-gray-200 cursor-pointer" onClick={() => setCurrentView('dashboard')}>
+          <div className="w-8 h-8 bg-black rounded-md flex items-center justify-center mr-3">
+            <span className="text-white font-bold text-sm">SM</span>
+          </div>
+          <span className="font-bold text-gray-900">Smart Menu Studio</span>
+        </div>
+
+        <div className="px-4 py-3 border-b border-gray-100">
+          <div className="text-[11px] uppercase tracking-wide text-gray-400">Workspace</div>
+          <div className="text-sm font-semibold text-gray-800 mt-1 truncate">
+            {activeWorkspace?.workspace_name || session.activeWorkspaceId}
+          </div>
+          <div className="text-xs text-gray-500 mt-0.5">{session.activeRole}</div>
+        </div>
+
+        <nav className="flex-1 px-4 space-y-1 mt-2">
+          {NAVIGATION.map((item) => {
+            const Icon = item.icon;
+            const isActive =
+              currentView === item.id ||
+              (currentView === 'template-builder' && item.id === 'templates') ||
+              ((currentView === 'project-builder' || currentView === 'project-editor') && item.id === 'projects');
+
+            return (
+              <button
+                key={item.id}
+                onClick={() => setCurrentView(item.id)}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
+                  isActive ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                <Icon size={18} />
+                {item.label}
+              </button>
+            );
+          })}
+
+          <button
+            onClick={() => setCurrentView('account')}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
+              currentView === 'account' ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            <Users size={18} />
+            我的帳號
+          </button>
+        </nav>
+
+        <div className="p-4 border-t border-gray-200">
+          <button
+            onClick={logout}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium text-red-600 hover:bg-red-50"
+          >
+            <LogOut size={18} />
+            登出
+          </button>
+        </div>
+      </aside>
+
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 shrink-0">
+          <div className="text-sm text-gray-500">
+            Workspace / <span className="font-medium text-gray-900">
+              {currentView === 'template-builder'
+                ? '模板中心 / 建立模板'
+                : currentView === 'project-builder'
+                  ? '圖文選單專案 / 新增專案'
+                  : currentView === 'project-editor'
+                    ? '圖文選單專案 / 內容設定'
+                    : currentView === 'account'
+                      ? '我的帳號'
+                      : (NAVIGATION.find(n => n.id === currentView)?.label || '工作區')}
+            </span>
+          </div>
+
+          <div className="text-right">
+            <div className="text-sm font-medium text-gray-800">
+              {session.user?.display_name || '使用者'}
+            </div>
+            <div className="text-xs text-gray-500">{session.activeRole}</div>
+          </div>
+        </header>
+
+        <div className="flex-1 overflow-auto p-8">
+          <div className={currentView === 'project-editor' ? 'h-full' : 'max-w-6xl mx-auto'}>
+            {currentView === 'dashboard' && <DashboardView onNavigate={setCurrentView} />}
+            {currentView === 'projects' && (
+              <ProjectsView onStartNew={startNewProject} onEditProject={editProject} />
+            )}
+            {currentView === 'project-builder' && (
+              <ProjectBuilderView
+                onBack={() => setCurrentView('projects')}
+                onCreated={(projectId) => {
+                  setCurrentProjectId(projectId);
+                  setCurrentView('project-editor');
+                }}
+              />
+            )}
+            {currentView === 'project-editor' && (
+              <ProjectEditorView
+                projectId={currentProjectId}
+                onBack={() => setCurrentView('projects')}
+              />
+            )}
+            {currentView === 'members' && <MembersView />}
+            {currentView === 'linehub' && <LineHubView />}
+            {currentView === 'account' && (
+              <AccountView session={session} onSessionChanged={loadSession} />
+            )}
+            {currentView === 'templates' && (
+              <TemplatesView onNavigate={createTemplate} onEditTemplate={editTemplate} />
+            )}
+            {currentView === 'template-builder' && (
+              <EditorView
+                mode="template"
+                templateId={currentTemplateId}
+                onBack={() => {
+                  setCurrentTemplateId(null);
+                  setCurrentView('templates');
+                }}
+              />
+            )}
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
