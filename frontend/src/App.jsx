@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import SmartGuide from './components/SmartGuide';
 import { 
   LayoutDashboard, 
   FolderKanban, 
@@ -527,13 +528,14 @@ const PROJECT_ACTION_BADGES = {
   richmenuswitch: '↔ 切換頁',
 };
 
-const ProjectEditorView = ({ projectId, onBack, onStartNew }) => {
+const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate }) => {
   const [project, setProject] = useState(null);
   const [switchTargets, setSwitchTargets] = useState([]);
   const [activeArea, setActiveArea] = useState(null);
   const [loading, setLoading] = useState(true);
   const [changingImage, setChangingImage] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [guideRefreshKey, setGuideRefreshKey] = useState(0);
   const projectImageInputRef = useRef(null);
 
   useEffect(() => {
@@ -578,6 +580,7 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew }) => {
         assetId: data.asset.id,
         imageUrl: data.asset.imageUrl,
       }));
+      setGuideRefreshKey(key => key + 1);
     } catch (e) {
       console.error(e);
       alert('更換圖片失敗：' + e.message);
@@ -671,6 +674,7 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew }) => {
         throw new Error(data.error || '專案儲存失敗');
       }
 
+      setGuideRefreshKey(key => key + 1);
       alert('專案內容已儲存。');
     } catch (e) {
       console.error(e);
@@ -678,6 +682,29 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew }) => {
     } finally {
       setSaving(false);
     }
+  };
+
+  const focusGuideTarget = (target) => {
+    const areaTarget = /^project-area-(.+)-(action-type|uri|message|postback-data|switch-target)$/.exec(target);
+    if (areaTarget) {
+      const targetArea = project?.areas?.find(area => String(area.id) === areaTarget[1]);
+      if (targetArea) setActiveArea(targetArea.id);
+    }
+
+    const focus = () => {
+      const element = document.querySelector(`[data-guide-target="${target}"]`);
+      if (!element) return;
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      element.classList.add('ring-4', 'ring-amber-300', 'ring-offset-2');
+      window.setTimeout(() => element.classList.remove('ring-4', 'ring-amber-300', 'ring-offset-2'), 1800);
+    };
+
+    requestAnimationFrame(() => requestAnimationFrame(focus));
+  };
+
+  const handleGuideAction = (nextAction) => {
+    if (nextAction?.type === 'focus') focusGuideTarget(nextAction.target);
+    if (nextAction?.type === 'navigate') onGuideNavigate?.(nextAction.target);
   };
 
   if (loading) {
@@ -726,6 +753,7 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew }) => {
             onChange={changeProjectImage}
           />
           <button
+            data-guide-target="project-image"
             onClick={() => projectImageInputRef.current?.click()}
             disabled={changingImage}
             className="border border-gray-300 hover:bg-gray-50 disabled:opacity-50 px-3 py-2 rounded-md text-sm font-medium text-gray-700 flex items-center gap-2"
@@ -762,7 +790,7 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew }) => {
             <p className="text-sm text-gray-500">模板提供圖片、座標、區域名稱與預設 Action；此專案可獨立調整每個區域的最終動作，不會回寫模板。</p>
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
+          <div data-guide-target="project-areas" className="grid grid-cols-2 lg:grid-cols-3 gap-2">
             {(project.areas || []).map(area => (
               <button
                 key={area.id}
@@ -785,7 +813,7 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew }) => {
                 <div className="text-xs text-gray-500 mt-1">{fieldDescription}</div>
               </div>
 
-              <div>
+              <div data-guide-target={`project-area-${currentArea.id}-action-type`}>
                 <label className="block text-sm font-medium text-gray-700 mb-1">動作類型</label>
                 <select
                   value={action.type || 'uri'}
@@ -799,7 +827,7 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew }) => {
               </div>
 
               {action.type === 'uri' && (
-                <div>
+                <div data-guide-target={`project-area-${currentArea.id}-uri`}>
                   <label className="block text-sm font-medium text-gray-700 mb-1">網址</label>
                   <input
                     value={action.uri || ''}
@@ -812,7 +840,7 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew }) => {
               )}
 
               {action.type === 'message' && (
-                <div>
+                <div data-guide-target={`project-area-${currentArea.id}-message`}>
                   <label className="block text-sm font-medium text-gray-700 mb-1">傳送文字</label>
                   <textarea
                     value={action.text || ''}
@@ -827,7 +855,7 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew }) => {
 
               {action.type === 'postback' && (
                 <div className="space-y-3">
-                  <div>
+                  <div data-guide-target={`project-area-${currentArea.id}-postback-data`}>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Data</label>
                     <input
                       value={action.data || ''}
@@ -850,7 +878,7 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew }) => {
 
               {action.type === 'richmenuswitch' && (
                 <div className="space-y-3">
-                  <div>
+                  <div data-guide-target={`project-area-${currentArea.id}-switch-target`}>
                     <label className="block text-sm font-medium text-gray-700 mb-1">目標頁面</label>
                     <select
                       value={action.targetPageId || ''}
@@ -912,6 +940,13 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew }) => {
           </div>
         </div>
       </div>
+      <SmartGuide
+        projectId={projectId}
+        selectedAreaId={activeArea}
+        refreshKey={guideRefreshKey}
+        request={authFetch}
+        onAction={handleGuideAction}
+      />
     </div>
   );
 };
@@ -1358,7 +1393,7 @@ const LineHubView = ({ member, onBack }) => {
         </p>
       </div>
 
-      <section className="bg-white border border-gray-200 rounded-xl shadow-sm p-6 space-y-5">
+      <section data-guide-target="line-account-settings" className="bg-white border border-gray-200 rounded-xl shadow-sm p-6 space-y-5">
         <div>
           <h3 className="font-bold text-gray-900">LINE OA 串接</h3>
           <p className="text-xs text-gray-500 mt-1">Secret / Token 留空時不會覆蓋既有值。</p>
@@ -4847,6 +4882,9 @@ export default function App() {
                 projectId={currentProjectId}
                 onStartNew={startNewProject}
                 onBack={() => setCurrentView('projects')}
+                onGuideNavigate={(target) => {
+                  if (target === 'line-hub') setCurrentView('member-linehub');
+                }}
               />
             )}
             {currentView === 'tenant-integrity' && isPlatformAdminMode && (

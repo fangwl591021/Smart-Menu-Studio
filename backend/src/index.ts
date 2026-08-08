@@ -13,6 +13,8 @@ import {
   setDefaultRichMenu,
   upsertRichMenuAlias,
 } from './line-rich-menu.mjs';
+import { buildGuideContext } from './guide/context';
+import { evaluateGuide } from './guide/rules';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
@@ -2291,6 +2293,35 @@ app.get('/api/projects/:projectId', async (c) => {
 });
 
 
+
+app.get('/api/projects/:projectId/guide', async (c) => {
+  try {
+    const projectId = c.req.param('projectId');
+    const workspaceId = workspaceIdOf(c);
+    const context = await buildGuideContext({
+      db: c.env.smart_menu_db,
+      workspaceId,
+      userId: text(c.get('userId')),
+      route: text(c.req.query('route')) || `/projects/${projectId}`,
+      entityType: 'project',
+      entityId: projectId,
+      selectedAreaId: text(c.req.query('selectedAreaId')),
+    });
+
+    if (!context) {
+      return c.json({ success: false, error: '找不到專案。' }, 404);
+    }
+
+    return c.json({
+      success: true,
+      context,
+      guide: evaluateGuide(context),
+    });
+  } catch (e: any) {
+    console.error('project-guide:', e);
+    return c.json({ success: false, error: '目前無法取得引導狀態。' }, 500);
+  }
+});
 
 app.post('/api/projects/:projectId/publish', async (c) => {
   const projectId = c.req.param('projectId');
