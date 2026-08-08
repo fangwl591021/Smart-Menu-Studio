@@ -7,6 +7,12 @@ import {
   projectAreaActionFromRow,
   richMenuAliasIdForProject,
 } from './project-actions.mjs';
+import {
+  deleteRichMenuAlias,
+  getRichMenuAlias,
+  setDefaultRichMenu,
+  upsertRichMenuAlias,
+} from './line-rich-menu.mjs';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
@@ -2015,6 +2021,8 @@ app.get('/api/projects', async (c) => {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       imageUrl: row.asset_id ? `/api/assets/${row.asset_id}` : null,
+      isDefault: row.status === 'default',
+      disabled: row.status === 'disabled',
     }));
 
     return c.json({ success: true, projects });
@@ -2148,6 +2156,10 @@ app.patch('/api/projects/:projectId', async (c) => {
       return c.json({ success: false, error: '切換頁 Action 必須選擇目標頁面。' }, 400);
     }
 
+    if (switchTargetIds.includes(projectId)) {
+      return c.json({ success: false, error: '切換頁 Action 不可指向目前專案。' }, 400);
+    }
+
     if (switchTargetIds.length) {
       const placeholders = switchTargetIds.map(() => '?').join(', ');
       const targetResult = await c.env.smart_menu_db.prepare(`
@@ -2155,6 +2167,7 @@ app.patch('/api/projects/:projectId', async (c) => {
         FROM projects
         WHERE workspace_id = ?
           AND deleted_at IS NULL
+          AND status <> 'disabled'
           AND id IN (${placeholders})
       `).bind(workspaceId, ...switchTargetIds).all();
 
@@ -2225,9 +2238,12 @@ app.get('/api/projects/:projectId', async (c) => {
     const switchTargetResult = await c.env.smart_menu_db.prepare(`
       SELECT id, name, status
       FROM projects
-      WHERE workspace_id = ? AND deleted_at IS NULL
+      WHERE workspace_id = ?
+        AND id <> ?
+        AND deleted_at IS NULL
+        AND status <> 'disabled'
       ORDER BY updated_at DESC, created_at DESC
-    `).bind(workspaceId).all();
+    `).bind(workspaceId, projectId).all();
 
     const areas = (areaResult.results || []).map((row: any) => {
       const action: any = projectAreaActionFromRow(row);
@@ -2280,6 +2296,8 @@ app.post('/api/projects/:projectId/publish', async (c) => {
   const projectId = c.req.param('projectId');
 
   try {
+    requireRole(c, 'editor');
+
     if (!c.env.LINE_CHANNEL_ACCESS_TOKEN) {
       return c.json({
         success: false,
@@ -2287,10 +2305,15 @@ app.post('/api/projects/:projectId/publish', async (c) => {
       }, 500);
     }
 
-    const project: any = await getProjectForPublish(c.env, workspaceIdOf(c), projectId);
+    const workspaceId = workspaceIdOf(c);
+    const project: any = await getProjectForPublish(c.env, workspaceId, projectId);
 
     if (!project) {
       return c.json({ success: false, error: '找不到專案。' }, 404);
+    }
+
+    if (project.status === 'disabled') {
+      return c.json({ success: false, error: '此專案已停用，請先啟用後再發布。' }, 409);
     }
 
     if (!project.asset_id) {
@@ -2301,24 +2324,42 @@ app.post('/api/projects/:projectId/publish', async (c) => {
       return c.json({ success: false, error: '專案沒有可發布的熱區。' }, 400);
     }
 
-    const lineAreas = project.areas
-      .filter((area: any) => text(area.action?.type) !== 'none')
-      .map((area: any) => ({
-        bounds: {
-          x: Math.max(0, Math.round(num(area.x))),
-          y: Math.max(0, Math.round(num(area.y))),
-          width: Math.max(1, Math.round(num(area.width, 1))),
-          height: Math.max(1, Math.round(num(area.height, 1))),
-        },
-        action: buildLineAction(area.action),
-      }));
+    const switchTargetIds = [...new Set(
+      project.areas
+        .filter((area: any) => area.action?.type === 'richmenuswitch')
+        .map((area: any) => text(area.action?.targetPageId))
+        .filter(Boolean)
+    )] as string[];
 
-    if (!lineAreas.length) {
-      return c.json({
-        success: false,
-        error: '沒有可發布的 LINE Action。',
-      }, 400);
+    if (switchTargetIds.includes(projectId)) {
+      return c.json({ success: false, error: '切換頁 Action 不可指向目前專案。' }, 400);
     }
+
+    if (switchTargetIds.length) {
+      const placeholders = switchTargetIds.map(() => '?').join(', ');
+      const targetResult = await c.env.smart_menu_db.prepare(`
+        SELECT id
+        FROM projects
+        WHERE workspace_id = ?
+          AND deleted_at IS NULL
+          AND status <> 'disabled'
+          AND id IN (${placeholders})
+      `).bind(workspaceId, ...switchTargetIds).all();
+
+      if ((targetResult.results || []).length !== switchTargetIds.length) {
+        return c.json({ success: false, error: '切換目標不存在、已停用或不屬於目前 Workspace。' }, 400);
+      }
+    }
+
+    const lineAreas = project.areas.map((area: any) => ({
+      bounds: {
+        x: Math.max(0, Math.round(num(area.x))),
+        y: Math.max(0, Math.round(num(area.y))),
+        width: Math.max(1, Math.round(num(area.width, 1))),
+        height: Math.max(1, Math.round(num(area.height, 1))),
+      },
+      action: buildLineAction(area.action),
+    }));
 
     const richMenuObject = {
       size: {
@@ -2331,7 +2372,7 @@ app.post('/api/projects/:projectId/publish', async (c) => {
       areas: lineAreas,
     };
 
-    // 1. Create Rich Menu
+    // 1. Create a new immutable LINE Rich Menu version.
     const createRes = await fetch(
       'https://api.line.me/v2/bot/richmenu',
       {
@@ -2356,15 +2397,9 @@ app.post('/api/projects/:projectId/publish', async (c) => {
       throw new Error('LINE 未回傳 richMenuId');
     }
 
-    // 2. Read image from R2
-    const { asset, object } = await getProjectImageObject(c.env, workspaceIdOf(c), project.asset_id);
-
-    const imageContentType =
-      asset.content_type === 'image/png'
-        ? 'image/png'
-        : 'image/jpeg';
-
-    // 3. Upload image to LINE
+    // 2. Upload the image before creating or updating the alias.
+    const { asset, object } = await getProjectImageObject(c.env, workspaceId, project.asset_id);
+    const imageContentType = asset.content_type === 'image/png' ? 'image/png' : 'image/jpeg';
     const uploadRes = await fetch(
       `https://api-data.line.me/v2/bot/richmenu/${richMenuId}/content`,
       {
@@ -2382,66 +2417,47 @@ app.post('/api/projects/:projectId/publish', async (c) => {
       throw new Error(`上傳 LINE Rich Menu 圖片失敗：${detail}`);
     }
 
-    // 4. Set as default Rich Menu
-    const defaultRes = await fetch(
-      `https://api.line.me/v2/bot/user/all/richmenu/${richMenuId}`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${c.env.LINE_CHANNEL_ACCESS_TOKEN}`,
-        },
-      }
+    // 3. Point the stable Project alias to the newly published Rich Menu.
+    const richMenuAliasId = richMenuAliasIdForProject(projectId);
+    const alias = await upsertRichMenuAlias(
+      fetch,
+      c.env.LINE_CHANNEL_ACCESS_TOKEN,
+      richMenuAliasId,
+      richMenuId,
     );
 
-    if (!defaultRes.ok) {
-      const detail = await defaultRes.text();
-      throw new Error(`設定預設 Rich Menu 失敗：${detail}`);
+    // 4. A republished home Project must remain the default; other Projects never replace it.
+    if (project.status === 'default') {
+      await setDefaultRichMenu(fetch, c.env.LINE_CHANNEL_ACCESS_TOKEN, richMenuId);
     }
 
-    // 5. Write back to D1
+    // 5. Store only lifecycle state. LINE alias remains the source of the current richMenuId mapping.
     await c.env.smart_menu_db.prepare(`
       UPDATE projects
       SET
-        status = 'published',
-        rich_menu_id = ?,
-        published_at = CURRENT_TIMESTAMP,
-        publish_error = NULL,
+        status = CASE WHEN status = 'default' THEN 'default' ELSE 'published' END,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
-    `).bind(
-      richMenuId,
-      projectId,
-      workspaceIdOf(c)
-    ).run();
+    `).bind(projectId, workspaceId).run();
 
     return c.json({
       success: true,
       project: {
         id: projectId,
         name: project.name,
-        status: 'published',
+        status: project.status === 'default' ? 'default' : 'published',
+        isDefault: project.status === 'default',
+        richMenuAliasId,
         richMenuId,
       },
+      alias,
       richMenu: richMenuObject,
     });
-
   } catch (e: any) {
     console.error('publish-project:', e);
-
-    try {
-      await c.env.smart_menu_db.prepare(`
-        UPDATE projects
-        SET
-          publish_error = ?,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
-      `).bind(
-        text(e?.message || '發布失敗').slice(0, 2000),
-        projectId,
-        workspaceIdOf(c)
-      ).run();
-    } catch {}
-
+    if (e?.message === 'FORBIDDEN_ROLE') {
+      return c.json({ success: false, error: '權限不足，需要 editor、admin 或 owner。' }, 403);
+    }
     return c.json({
       success: false,
       error: e?.message || '發布至 LINE 失敗',
@@ -2449,9 +2465,156 @@ app.post('/api/projects/:projectId/publish', async (c) => {
   }
 });
 
+app.post('/api/projects/:projectId/set-default', async (c) => {
+  try {
+    requireRole(c, 'editor');
+    const projectId = c.req.param('projectId');
+    const workspaceId = workspaceIdOf(c);
 
+    if (!c.env.LINE_CHANNEL_ACCESS_TOKEN) {
+      return c.json({ success: false, error: 'LINE_CHANNEL_ACCESS_TOKEN 尚未設定。' }, 500);
+    }
 
+    const project: any = await c.env.smart_menu_db.prepare(`
+      SELECT id, name, status
+      FROM projects
+      WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
+      LIMIT 1
+    `).bind(projectId, workspaceId).first();
 
+    if (!project) return c.json({ success: false, error: '找不到專案。' }, 404);
+    if (project.status === 'disabled') {
+      return c.json({ success: false, error: '停用中的專案不可設為首頁。' }, 409);
+    }
+
+    const richMenuAliasId = richMenuAliasIdForProject(projectId);
+    const alias: any = await getRichMenuAlias(fetch, c.env.LINE_CHANNEL_ACCESS_TOKEN, richMenuAliasId);
+    const richMenuId = text(alias?.richMenuId);
+
+    if (!richMenuId) {
+      return c.json({ success: false, error: '此專案尚未發布或 Alias 不存在，請先發布。' }, 409);
+    }
+
+    await setDefaultRichMenu(fetch, c.env.LINE_CHANNEL_ACCESS_TOKEN, richMenuId);
+    await c.env.smart_menu_db.batch([
+      c.env.smart_menu_db.prepare(`
+        UPDATE projects
+        SET status = 'published', updated_at = CURRENT_TIMESTAMP
+        WHERE workspace_id = ? AND status = 'default' AND id <> ? AND deleted_at IS NULL
+      `).bind(workspaceId, projectId),
+      c.env.smart_menu_db.prepare(`
+        UPDATE projects
+        SET status = 'default', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
+      `).bind(projectId, workspaceId),
+    ]);
+
+    return c.json({
+      success: true,
+      project: { id: projectId, name: project.name, status: 'default', isDefault: true },
+      richMenuAliasId,
+      richMenuId,
+    });
+  } catch (e: any) {
+    console.error('set-default-project:', e);
+    if (e?.message === 'FORBIDDEN_ROLE') {
+      return c.json({ success: false, error: '權限不足，需要 editor、admin 或 owner。' }, 403);
+    }
+    return c.json({ success: false, error: e?.message || '設定首頁失敗' }, 500);
+  }
+});
+
+app.post('/api/projects/:projectId/disable', async (c) => {
+  try {
+    requireRole(c, 'editor');
+    const projectId = c.req.param('projectId');
+    const workspaceId = workspaceIdOf(c);
+
+    if (!c.env.LINE_CHANNEL_ACCESS_TOKEN) {
+      return c.json({ success: false, error: 'LINE_CHANNEL_ACCESS_TOKEN 尚未設定。' }, 500);
+    }
+
+    const project: any = await c.env.smart_menu_db.prepare(`
+      SELECT id, name, status
+      FROM projects
+      WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
+      LIMIT 1
+    `).bind(projectId, workspaceId).first();
+
+    if (!project) return c.json({ success: false, error: '找不到專案。' }, 404);
+    if (project.status === 'disabled') return c.json({ success: true, alreadyDisabled: true });
+    if (project.status === 'default') {
+      return c.json({ success: false, error: '此專案是目前首頁，請先將其他已發布專案設為首頁。' }, 409);
+    }
+
+    const reference: any = await c.env.smart_menu_db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM project_areas pa
+      INNER JOIN projects p
+        ON p.id = pa.project_id AND p.workspace_id = pa.workspace_id
+      WHERE pa.workspace_id = ?
+        AND pa.target_page_id = ?
+        AND pa.action_type = 'richmenuswitch'
+        AND p.id <> ?
+        AND p.deleted_at IS NULL
+        AND p.status <> 'disabled'
+    `).bind(workspaceId, projectId, projectId).first();
+
+    if (num(reference?.count) > 0) {
+      return c.json({
+        success: false,
+        error: `仍有 ${num(reference.count)} 個啟用中熱區切換到此頁，請先修改這些 Action。`,
+      }, 409);
+    }
+
+    const richMenuAliasId = richMenuAliasIdForProject(projectId);
+    const alias = await deleteRichMenuAlias(fetch, c.env.LINE_CHANNEL_ACCESS_TOKEN, richMenuAliasId);
+    await c.env.smart_menu_db.prepare(`
+      UPDATE projects
+      SET status = 'disabled', updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
+    `).bind(projectId, workspaceId).run();
+
+    return c.json({ success: true, project: { id: projectId, status: 'disabled' }, alias });
+  } catch (e: any) {
+    console.error('disable-project:', e);
+    if (e?.message === 'FORBIDDEN_ROLE') {
+      return c.json({ success: false, error: '權限不足，需要 editor、admin 或 owner。' }, 403);
+    }
+    return c.json({ success: false, error: e?.message || '停用專案失敗' }, 500);
+  }
+});
+
+app.post('/api/projects/:projectId/enable', async (c) => {
+  try {
+    requireRole(c, 'editor');
+    const projectId = c.req.param('projectId');
+    const workspaceId = workspaceIdOf(c);
+    const project: any = await c.env.smart_menu_db.prepare(`
+      SELECT id, status
+      FROM projects
+      WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
+      LIMIT 1
+    `).bind(projectId, workspaceId).first();
+
+    if (!project) return c.json({ success: false, error: '找不到專案。' }, 404);
+    if (project.status !== 'disabled') return c.json({ success: true, alreadyEnabled: true });
+
+    await c.env.smart_menu_db.prepare(`
+      UPDATE projects
+      SET status = 'draft', updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
+    `).bind(projectId, workspaceId).run();
+
+    return c.json({ success: true, project: { id: projectId, status: 'draft' } });
+  } catch (e: any) {
+    console.error('enable-project:', e);
+    if (e?.message === 'FORBIDDEN_ROLE') {
+      return c.json({ success: false, error: '權限不足，需要 editor、admin 或 owner。' }, 403);
+    }
+    return c.json({ success: false, error: e?.message || '啟用專案失敗' }, 500);
+  }
+});
 
 async function runLineSimulation(env: Bindings, workspaceId: string, messageText: string) {
   const targetsResult = await env.smart_menu_db.prepare(`

@@ -186,6 +186,7 @@ const DashboardView = ({ onNavigate }) => (
 const ProjectsView = ({ onStartNew, onEditProject }) => {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [busyProjectId, setBusyProjectId] = useState('');
   const [query, setQuery] = useState('');
 
   const loadProjects = async () => {
@@ -207,16 +208,41 @@ const ProjectsView = ({ onStartNew, onEditProject }) => {
     loadProjects();
   }, []);
 
+  const runProjectAction = async (project, action, successMessage, confirmMessage = '') => {
+    if (confirmMessage && !window.confirm(confirmMessage)) return;
+    setBusyProjectId(project.id);
+    try {
+      const res = await authFetch(`/api/projects/${project.id}/${action}`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || '操作失敗');
+      alert(successMessage);
+      await loadProjects();
+    } catch (e) {
+      console.error(e);
+      alert(`操作失敗：${e.message}`);
+    } finally {
+      setBusyProjectId('');
+    }
+  };
+
   const rows = projects.filter(p =>
     String(p.name || '').toLowerCase().includes(query.trim().toLowerCase())
   );
+  const enabledProjectCount = projects.filter(project => project.status !== 'disabled').length;
+
+  const statusView = (project) => {
+    if (project.status === 'default') return { label: '預設首頁', className: 'bg-blue-100 text-blue-700' };
+    if (project.status === 'published') return { label: '已發布', className: 'bg-green-100 text-green-700' };
+    if (project.status === 'disabled') return { label: '已停用', className: 'bg-red-100 text-red-700' };
+    return { label: '草稿', className: 'bg-gray-100 text-gray-700' };
+  };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold tracking-tight text-gray-900">圖文選單專案</h2>
-          <p className="text-gray-500 text-sm mt-1">從已驗證模板建立客戶專案，不再重新執行 AI 座標辨識。</p>
+          <p className="text-gray-500 text-sm mt-1">每個 Project 代表一個選單頁；發布各頁後，再指定其中一頁為預設首頁。</p>
         </div>
         <button
           onClick={onStartNew}
@@ -226,6 +252,17 @@ const ProjectsView = ({ onStartNew, onEditProject }) => {
           新增專案
         </button>
       </div>
+
+      <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+        發布順序：① 建立並設定各頁 → ② 逐頁發布以建立 Alias → ③ 選擇一個已發布頁面設為預設首頁。
+      </div>
+
+      {enabledProjectCount < 2 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-center justify-between gap-4">
+          <span>切換頁至少需要 2 個啟用中的 Project。請先建立第二個專案，再設定彼此的「切換頁」Action。</span>
+          <button onClick={onStartNew} className="shrink-0 font-bold text-amber-900 underline">新增第二頁</button>
+        </div>
+      )}
 
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
         <div className="border-b border-gray-200 px-6 py-4 flex items-center gap-4">
@@ -255,46 +292,77 @@ const ProjectsView = ({ onStartNew, onEditProject }) => {
           </div>
         ) : (
           <div className="divide-y divide-gray-200">
-            {rows.map((project) => (
-              <button
-                key={project.id}
-                onClick={() => onEditProject(project.id)}
-                className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors group text-left"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-20 h-14 rounded-lg bg-gray-100 overflow-hidden border border-gray-200 flex items-center justify-center text-gray-400">
-                    {project.imageUrl ? (
-                      <AuthImage src={project.imageUrl} alt={project.name} className="w-full h-full object-cover" />
-                    ) : (
-                      <Smartphone size={20} />
+            {rows.map((project) => {
+              const status = statusView(project);
+              const busy = busyProjectId === project.id;
+              const published = project.status === 'published' || project.status === 'default';
+              const disabled = project.status === 'disabled';
+
+              return (
+                <div key={project.id} className="px-6 py-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 hover:bg-gray-50 transition-colors">
+                  <button onClick={() => onEditProject(project.id)} className="flex items-center gap-4 text-left min-w-0">
+                    <div className="w-20 h-14 shrink-0 rounded-lg bg-gray-100 overflow-hidden border border-gray-200 flex items-center justify-center text-gray-400">
+                      {project.imageUrl ? (
+                        <AuthImage src={project.imageUrl} alt={project.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <Smartphone size={20} />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="text-sm font-semibold text-gray-900 truncate">{project.name}</h4>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {project.areaCount || 0} 個熱區 · {project.pageCount || 1} 頁
+                      </p>
+                    </div>
+                  </button>
+
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${status.className}`}>{status.label}</span>
+                    <button onClick={() => onEditProject(project.id)} className="border border-gray-300 px-3 py-1.5 rounded-md text-xs font-medium text-gray-700 hover:bg-white">編輯</button>
+                    {!disabled && (
+                      <button
+                        disabled={busy}
+                        onClick={() => runProjectAction(project, 'publish', project.status === 'default' ? '首頁已重新發布並維持預設。' : '專案已發布並完成 Alias 綁定。')}
+                        className="border border-green-300 px-3 py-1.5 rounded-md text-xs font-medium text-green-700 hover:bg-green-50 disabled:opacity-50"
+                      >
+                        {busy ? '處理中...' : published ? '重新發布' : '發布'}
+                      </button>
                     )}
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-semibold text-gray-900">{project.name}</h4>
-                    <p className="text-xs text-gray-500 mt-1">
-                      {project.areaCount || 0} 個熱區 · {project.pageCount || 1} 頁
-                    </p>
+                    {published && !project.isDefault && (
+                      <button
+                        disabled={busy}
+                        onClick={() => runProjectAction(project, 'set-default', '已設為預設首頁。')}
+                        className="border border-blue-300 px-3 py-1.5 rounded-md text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+                      >
+                        設為首頁
+                      </button>
+                    )}
+                    <button
+                      disabled={busy}
+                      onClick={() => runProjectAction(
+                        project,
+                        disabled ? 'enable' : 'disable',
+                        disabled ? '專案已啟用，請重新發布以建立 Alias。' : '專案已停用並解除 Alias。',
+                        disabled ? '' : `確定停用「${project.name}」？系統會解除這個頁面的 LINE Alias。`,
+                      )}
+                      className={`border px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-50 ${
+                        disabled
+                          ? 'border-gray-300 text-gray-700 hover:bg-white'
+                          : 'border-red-300 text-red-700 hover:bg-red-50'
+                      }`}
+                    >
+                      {disabled ? '啟用' : '停用'}
+                    </button>
                   </div>
                 </div>
-                <div className="flex items-center gap-4">
-                  <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-                    project.status === 'published'
-                      ? 'bg-green-100 text-green-700'
-                      : 'bg-gray-100 text-gray-700'
-                  }`}>
-                    {project.status === 'published' ? '已發布' : '草稿'}
-                  </span>
-                  <span className="text-blue-600 group-hover:text-blue-800 text-sm font-medium">編輯</span>
-                </div>
-              </button>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
     </div>
   );
 };
-
 const ProjectBuilderView = ({ onBack, onCreated }) => {
   const [templates, setTemplates] = useState([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
@@ -459,7 +527,7 @@ const PROJECT_ACTION_BADGES = {
   richmenuswitch: '↔ 切換頁',
 };
 
-const ProjectEditorView = ({ projectId, onBack }) => {
+const ProjectEditorView = ({ projectId, onBack, onStartNew }) => {
   const [project, setProject] = useState(null);
   const [switchTargets, setSwitchTargets] = useState([]);
   const [activeArea, setActiveArea] = useState(null);
@@ -560,7 +628,7 @@ const ProjectEditorView = ({ projectId, onBack }) => {
       return;
     }
     if (type === 'richmenuswitch') {
-      const target = switchTargets.find(item => item.id !== projectId) || switchTargets[0];
+      const target = switchTargets[0];
       replaceProjectAreaAction(areaId, {
         type,
         targetPageId: target?.id || '',
@@ -622,8 +690,8 @@ const ProjectEditorView = ({ projectId, onBack }) => {
 
   const currentArea = project.areas?.find(a => a.id === activeArea);
   const action = currentArea?.action || { type: 'uri', uri: '' };
-  const otherSwitchTargets = switchTargets.filter(item => item.id !== project.id);
-  const availableSwitchTargets = otherSwitchTargets.length ? otherSwitchTargets : switchTargets;
+
+  const availableSwitchTargets = switchTargets;
 
   const fieldDescription = (() => {
     if (action.type === 'uri') return '開啟客戶指定網址';
@@ -673,7 +741,17 @@ const ProjectEditorView = ({ projectId, onBack }) => {
             {saving && <Loader2 size={15} className="animate-spin" />}
             儲存專案
           </button>
-          <span className="text-xs px-2.5 py-1 rounded-full bg-gray-100 text-gray-700">草稿</span>
+          <span className={`text-xs px-2.5 py-1 rounded-full ${
+            project.status === 'default'
+              ? 'bg-blue-100 text-blue-700'
+              : project.status === 'published'
+                ? 'bg-green-100 text-green-700'
+                : project.status === 'disabled'
+                  ? 'bg-red-100 text-red-700'
+                  : 'bg-gray-100 text-gray-700'
+          }`}>
+            {project.status === 'default' ? '預設首頁' : project.status === 'published' ? '已發布' : project.status === 'disabled' ? '已停用' : '草稿'}
+          </span>
         </div>
       </div>
 
@@ -788,8 +866,9 @@ const ProjectEditorView = ({ projectId, onBack }) => {
                     </select>
                   </div>
                   {availableSwitchTargets.length === 0 ? (
-                    <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
-                      目前 Workspace 尚無可切換的 Project 頁面。
+                    <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800 space-y-2">
+                      <div>切換頁至少需要另一個啟用中的 Project。</div>
+                      <button type="button" onClick={onStartNew} className="font-bold underline">新增第二個專案</button>
                     </div>
                   ) : (
                     <div className="rounded-md bg-green-50 border border-green-100 p-3 text-xs text-green-800">
@@ -4766,6 +4845,7 @@ export default function App() {
             {currentView === 'project-editor' && (
               <ProjectEditorView
                 projectId={currentProjectId}
+                onStartNew={startNewProject}
                 onBack={() => setCurrentView('projects')}
               />
             )}
