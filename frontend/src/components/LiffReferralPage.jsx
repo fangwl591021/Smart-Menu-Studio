@@ -14,7 +14,7 @@ export default function LiffReferralPage() {
     if (!initial.lineAccountId) { if (active) setState({ loading: false, status: 'NOT_CONFIGURED', error: '缺少安全的 LINE 帳號入口資訊。', referral: null, friendship: null }); return; }
     try {
       const response = await api(`/api/member/referral/bootstrap?lineAccountId=${encodeURIComponent(initial.lineAccountId)}`);
-      const bootstrap = await response.json(); if (bootstrap?.referralFlowToken) setReferralFlowToken(bootstrap.referralFlowToken);
+      const bootstrap = await response.json(); if (bootstrap?.referralFlowInvalid) applyReferralFlowTerminalResult('REFERRAL_FLOW_INVALID'); if (bootstrap?.referralFlowToken) setReferralFlowToken(bootstrap.referralFlowToken);
       if (!response.ok || !bootstrap.success || !usableLiffConfig(bootstrap.config)) { if (active) setState({ loading: false, status: bootstrap?.config?.status || 'NOT_CONFIGURED', error: '', referral: null, friendship: null }); return; }
       const liff = await loadLiffSdk(); await liff.init({ liffId: bootstrap.config.liffId });
       const context = referralContextFromLocation();
