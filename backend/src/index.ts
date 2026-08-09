@@ -100,6 +100,7 @@ import {
   type PreparedPlanStep,
 } from './guide/proposals/composite-execution';
 import type { OperationPlanStep } from './guide/proposals/composite-plan';
+import { syncLineRichMenuInsights, recordLineActionEvent } from './line-intelligence/service';
 import { GEMINI_MODEL, requestGeminiContent } from './gemini';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -3907,6 +3908,44 @@ app.post('/api/projects/:projectId/operation-plans/:planId/execute', async (c) =
   }
 });
 
+app.get('/api/projects/:projectId/intelligence/summary', async (c) => {
+  try {
+    const workspaceId = workspaceIdOf(c); const projectId = c.req.param('projectId');
+    const project: any = await c.env.smart_menu_db.prepare('SELECT id FROM projects WHERE id=? AND workspace_id=? AND deleted_at IS NULL').bind(projectId, workspaceId).first();
+    if (!project) return c.json({ success: false, error: 'Project not found.' }, 404);
+    const from = text(c.req.query('from')) || new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10); const to = text(c.req.query('to')) || new Date().toISOString().slice(0, 10);
+    const rows: any[] = (await c.env.smart_menu_db.prepare("SELECT * FROM line_intelligence_daily WHERE workspace_id=? AND project_id=? AND project_area_id='' AND metric_date>=? AND metric_date<=? ORDER BY metric_date").bind(workspaceId, projectId, from, to).all()).results || [];
+    const areaRows: any[] = (await c.env.smart_menu_db.prepare("SELECT * FROM line_intelligence_daily WHERE workspace_id=? AND project_id=? AND project_area_id<>'' AND metric_date>=? AND metric_date<=?").bind(workspaceId, projectId, from, to).all()).results || [];
+    const areas: any[] = (await c.env.smart_menu_db.prepare('SELECT id,label,action_type FROM project_areas WHERE workspace_id=? AND project_id=? ORDER BY area_index').bind(workspaceId, projectId).all()).results || [];
+    const suppressed = rows.some(row => row.data_status === 'privacy_suppressed'); const sum = (key: string) => rows.reduce((total, row) => total + Number(row[key] || 0), 0);
+    const mapped = areas.map(area => { const metrics = areaRows.filter(row => row.project_area_id === area.id); const value = (key: string) => metrics.reduce((total, row) => total + Number(row[key] || 0), 0); const status = metrics.some(row => row.data_status === 'privacy_suppressed') ? 'privacy_suppressed' : metrics.some(row => row.data_status === 'mapping_unmatched') ? 'mapping_unmatched' : metrics.length ? 'available' : 'unavailable'; return { projectAreaId: area.id, label: area.label, actionType: area.action_type, clicks: status === 'privacy_suppressed' ? null : value('clicks'), uniqueClickers: status === 'privacy_suppressed' ? null : value('click_unique_users'), messageActions: value('message_actions'), postbackActions: value('postback_actions'), switchActions: value('switch_actions'), dataStatus: status }; }).sort((a, b) => Number(b.clicks || 0) - Number(a.clicks || 0));
+    const binding: any = await c.env.smart_menu_db.prepare('SELECT line_rich_menu_id,last_synced_at,last_sync_status,status FROM workspace_rich_menu_bindings WHERE workspace_id=? AND project_id=? ORDER BY updated_at DESC LIMIT 1').bind(workspaceId, projectId).first();
+    return c.json({ success: true, period: { from, to }, project: { impressions: suppressed ? null : sum('impressions'), uniqueViewers: suppressed ? null : sum('impression_unique_users'), clicks: suppressed ? null : sum('clicks'), uniqueClickers: suppressed ? null : sum('click_unique_users'), ctr: suppressed || !sum('impressions') ? null : sum('clicks') / sum('impressions'), messageActions: sum('message_actions'), postbackActions: sum('postback_actions'), switchActions: sum('switch_actions') }, areas: mapped, privacySuppressed: suppressed, dataFreshness: { lastLineSyncAt: binding?.last_synced_at || null, metricsThrough: rows.map(row => row.metric_date).at(-1) || null, delayed: true }, binding: binding ? { lineRichMenuId: binding.line_rich_menu_id, status: binding.status } : null });
+  } catch { return c.json({ success: false, error: 'Unable to load LINE intelligence.' }, 500); }
+});
+
+app.get('/api/projects/:projectId/intelligence/daily', async (c) => {
+  const workspaceId = workspaceIdOf(c); const projectId = c.req.param('projectId'); const project: any = await c.env.smart_menu_db.prepare('SELECT id FROM projects WHERE id=? AND workspace_id=? AND deleted_at IS NULL').bind(projectId, workspaceId).first();
+  if (!project) return c.json({ success: false, error: 'Project not found.' }, 404);
+  const from = text(c.req.query('from')) || new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10); const to = text(c.req.query('to')) || new Date().toISOString().slice(0, 10);
+  const rows: any[] = (await c.env.smart_menu_db.prepare("SELECT metric_date date,impressions,clicks,click_through_rate,data_status FROM line_intelligence_daily WHERE workspace_id=? AND project_id=? AND project_area_id='' AND metric_date>=? AND metric_date<=? ORDER BY metric_date").bind(workspaceId, projectId, from, to).all()).results || [];
+  return c.json({ success: true, days: rows.map(row => ({ date: row.date, impressions: row.data_status === 'privacy_suppressed' ? null : Number(row.impressions || 0), clicks: row.data_status === 'privacy_suppressed' ? null : Number(row.clicks || 0), ctr: row.data_status === 'privacy_suppressed' ? null : row.click_through_rate, dataStatus: row.data_status })) });
+});
+
+app.post('/api/projects/:projectId/intelligence/bindings', async (c) => {
+  try { requireRole(c, 'admin'); const workspaceId = workspaceIdOf(c); const projectId = c.req.param('projectId'); const body: any = await c.req.json(); const richMenuId = text(body.lineRichMenuId, 100); const account: any = await c.env.smart_menu_db.prepare('SELECT * FROM workspace_line_accounts WHERE workspace_id=? LIMIT 1').bind(workspaceId).first(); const project: any = await c.env.smart_menu_db.prepare('SELECT id FROM projects WHERE id=? AND workspace_id=? AND deleted_at IS NULL').bind(projectId, workspaceId).first(); if (!project) return c.json({ success: false, error: 'Project not found.' }, 404); if (!account?.line_bot_channel_access_token) return c.json({ success: false, error: 'Workspace LINE Bot token is not configured.' }, 409); if (!richMenuId) return c.json({ success: false, error: 'LINE Rich Menu ID is required.' }, 400); const verify = await fetch(`https://api.line.me/v2/bot/richmenu/${encodeURIComponent(richMenuId)}`, { headers: { Authorization: `Bearer ${account.line_bot_channel_access_token}` } }); if (!verify.ok) return c.json({ success: false, error: verify.status === 404 ? 'LINE Rich Menu was not found for this Workspace.' : 'Unable to verify LINE Rich Menu.' }, verify.status === 404 ? 404 : 502); await c.env.smart_menu_db.prepare("INSERT INTO workspace_rich_menu_bindings (id,workspace_id,line_account_id,project_id,line_rich_menu_id,line_rich_menu_alias_id,source,status) VALUES (?,?,?,?,?,?, 'manual_link','active') ON CONFLICT(workspace_id,line_rich_menu_id) DO UPDATE SET project_id=excluded.project_id,line_account_id=excluded.line_account_id,line_rich_menu_alias_id=excluded.line_rich_menu_alias_id,status='active',updated_at=CURRENT_TIMESTAMP").bind(id('lrmb'), workspaceId, account.id, projectId, richMenuId, text(body.lineRichMenuAliasId) || null).run(); return c.json({ success: true }); } catch (error: any) { return c.json({ success: false, error: error?.message === 'FORBIDDEN_ROLE' ? 'Owner or admin role is required.' : 'Unable to link LINE Rich Menu.' }, error?.message === 'FORBIDDEN_ROLE' ? 403 : 500); }
+});
+
+app.post('/api/projects/:projectId/intelligence/sync', async (c) => {
+  try { requireRole(c, 'admin'); const workspaceId = workspaceIdOf(c); const projectId = c.req.param('projectId'); const binding: any = await c.env.smart_menu_db.prepare("SELECT * FROM workspace_rich_menu_bindings WHERE workspace_id=? AND project_id=? AND status='active' ORDER BY updated_at DESC LIMIT 1").bind(workspaceId, projectId).first(); const account: any = await c.env.smart_menu_db.prepare('SELECT * FROM workspace_line_accounts WHERE workspace_id=? LIMIT 1').bind(workspaceId).first(); if (!binding) return c.json({ success: false, error: 'Link a LINE Rich Menu first.' }, 409); const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10); const priorDate = text(binding.last_synced_at, 10); const from = priorDate && priorDate < yesterday ? priorDate : yesterday; const result = await syncLineRichMenuInsights({ db: c.env.smart_menu_db, workspaceId, projectId, binding, account, from, to: yesterday }); return c.json({ success: true, result }); } catch (error: any) { const code = String(error?.message || ''); return c.json({ success: false, error: code === 'LINE_SYNC_COOLDOWN' ? 'LINE insight sync is limited to once per 15 minutes.' : code === 'LINE_RICH_MENU_UNAVAILABLE' ? 'LINE Rich Menu is unavailable.' : 'Unable to sync LINE insight.' }, code === 'LINE_SYNC_COOLDOWN' ? 429 : 502); }
+});
+
+app.get('/api/system/line-intelligence/health', async (c) => {
+  await requireSystemAdmin(c);
+  const rows: any[] = (await c.env.smart_menu_db.prepare("SELECT b.workspace_id,b.project_id,p.name project_name,b.line_rich_menu_id,b.status,b.last_synced_at,b.last_sync_status,COUNT(i.id) cached_rows,SUM(CASE WHEN i.data_status='privacy_suppressed' THEN 1 ELSE 0 END) privacy_rows,SUM(CASE WHEN i.data_status='mapping_unmatched' THEN 1 ELSE 0 END) unmatched_rows FROM workspace_rich_menu_bindings b LEFT JOIN projects p ON p.id=b.project_id AND p.workspace_id=b.workspace_id LEFT JOIN line_rich_menu_insight_daily i ON i.workspace_id=b.workspace_id AND i.project_id=b.project_id GROUP BY b.id ORDER BY b.updated_at DESC").all()).results || [];
+  return c.json({ success: true, bindings: rows.map(row => ({ workspaceId: row.workspace_id, projectId: row.project_id, projectName: row.project_name, lineRichMenuId: row.line_rich_menu_id, status: row.status, lastSyncedAt: row.last_synced_at, lastSyncStatus: row.last_sync_status, cachedRows: Number(row.cached_rows || 0), privacyRows: Number(row.privacy_rows || 0), unmatchedRows: Number(row.unmatched_rows || 0) })) });
+});
+
 app.post('/api/projects/:projectId/publish', async (c) => {
   const projectId = c.req.param('projectId');
 
@@ -4379,6 +4418,7 @@ app.post('/line/webhook/:workspaceId/:webhookToken', async (c) => {
     const dispatches: any[] = [];
 
     for (const event of events) {
+      await recordLineActionEvent(c.env.smart_menu_db, { workspaceId, account, event }).catch(() => {});
       let selectedTarget: any = null;
       let matchedRoute: any = null;
 

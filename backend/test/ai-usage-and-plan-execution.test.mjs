@@ -322,7 +322,7 @@ test('Plan execution migration and endpoint preserve tenant, Template, R2 and LI
   assert.match(migration, /CREATE TABLE IF NOT EXISTS ai_operation_plan_run_steps/);
   assert.match(migration, /idx_ai_operation_plan_one_active_run/);
   const start = app.indexOf("app.post('/api/projects/:projectId/operation-plans/:planId/execute'");
-  const end = app.indexOf("app.post('/api/projects/:projectId/publish'", start);
+  const end = app.indexOf("app.get('/api/projects/:projectId/intelligence/summary'", start);
   const route = app.slice(start, end);
   assert.match(route, /workspaceId|plan\.workspaceId/);
   assert.doesNotMatch(route, /UPDATE\s+templates|smart_menu_assets|api\.line\.me|LINE_CHANNEL_ACCESS_TOKEN/);

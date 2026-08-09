@@ -2,7 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import SmartGuide from './components/SmartGuide';
 import ProposalManagement from './components/ProposalManagement';
 import OperationPlanManagement from './components/OperationPlanManagement';
+import LineIntelligencePanel from './components/LineIntelligencePanel';
 import AIUsagePanel from './components/AIUsagePanel';
+import LineIntelligenceHealthPanel from './components/LineIntelligenceHealthPanel';
 import { emitGuideEvent } from './guide-events';
 import { 
   LayoutDashboard, 
@@ -33,6 +35,7 @@ const NAVIGATION = [
   { id: 'projects', label: '圖文選單專案', icon: FolderKanban },
   { id: 'templates', label: '模板中心', icon: LayoutTemplate },
   { id: 'ai-usage', label: 'AI \u7528\u91cf', icon: Sparkles },
+  { id: 'intelligence-health', label: 'LINE Health', icon: MousePointerClick },
   { id: 'accounts', label: '客戶帳號', icon: Users },
   { id: 'tenant-inventory', label: '租戶資料盤點', icon: Search },
   { id: 'tenant-integrity', label: '租戶健康檢查', icon: CheckCircle2 },
@@ -995,6 +998,7 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
               )}
             </div>
           )}
+          <LineIntelligencePanel projectId={projectId} request={authFetch} userRole={userRole} />
           <ProposalManagement
             projectId={projectId}
             project={project}
@@ -4875,7 +4879,7 @@ export default function App() {
   const activeRole = String(session?.activeRole || 'viewer').toLowerCase();
 
   const visibleNavigation = isPlatformAdminMode
-    ? NAVIGATION.filter(item => ['accounts', 'templates', 'ai-usage', 'tenant-inventory', 'tenant-integrity'].includes(item.id))
+    ? NAVIGATION.filter(item => ['accounts', 'templates', 'ai-usage', 'intelligence-health', 'tenant-inventory', 'tenant-integrity'].includes(item.id))
     : NAVIGATION.filter(item => {
         if (item.id === 'accounts') return false;
         if (item.id === 'members') return activeRole === 'owner' || activeRole === 'admin';
@@ -5057,6 +5061,9 @@ export default function App() {
             )}
             {currentView === 'ai-usage' && (
               <AIUsagePanel request={authFetch} systemAdmin={isPlatformAdminMode} />
+            )}
+            {currentView === 'intelligence-health' && isPlatformAdminMode && (
+              <LineIntelligenceHealthPanel request={authFetch} />
             )}
             {currentView === 'templates' && isPlatformAdminMode && (
               <SystemTemplatesView />
