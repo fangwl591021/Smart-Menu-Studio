@@ -40,9 +40,13 @@ export async function resolveConversionReferralContext(db: D1Database, input: { 
 }
 
 export async function establishConversionReferralEvidence(db: D1Database, input: { workspaceId: string; lineAccountId: string; conversionEventId: string; context: any }) {
-  if (!input.context || input.context.workspace_id !== input.workspaceId || input.context.line_account_id !== input.lineAccountId) return false;
-  const inserted: any = await db.prepare("INSERT INTO conversion_referral_evidence(id,workspace_id,line_account_id,conversion_event_id,member_referral_attribution_id,context_id,evidence_type) VALUES(?,?,?,?,?,?, 'SERVER_CONTEXT') ON CONFLICT DO NOTHING").bind(`cre_${crypto.randomUUID()}`, input.workspaceId, input.lineAccountId, input.conversionEventId, input.context.member_referral_attribution_id, input.context.id).run();
-  if (Number(inserted?.meta?.changes || 0) !== 1) return false;
+  if (!input.context || input.context.workspace_id !== input.workspaceId || input.context.line_account_id !== input.lineAccountId) return null;
+  const evidenceId = `cre_${crypto.randomUUID()}`;
+  const inserted: any = await db.prepare("INSERT INTO conversion_referral_evidence(id,workspace_id,line_account_id,conversion_event_id,member_referral_attribution_id,context_id,evidence_type) VALUES(?,?,?,?,?,?, 'SERVER_CONTEXT') ON CONFLICT DO NOTHING").bind(evidenceId, input.workspaceId, input.lineAccountId, input.conversionEventId, input.context.member_referral_attribution_id, input.context.id).run();
+  if (Number(inserted?.meta?.changes || 0) !== 1) {
+    const existing: any = await db.prepare('SELECT id FROM conversion_referral_evidence WHERE workspace_id=? AND line_account_id=? AND conversion_event_id=? AND context_id=? LIMIT 1').bind(input.workspaceId, input.lineAccountId, input.conversionEventId, input.context.id).first();
+    return existing?.id || null;
+  }
   await db.prepare('UPDATE conversion_referral_contexts SET consumed_at=CURRENT_TIMESTAMP WHERE id=? AND workspace_id=? AND line_account_id=? AND consumed_at IS NULL').bind(input.context.id, input.workspaceId, input.lineAccountId).run();
-  return true;
+  return evidenceId;
 }

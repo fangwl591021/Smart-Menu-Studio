@@ -111,6 +111,7 @@ import { backendFriendship, establishMember, memberIdentityHash, parseReferralLa
 import { createReferralFlowToken, recordReferralAnalyticsEvent, referralEventKeys, verifyReferralFlowToken, REFERRAL_GROWTH_THRESHOLDS } from './referral/growth';
 import { referralGrowthPeriod, referralGrowthSnapshot } from './referral/growth-api';
 import { establishConversionReferralEvidence, issueConversionReferralContext, resolveConversionReferralContext } from './commission/evidence-bridge';
+import { establishCommissionAttribution } from './commission/attribution';
 import { canTransitionCommissionProgramStatus, isAttributionWindowDays, isCommissionProgramStatus, isDealerEligibilityStatus, publicCommissionProgramDealerRow, publicCommissionProgramRow } from './commission/program-foundation';
 import { canTenantTransitionDealerStatus, dealerApplyDecision, isDealerStatus, publicDealerRow } from './dealers/foundation';
 import { Hono } from 'hono';
@@ -2526,7 +2527,7 @@ app.post('/api/intelligence/conversions', async c => {
   if (projectAreaId && !area) return c.json({ success: false, error: 'INVALID_MAPPING' }, 400);
   if (projectId && area && area.project_id !== projectId) return c.json({ success: false, error: 'INVALID_MAPPING' }, 400);
   const existing = await c.env.smart_menu_db.prepare('SELECT id FROM line_conversion_events WHERE workspace_id=? AND external_event_id=? LIMIT 1').bind(workspaceId, text(body.externalEventId, 120)).first();
-  if (existing && referralContext) establishConversionReferralEvidence(c.env.smart_menu_db,{workspaceId,lineAccountId:referralContext.line_account_id,conversionEventId:(existing as any).id,context:referralContext}).catch(()=>{});
+  if (existing && referralContext) establishConversionReferralEvidence(c.env.smart_menu_db,{workspaceId,lineAccountId:referralContext.line_account_id,conversionEventId:(existing as any).id,context:referralContext}).then(evidenceId=>{if(evidenceId)return establishCommissionAttribution(c.env.smart_menu_db,{workspaceId,lineAccountId:referralContext.line_account_id,conversionReferralEvidenceId:evidenceId});}).catch(()=>{});
   if (existing) return c.json({ success: true, idempotent: true });
 
   const requestedAttributionToken = text(body.attributionToken, 256);
@@ -2555,7 +2556,7 @@ app.post('/api/intelligence/conversions', async c => {
     'last_observed_touch', value ?? null, text(body.currency || '', 8) || null, mapped ? 'matched' : 'unmatched', occurredAt,
   ).run();
   if (tracked) await c.env.smart_menu_db.prepare('UPDATE tracked_uri_attributions SET conversion_event_id=? WHERE workspace_id=? AND attribution_token_hash=? AND conversion_event_id IS NULL').bind(conversionEventId, workspaceId, await trackedTokenHash(requestedAttributionToken)).run();
-  if (referralContext) establishConversionReferralEvidence(c.env.smart_menu_db,{workspaceId,lineAccountId:referralContext.line_account_id,conversionEventId,context:referralContext}).catch(()=>{});
+  if (referralContext) establishConversionReferralEvidence(c.env.smart_menu_db,{workspaceId,lineAccountId:referralContext.line_account_id,conversionEventId,context:referralContext}).then(evidenceId=>{if(evidenceId)return establishCommissionAttribution(c.env.smart_menu_db,{workspaceId,lineAccountId:referralContext.line_account_id,conversionReferralEvidenceId:evidenceId});}).catch(()=>{});
   return c.json({ success: true, idempotent: false });
 });
 
