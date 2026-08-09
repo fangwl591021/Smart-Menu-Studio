@@ -102,6 +102,9 @@ import {
 import type { OperationPlanStep } from './guide/proposals/composite-plan';
 import { syncLineRichMenuInsights, recordLineActionEvent } from './line-intelligence/service';
 import { GEMINI_MODEL, requestGeminiContent } from './gemini';
+import { authenticateConversionApiKey, conversionKeyHash, conversionMetadata, createConversionApiKey } from './journey/conversion-keys';
+import { writeGatewayJourneyEvent } from './journey/engine';
+import { funnel, lastObservedTouch, rebuildJourneyDaily } from './journey/core';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
@@ -888,6 +891,7 @@ app.post('/auth/login', async (c) => {
 });
 
 app.use('/api/*', async (c, next) => {
+  if (c.req.path === '/api/intelligence/conversions') return next();
   try {
     const tenant = await resolveTenantContext(c);
     c.set('workspaceId', tenant.workspaceId);
@@ -2435,6 +2439,96 @@ app.get('/api/projects/:projectId', async (c) => {
 });
 
 
+
+
+app.get('/api/workspaces/conversion-api-keys', async c => { try { requireRole(c,'admin'); const rows:any[]=(await c.env.smart_menu_db.prepare('SELECT id,name,key_prefix,status,last_used_at,created_at,revoked_at FROM workspace_conversion_api_keys WHERE workspace_id=? ORDER BY created_at DESC').bind(workspaceIdOf(c)).all()).results||[]; return c.json({success:true,keys:rows.map(x=>({id:x.id,name:x.name,prefix:x.key_prefix,status:x.status,lastUsedAt:x.last_used_at,createdAt:x.created_at,revokedAt:x.revoked_at}))}); } catch { return c.json({success:false,error:'FORBIDDEN'},403); } });
+app.post('/api/workspaces/conversion-api-keys', async c => { try { requireRole(c,'admin'); const body:any=await c.req.json().catch(()=>({})); const created=createConversionApiKey(); const id='cak_'+crypto.randomUUID(); await c.env.smart_menu_db.prepare('INSERT INTO workspace_conversion_api_keys (id,workspace_id,name,key_prefix,key_hash,created_by_user_id) VALUES (?,?,?,?,?,?)').bind(id,workspaceIdOf(c),text(body.name||'Conversion integration').slice(0,80),created.prefix,await conversionKeyHash(created.key),text(c.get('userId'))).run(); return c.json({success:true,key:{id,name:text(body.name||'Conversion integration').slice(0,80),prefix:created.prefix,status:'active',secret:created.key}}); } catch { return c.json({success:false,error:'FORBIDDEN'},403); } });
+app.post('/api/workspaces/conversion-api-keys/:keyId/revoke', async c => { try { requireRole(c,'admin'); await c.env.smart_menu_db.prepare("UPDATE workspace_conversion_api_keys SET status='revoked',revoked_at=CURRENT_TIMESTAMP WHERE id=? AND workspace_id=? AND status='active'").bind(c.req.param('keyId'),workspaceIdOf(c)).run(); return c.json({success:true}); } catch { return c.json({success:false,error:'FORBIDDEN'},403); } });
+app.post('/api/intelligence/conversions', async c => {
+  const credential = await authenticateConversionApiKey(c.env.smart_menu_db, c.req.header('authorization'));
+  if (!credential) return c.json({ success: false, error: 'UNAUTHORIZED' }, 401);
+  const body: any = await c.req.json().catch(() => null);
+  if (!body || !['lead', 'signup', 'registration', 'booking', 'purchase', 'custom'].includes(text(body.conversionType)) || !text(body.externalEventId)) return c.json({ success: false, error: 'INVALID_CONVERSION' }, 400);
+  const value = body.valueMinor;
+  if (value !== undefined && (!Number.isInteger(value) || value < 0)) return c.json({ success: false, error: 'INVALID_VALUE_MINOR' }, 400);
+  const workspaceId = credential.workspaceId;
+  const occurredAt = new Date().toISOString();
+  const projectId = text(body.projectId);
+  const projectAreaId = text(body.projectAreaId);
+  const requestedSessionId = text(body.journeySessionId);
+  if (projectId && !(await c.env.smart_menu_db.prepare('SELECT id FROM projects WHERE id=? AND workspace_id=? LIMIT 1').bind(projectId, workspaceId).first())) return c.json({ success: false, error: 'INVALID_MAPPING' }, 400);
+  const area: any = projectAreaId ? await c.env.smart_menu_db.prepare('SELECT id,project_id FROM project_areas WHERE id=? AND workspace_id=? LIMIT 1').bind(projectAreaId, workspaceId).first() : null;
+  if (projectAreaId && !area) return c.json({ success: false, error: 'INVALID_MAPPING' }, 400);
+  if (projectId && area && area.project_id !== projectId) return c.json({ success: false, error: 'INVALID_MAPPING' }, 400);
+  const existing = await c.env.smart_menu_db.prepare('SELECT id FROM line_conversion_events WHERE workspace_id=? AND external_event_id=? LIMIT 1').bind(workspaceId, text(body.externalEventId, 120)).first();
+  if (existing) return c.json({ success: true, idempotent: true });
+
+  const sessionRows: any[] = requestedSessionId
+    ? ((await c.env.smart_menu_db.prepare('SELECT journey_session_id,project_id,project_area_id,event_type,occurred_at FROM line_journey_events WHERE workspace_id=? AND journey_session_id=? ORDER BY occurred_at DESC').bind(workspaceId, requestedSessionId).all()).results || [])
+    : [];
+  if (requestedSessionId && !sessionRows.length) return c.json({ success: false, error: 'INVALID_JOURNEY_SESSION' }, 400);
+  // Server-to-server conversion calls have no pseudonymous actor context without an explicit session.
+  // Never infer a user's touch from arbitrary events elsewhere in the workspace.
+  const touch = lastObservedTouch(sessionRows, occurredAt);
+  const mapped = projectAreaId
+    ? { projectId: text(area?.project_id), projectAreaId }
+    : projectId
+      ? { projectId, projectAreaId: null }
+      : touch
+        ? { projectId: text(touch.project_id), projectAreaId: text(touch.project_area_id) }
+        : null;
+  await c.env.smart_menu_db.prepare('INSERT INTO line_conversion_events (id,workspace_id,conversion_key_id,external_event_id,conversion_type,journey_session_id,project_id,project_area_id,attributed_project_id,attributed_project_area_id,attribution_model,value_minor,currency,mapping_status,occurred_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(
+    'lce_' + crypto.randomUUID(), workspaceId, credential.id, text(body.externalEventId, 120), text(body.conversionType, 30), requestedSessionId || null,
+    projectId || null, projectAreaId || null, mapped?.projectId || null, mapped?.projectAreaId || null,
+    'last_observed_touch', value ?? null, text(body.currency || '', 8) || null, mapped ? 'matched' : 'unmatched', occurredAt,
+  ).run();
+  return c.json({ success: true, idempotent: false });
+});
+
+app.get('/api/projects/:projectId/intelligence/journey', async (c) => {
+  const workspaceId = workspaceIdOf(c);
+  const projectId = c.req.param('projectId');
+  const from = text(c.req.query('from')) || new Date(Date.now() - 29 * 86_400_000).toISOString().slice(0, 10);
+  const to = text(c.req.query('to')) || new Date().toISOString().slice(0, 10);
+  const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value + 'T00:00:00.000Z'));
+  if (!validDate(from) || !validDate(to) || from > to || (Date.parse(to + 'T00:00:00.000Z') - Date.parse(from + 'T00:00:00.000Z')) / 86_400_000 > 366) return c.json({ success: false, error: 'INVALID_DATE_RANGE' }, 400);
+  const project: any = await c.env.smart_menu_db.prepare('SELECT id FROM projects WHERE id=? AND workspace_id=? AND deleted_at IS NULL').bind(projectId, workspaceId).first();
+  if (!project) return c.json({ success: false, error: 'Project not found.' }, 404);
+  const [daily, areas, activeKey] = await Promise.all([
+    c.env.smart_menu_db.prepare("SELECT * FROM line_journey_daily WHERE workspace_id=? AND project_id=? AND project_area_id='' AND metric_date>=? AND metric_date<=? ORDER BY metric_date").bind(workspaceId, projectId, from, to).all(),
+    c.env.smart_menu_db.prepare('SELECT id,label,action_type FROM project_areas WHERE workspace_id=? AND project_id=? ORDER BY area_index').bind(workspaceId, projectId).all(),
+    c.env.smart_menu_db.prepare("SELECT id FROM workspace_conversion_api_keys WHERE workspace_id=? AND status='active' LIMIT 1").bind(workspaceId).first(),
+  ]);
+  const areaDaily: any[] = (await c.env.smart_menu_db.prepare("SELECT * FROM line_journey_daily WHERE workspace_id=? AND project_id=? AND project_area_id<>'' AND metric_date>=? AND metric_date<=?").bind(workspaceId, projectId, from, to).all()).results || [];
+  const overview = funnel((daily.results || []) as any[]);
+  const areaMetrics = (areas.results || []).map((area: any) => {
+    const rows = areaDaily.filter((row) => row.project_area_id === area.id);
+    const value = (key: string) => rows.reduce((total, row) => total + Number(row[key] || 0), 0);
+    const observedActions = value('message_actions') + value('postback_actions') + value('switch_actions');
+    const conversions = value('conversions');
+    return { areaId: area.id, label: area.label, actionType: area.action_type, observedActions, sessions: value('observed_sessions'), keywordMatches: value('keyword_matches'), webhookSuccesses: value('webhook_successes'), conversions, conversionValueMinor: value('conversion_value_minor'), observedConversionRate: observedActions > 0 ? conversions / observedActions : null };
+  });
+  return c.json({ success: true, period: { from, to }, ...overview, conversionIntegrationAvailable: Boolean(activeKey), areas: areaMetrics });
+});
+
+app.post('/api/projects/:projectId/intelligence/journey/rebuild', async (c) => {
+  try {
+    requireRole(c, 'admin');
+    const workspaceId = workspaceIdOf(c);
+    const projectId = c.req.param('projectId');
+    const body: any = await c.req.json().catch(() => ({}));
+    const from = text(body.from) || new Date(Date.now() - 29 * 86_400_000).toISOString().slice(0, 10);
+    const to = text(body.to) || new Date().toISOString().slice(0, 10);
+    const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value + 'T00:00:00.000Z'));
+    if (!validDate(from) || !validDate(to) || from > to || (Date.parse(to + 'T00:00:00.000Z') - Date.parse(from + 'T00:00:00.000Z')) / 86_400_000 > 366) return c.json({ success: false, error: 'INVALID_DATE_RANGE' }, 400);
+    const project: any = await c.env.smart_menu_db.prepare('SELECT id FROM projects WHERE id=? AND workspace_id=? AND deleted_at IS NULL').bind(projectId, workspaceId).first();
+    if (!project) return c.json({ success: false, error: 'Project not found.' }, 404);
+    await rebuildJourneyDaily(c.env.smart_menu_db, workspaceId, projectId, from, to);
+    return c.json({ success: true, period: { from, to } });
+  } catch (error: any) {
+    return c.json({ success: false, error: error?.message === 'FORBIDDEN_ROLE' ? 'FORBIDDEN' : 'JOURNEY_REBUILD_FAILED' }, error?.message === 'FORBIDDEN_ROLE' ? 403 : 500);
+  }
+});
 
 app.get('/api/projects/:projectId/guide', async (c) => {
   try {
@@ -4431,6 +4525,7 @@ app.post('/line/webhook/:workspaceId/:webhookToken', async (c) => {
         ) || null;
 
         if (matchedRoute) {
+          await writeGatewayJourneyEvent(c.env.smart_menu_db,{workspaceId,account,event,eventType:'keyword_match',routeId:matchedRoute.id,targetId:matchedRoute.target_id,status:matchedRoute.match_type}).catch(()=>{});
           selectedTarget = targets.find(t => t.id === matchedRoute.target_id) || {
             id: matchedRoute.target_id,
             name: matchedRoute.target_name,
@@ -4476,6 +4571,8 @@ app.post('/line/webhook/:workspaceId/:webhookToken', async (c) => {
       const timer = setTimeout(() => controller.abort(), timeoutMs);
 
       try {
+        const journeyStarted=Date.now();
+        await writeGatewayJourneyEvent(c.env.smart_menu_db,{workspaceId,account,event,eventType:'webhook_route',targetId:selectedTarget.id}).catch(()=>{});
         const headers: Record<string, string> = {
           'Content-Type': 'application/json',
           'X-Smart-Menu-Workspace': workspaceId,
@@ -4493,6 +4590,7 @@ app.post('/line/webhook/:workspaceId/:webhookToken', async (c) => {
           signal: controller.signal,
         });
 
+        await writeGatewayJourneyEvent(c.env.smart_menu_db,{workspaceId,account,event,eventType:forwardRes.ok?'webhook_success':'webhook_failure',targetId:selectedTarget.id,status:String(Math.floor(forwardRes.status/100)+'xx'),latencyMs:Date.now()-journeyStarted,errorCode:forwardRes.ok?null:'DOWNSTREAM_HTTP'}).catch(()=>{});
         const responseText = await forwardRes.text();
         let downstream: any = null;
 
@@ -4529,6 +4627,7 @@ app.post('/line/webhook/:workspaceId/:webhookToken', async (c) => {
           ok: forwardRes.ok,
         });
       } catch (error: any) {
+        await writeGatewayJourneyEvent(c.env.smart_menu_db,{workspaceId,account,event,eventType:'webhook_failure',targetId:selectedTarget?.id||null,errorCode:error?.name==='AbortError'?'DOWNSTREAM_TIMEOUT':'FORWARD_FAILED'}).catch(()=>{});
         console.error('LINE webhook forward failed:', {
           workspaceId,
           targetId: selectedTarget?.id,

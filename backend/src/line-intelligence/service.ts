@@ -1,4 +1,6 @@
-﻿type Db = D1Database;
+﻿import { captureJourneyAction } from '../journey/engine.ts';
+
+type Db = D1Database;
 type Row = Record<string, unknown>;
 const clean = (value: unknown, max = 160) => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max);
 const count = (value: unknown) => Math.max(0, Math.floor(Number(value) || 0));
@@ -43,6 +45,7 @@ export async function recordLineActionEvent(db: Db, input: { workspaceId: string
   const sourceUserHash = await hashLineUser(clean(input.account.line_bot_channel_secret, 1000), clean((input.event.source as Row)?.userId, 200));
   const timestamp = Number(input.event.timestamp); const eventAt = Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp).toISOString() : now();
   await db.prepare('INSERT INTO line_action_events (id,workspace_id,line_account_id,project_id,project_area_id,line_rich_menu_id,event_type,action_type,action_fingerprint,source_user_hash,event_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)').bind(`lae_${crypto.randomUUID()}`, input.workspaceId, clean(input.account.id), match?.project_id || null, match?.area_id || null, null, actionType === 'richmenuswitch' ? 'richmenu_switch' : type, actionType, await actionFingerprint(`${actionType}:${rawAction}`), sourceUserHash, eventAt).run();
+  await captureJourneyAction(db, { workspaceId: input.workspaceId, account: input.account, event: input.event, projectId: clean(match?.project_id) || null, areaId: clean(match?.area_id) || null }).catch(() => {});
 }
 
 export async function rebuildLineIntelligenceDaily(db: Db, workspaceId: string, projectId: string, from: string, to: string) {
