@@ -8,7 +8,7 @@ import {
 } from './policy.ts';
 import type { ProposalType, SafeProposalValue } from './types.ts';
 
-export type CompositePlanStatus = 'draft' | 'reviewed' | 'approved' | 'stale' | 'cancelled';
+export type CompositePlanStatus = 'draft' | 'reviewed' | 'approved' | 'executing' | 'executed' | 'failed' | 'rolled_back' | 'partially_compensated' | 'stale' | 'cancelled';
 export type CompositePlanRisk = 'LOW' | 'MEDIUM' | 'HIGH';
 export type CompositeOperationType =
   | 'SET_PROJECT_AREA_DISPLAY_TEXT'

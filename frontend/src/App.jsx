@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import SmartGuide from './components/SmartGuide';
 import ProposalManagement from './components/ProposalManagement';
 import OperationPlanManagement from './components/OperationPlanManagement';
+import AIUsagePanel from './components/AIUsagePanel';
 import { emitGuideEvent } from './guide-events';
 import { 
   LayoutDashboard, 
@@ -31,6 +32,7 @@ const NAVIGATION = [
   { id: 'dashboard', label: '總覽', icon: LayoutDashboard },
   { id: 'projects', label: '圖文選單專案', icon: FolderKanban },
   { id: 'templates', label: '模板中心', icon: LayoutTemplate },
+  { id: 'ai-usage', label: 'AI \u7528\u91cf', icon: Sparkles },
   { id: 'accounts', label: '客戶帳號', icon: Users },
   { id: 'tenant-inventory', label: '租戶資料盤點', icon: Search },
   { id: 'tenant-integrity', label: '租戶健康檢查', icon: CheckCircle2 },
@@ -4873,12 +4875,12 @@ export default function App() {
   const activeRole = String(session?.activeRole || 'viewer').toLowerCase();
 
   const visibleNavigation = isPlatformAdminMode
-    ? NAVIGATION.filter(item => ['accounts', 'templates', 'tenant-inventory', 'tenant-integrity'].includes(item.id))
+    ? NAVIGATION.filter(item => ['accounts', 'templates', 'ai-usage', 'tenant-inventory', 'tenant-integrity'].includes(item.id))
     : NAVIGATION.filter(item => {
         if (item.id === 'accounts') return false;
         if (item.id === 'members') return activeRole === 'owner' || activeRole === 'admin';
         if (item.id === 'settings') return activeRole === 'owner' || activeRole === 'admin';
-        return ['dashboard', 'projects', 'templates'].includes(item.id);
+        return ['dashboard', 'projects', 'templates', 'ai-usage'].includes(item.id);
       });
 
   const navigateHome = () => {
@@ -5052,6 +5054,9 @@ export default function App() {
             )}
             {currentView === 'account' && (
               <AccountView session={session} onSessionChanged={loadSession} />
+            )}
+            {currentView === 'ai-usage' && (
+              <AIUsagePanel request={authFetch} systemAdmin={isPlatformAdminMode} />
             )}
             {currentView === 'templates' && isPlatformAdminMode && (
               <SystemTemplatesView />

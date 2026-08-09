@@ -314,26 +314,29 @@ test('all Plan reads and lifecycle writes are workspace and project scoped', asy
   assert.match(persistence, /WHERE id = \? AND workspace_id = \? AND project_id = \? AND status = \?/);
 });
 
-test('approved Plan has no execute endpoint and cannot call individual executors', async () => {
+test('approved Plan execute endpoint trusts only confirmation and reuses typed engines', async () => {
   const source = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8');
-  const planStart = source.indexOf('class CompositePlanApiError');
-  const planEnd = source.indexOf("app.post('/api/projects/:projectId/publish'", planStart);
-  const routes = source.slice(planStart, planEnd);
-  assert.doesNotMatch(routes, /operation-plans[^'\n]*\/execute/);
-  assert.doesNotMatch(routes, /executeOperationPlan|executeRollbackPlan/);
-  assert.doesNotMatch(routes, /UPDATE\s+(?:projects|project_areas|templates|assets)/i);
-  assert.match(routes, /canExecute:\s*false/);
+  const start = source.indexOf("app.post('/api/projects/:projectId/operation-plans/:planId/execute'");
+  const end = source.indexOf("app.post('/api/projects/:projectId/publish'", start);
+  const route = source.slice(start, end);
+  assert.ok(start > 0 && end > start);
+  assert.match(route, /body\.confirmation === true/);
+  assert.match(route, /executeOperationPlan/);
+  assert.match(route, /executeRollbackPlan/);
+  assert.match(route, /prepareCompositeExecutionStep/);
+  assert.doesNotMatch(route, /body\.(?:steps|operationType|target|before|after|probeId|risk)/);
+  assert.doesNotMatch(route, /UPDATE\s+(?:projects|project_areas|templates|assets)/i);
 });
 
-test('frontend covers Plan workflow and contains no Plan execute request or force override', async () => {
+test('frontend covers confirmed execution and contains no force override', async () => {
   const source = await readFile(new URL('../../frontend/src/components/OperationPlanManagement.jsx', import.meta.url), 'utf8');
   for (const marker of [
-    'proposalIds', '建立執行計畫', '執行計畫詳情', '低風險', '中風險', '高風險',
-    'dependencies', 'PLAN_CONFLICT', '此計畫建立後，部分專案設定已改變。',
+    'proposalIds', 'dependencies', 'PLAN_CONFLICT',
     "runPlanAction('review')", "runPlanAction('approve')", "runPlanAction('cancel')",
-    '目前版本尚未開放批次執行。',
+    'confirmation: true', 'partially_compensated',
   ]) assert.match(source, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.doesNotMatch(source, /operation-plans[^`'\n]*\/execute|force conflict|強制忽略/i);
+  assert.match(source, /operation-plans[^`'\n]*\/execute/);
+  assert.doesNotMatch(source, /force conflict|Force rollback.*button/i);
 });
 
 test('Plan persistence audit records policy risk and preflight without secrets', async () => {

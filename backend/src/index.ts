@@ -86,6 +86,20 @@ import {
   transitionStoredCompositePlan,
   updateCompositePlanPreflight,
 } from './guide/proposals/composite-plan-persistence';
+import {
+  executeMeteredAiCall,
+  extractGeminiUsageMetadata,
+  getSystemAiUsageSummary,
+  getWorkspaceAiUsageSummary,
+  normalizeUsagePeriod,
+} from './ai/usage';
+import {
+  CompositeExecutionError,
+  executeCompositeOperationPlan,
+  listPlanExecutionRuns,
+  type PreparedPlanStep,
+} from './guide/proposals/composite-execution';
+import type { OperationPlanStep } from './guide/proposals/composite-plan';
 import { GEMINI_MODEL, requestGeminiContent } from './gemini';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -913,6 +927,44 @@ function requireRole(c: any, minimum: 'viewer' | 'editor' | 'admin' | 'owner') {
   }
 }
 
+app.get('/api/ai-usage/summary', async (c) => {
+  try {
+    const period = normalizeUsagePeriod(c.req.query('from'), c.req.query('to'));
+    const summary = await getWorkspaceAiUsageSummary({
+      db: c.env.smart_menu_db,
+      workspaceId: workspaceIdOf(c),
+      requestingUserId: text(c.get('userId')),
+      role: text(c.get('userRole')),
+      ...period,
+    });
+    return c.json({ success: true, summary });
+  } catch (error: any) {
+    if (error?.message === 'INVALID_USAGE_PERIOD') {
+      return c.json({ success: false, error: 'AI 用量查詢期間無效。' }, 400);
+    }
+    console.error(JSON.stringify({ message: 'workspace ai usage summary failed' }));
+    return c.json({ success: false, error: '目前無法取得 AI 用量。' }, 500);
+  }
+});
+
+app.get('/api/system/ai-usage/summary', async (c) => {
+  try {
+    await requireSystemAdmin(c);
+    const period = normalizeUsagePeriod(c.req.query('from'), c.req.query('to'));
+    const summary = await getSystemAiUsageSummary({ db: c.env.smart_menu_db, ...period });
+    return c.json({ success: true, summary });
+  } catch (error: any) {
+    if (error?.message === 'SYSTEM_ADMIN_REQUIRED') {
+      return c.json({ success: false, error: '需要 System Admin 權限。' }, 403);
+    }
+    if (error?.message === 'INVALID_USAGE_PERIOD') {
+      return c.json({ success: false, error: 'AI 用量查詢期間無效。' }, 400);
+    }
+    console.error(JSON.stringify({ message: 'system ai usage summary failed' }));
+    return c.json({ success: false, error: '目前無法取得全平台 AI 用量。' }, 500);
+  }
+});
+
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let binary = '';
@@ -1503,36 +1555,54 @@ app.post('/api/detect-layout', async (c) => {
     const mimeType = image.type || 'image/png';
     const prompt = `你是一個 LINE 官方帳號 Rich Menu 專業座標分析器。分析圖片中的可點擊功能區塊。整張圖片固定換算為 2500x1686，左上角為 0,0。每個區塊回傳 id,label,x,y,width,height。座標使用整數，區塊不得超界或重疊，label 使用繁體中文，可辨識規則或不規則版型。只輸出符合 JSON Schema 的資料。`;
 
-    const response = await requestGeminiContent({
-      apiKey: c.env.GEMINI_API_KEY,
-      body: {
-        contents: [{ role: 'user', parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: base64Image } }] }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: 'OBJECT',
-            properties: {
-              areas: {
-                type: 'ARRAY',
-                items: {
-                  type: 'OBJECT',
-                  properties: {
-                    id: { type: 'INTEGER' }, label: { type: 'STRING' },
-                    x: { type: 'INTEGER' }, y: { type: 'INTEGER' },
-                    width: { type: 'INTEGER' }, height: { type: 'INTEGER' },
+    const geminiCall = await executeMeteredAiCall({
+      db: c.env.smart_menu_db,
+      workspaceId: workspaceIdOf(c),
+      userId: text(c.get('userId')),
+      featureCode: 'rich_menu_image_analysis',
+      operationCode: 'detect_layout',
+      provider: 'google',
+      model: GEMINI_MODEL,
+      execute: async () => {
+        const response = await requestGeminiContent({
+          apiKey: c.env.GEMINI_API_KEY,
+          body: {
+            contents: [{ role: 'user', parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: base64Image } }] }],
+            generationConfig: {
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: 'OBJECT',
+                properties: {
+                  areas: {
+                    type: 'ARRAY',
+                    items: {
+                      type: 'OBJECT',
+                      properties: {
+                        id: { type: 'INTEGER' }, label: { type: 'STRING' },
+                        x: { type: 'INTEGER' }, y: { type: 'INTEGER' },
+                        width: { type: 'INTEGER' }, height: { type: 'INTEGER' },
+                      },
+                      required: ['id', 'label', 'x', 'y', 'width', 'height'],
+                    },
                   },
-                  required: ['id', 'label', 'x', 'y', 'width', 'height'],
                 },
+                required: ['areas'],
               },
             },
-            required: ['areas'],
           },
-        },
+        });
+        const result: any = await response.json();
+        return {
+          value: { ok: response.ok, result },
+          status: response.ok ? 'success' as const : 'failed' as const,
+          usage: extractGeminiUsageMetadata(result),
+          providerRequestId: text(response.headers.get('x-request-id')) || null,
+          errorCode: response.ok ? null : text(result?.error?.status || 'GEMINI_REQUEST_FAILED'),
+        };
       },
     });
-
-    const result: any = await response.json();
-    if (!response.ok) return c.json({ success: false, error: result?.error?.message || 'Gemini API 呼叫失敗' }, 500);
+    const result: any = geminiCall.result;
+    if (!geminiCall.ok) return c.json({ success: false, error: result?.error?.message || 'Gemini API 呼叫失敗' }, 500);
 
     const outputText = result?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!outputText) throw new Error('Gemini 沒有回傳辨識結果');
@@ -2436,10 +2506,41 @@ app.post('/api/projects/:projectId/guide/recommendations/:recommendationId/expla
       return c.json({ success: false, error: '找不到此智慧建議。' }, 404);
     }
 
-    const explanation = await explainRecommendation(recommendation, {
-      apiKey: c.env.GEMINI_API_KEY,
-      timeoutMs: 8000,
-      logger: event => console.log(JSON.stringify(event)),
+    let providerUsage = extractGeminiUsageMetadata(null);
+    let providerRequestId: string | null = null;
+    const explanation = await executeMeteredAiCall({
+      db: c.env.smart_menu_db,
+      workspaceId,
+      userId: text(c.get('userId')),
+      featureCode: 'recommendation_explanation',
+      operationCode: recommendation.ruleCode,
+      provider: 'google',
+      model: GEMINI_MODEL,
+      logger: event => console.error(JSON.stringify(event)),
+      execute: async () => {
+        const value = await explainRecommendation(recommendation, {
+          apiKey: c.env.GEMINI_API_KEY,
+          timeoutMs: 8000,
+          fetcher: async (request: RequestInfo | URL, init?: RequestInit) => {
+            const response = await fetch(request, init);
+            providerRequestId = text(response.headers.get('x-request-id')) || null;
+            try {
+              providerUsage = extractGeminiUsageMetadata(await response.clone().json());
+            } catch {
+              providerUsage = extractGeminiUsageMetadata(null);
+            }
+            return response;
+          },
+          logger: event => console.log(JSON.stringify(event)),
+        });
+        return {
+          value,
+          status: value.status === 'generated' ? 'success' as const : 'fallback' as const,
+          usage: providerUsage,
+          providerRequestId,
+          errorCode: value.status === 'generated' ? null : 'DETERMINISTIC_FALLBACK',
+        };
+      },
     });
 
     return c.json({
@@ -3247,6 +3348,15 @@ function compositePlanErrorMessage(code: string): string {
     PLAN_CREATE_CONFLICT: '執行計畫建立衝突，請重新整理。',
     PLAN_CONFLICT_STATE: '執行計畫已被其他操作更新。',
     INVALID_PLAN_TRANSITION: '此執行計畫目前不能執行該狀態操作。',
+    PLAN_NOT_APPROVED: '只有已核准的執行計畫可以執行。',
+    PLAN_ALREADY_EXECUTING: '此執行計畫正在執行中。',
+    PLAN_ALREADY_EXECUTED: '此執行計畫已經執行完成。',
+    PLAN_EXECUTION_CONFLICT: '執行計畫狀態已被其他請求更新。',
+    PLAN_ROLE_NOT_ALLOWED: '只有 admin 或 owner 可以執行計畫。',
+    CONFIRMATION_REQUIRED: '請明確確認執行正式專案修改。',
+    PRECHECK_FAILED: '最終安全檢查未通過，計畫沒有開始執行。',
+    PLAN_FINALIZE_CONFLICT: '計畫完成狀態寫入衝突，請立即檢查執行紀錄。',
+    PLAN_RUN_NOT_FOUND: '找不到本次執行紀錄。',
   };
   return messages[code] || '執行計畫操作失敗。';
 }
@@ -3337,12 +3447,18 @@ function compositePlanResponse(plan: CompositeOperationPlan, actorRole: string, 
     reviewedAt: plan.reviewedAt,
     approvedAt: plan.approvedAt,
     cancelledAt: plan.cancelledAt,
-    capabilities: { ...policy.capabilities, canExecute: false as const },
+    capabilities: policy.capabilities,
     execution: {
-      enabled: false,
+      enabled: policy.capabilities.canExecute && plan.preflight.allowed,
       message: plan.status === 'approved'
-        ? '目前版本尚未開放批次執行。'
-        : '此階段只建立、檢視與核准執行計畫。',
+        ? policy.capabilities.canExecute && plan.preflight.allowed
+          ? '計畫已核准並通過目前安全檢查，可進行最終執行確認。'
+          : '計畫目前未通過執行權限或安全檢查。'
+        : plan.status === 'executing'
+          ? '執行計畫進行中。'
+          : plan.status === 'executed'
+            ? '執行計畫已完成。'
+            : '此計畫目前不可執行。',
     },
   };
 }
@@ -3370,6 +3486,9 @@ async function refreshCompositePlan(c: any, storedPlan: CompositeOperationPlan):
   const workspaceId = workspaceIdOf(c);
   if (storedPlan.workspaceId !== workspaceId || storedPlan.projectId !== c.req.param('projectId')) {
     throw new CompositePlanApiError('PLAN_NOT_FOUND');
+  }
+  if (!['draft', 'reviewed', 'approved'].includes(storedPlan.status)) {
+    return storedPlan;
   }
   const context = await buildGuideContext({
     db: c.env.smart_menu_db,
@@ -3565,16 +3684,25 @@ app.get('/api/projects/:projectId/operation-plans', async (c) => {
 app.get('/api/projects/:projectId/operation-plans/:planId', async (c) => {
   try {
     const plan = await loadCompositePlanOr404(c);
-    const events = await listCompositePlanEvents(
-      c.env.smart_menu_db,
-      workspaceIdOf(c),
-      c.req.param('projectId'),
-      plan.id,
-    );
+    const [events, runs] = await Promise.all([
+      listCompositePlanEvents(
+        c.env.smart_menu_db,
+        workspaceIdOf(c),
+        c.req.param('projectId'),
+        plan.id,
+      ),
+      listPlanExecutionRuns(
+        c.env.smart_menu_db,
+        workspaceIdOf(c),
+        c.req.param('projectId'),
+        plan.id,
+      ),
+    ]);
     return c.json({
       success: true,
       plan: compositePlanResponse(plan, text(c.get('userRole')), text(c.get('userId'))),
       events,
+      runs,
     });
   } catch (error) {
     return compositePlanApiError(c, error);
@@ -3628,6 +3756,156 @@ async function transitionCompositePlanRoute(c: any, action: 'review' | 'approve'
 app.post('/api/projects/:projectId/operation-plans/:planId/review', c => transitionCompositePlanRoute(c, 'review'));
 app.post('/api/projects/:projectId/operation-plans/:planId/approve', c => transitionCompositePlanRoute(c, 'approve'));
 app.post('/api/projects/:projectId/operation-plans/:planId/cancel', c => transitionCompositePlanRoute(c, 'cancel'));
+
+async function prepareCompositeExecutionStep(
+  c: any,
+  plan: CompositeOperationPlan,
+  step: OperationPlanStep,
+): Promise<PreparedPlanStep> {
+  let proposal = await getStoredProposal(
+    c.env.smart_menu_db,
+    plan.workspaceId,
+    plan.projectId,
+    step.proposalId,
+  );
+  if (!proposal) throw new CompositeExecutionError('PLAN_PROPOSAL_NOT_FOUND');
+  proposal = await refreshStaleStatus(c, proposal);
+  if (proposal.status === 'executed') throw new CompositeExecutionError('PROPOSAL_ALREADY_EXECUTED');
+  if (proposal.status === 'stale') throw new CompositeExecutionError('STALE_PROPOSAL');
+  if (proposal.status !== 'approved') throw new CompositeExecutionError('PLAN_NOT_APPROVED');
+
+  const current = await rebuildCurrentProposal(c, plan.projectId, {
+    recommendationId: proposal.recommendationId,
+  });
+  if (!current || current.proposalType !== proposal.proposalType) {
+    await markExecutionProposalStale(c, proposal, 'CURRENT_PROPOSAL_NOT_FOUND');
+    throw new CompositeExecutionError('STALE_PROPOSAL');
+  }
+  const currentFingerprint = await fingerprintProposal(
+    current.proposal,
+    current.proposalType,
+    current.recommendation.evidence,
+  );
+  if (currentFingerprint !== proposal.sourceFingerprint) {
+    await markExecutionProposalStale(c, proposal, 'SOURCE_FINGERPRINT_MISMATCH');
+    throw new CompositeExecutionError('STALE_PROPOSAL');
+  }
+
+  const probeState = await loadHttpsProbeState(c, proposal);
+  const preflight = buildExecutionPreflight({
+    proposal,
+    actorRole: text(c.get('userRole')),
+    confirmationProvided: true,
+    fingerprintMatches: true,
+    currentStateValid: true,
+    probeEligibility: probeState.eligibility,
+  });
+  if (!preflight.allowed) throw new CompositeExecutionError('PRECHECK_FAILED');
+
+  const operationPlan = buildOperationPlan({
+    proposal,
+    currentProposal: current.proposal,
+    context: current.context,
+    actor: { userId: text(c.get('userId')), role: text(c.get('userRole')) },
+    httpsProbe: { record: probeState.record, eligibility: probeState.eligibility },
+    policyAudit: policyAuditMetadata(preflight),
+  });
+  if (
+    operationPlan.operationType !== step.operationType
+    || operationPlan.target.entityId !== step.targetEntityId
+    || proposal.workspaceId !== plan.workspaceId
+    || proposal.projectId !== plan.projectId
+  ) throw new CompositeExecutionError('PRECHECK_FAILED');
+
+  return { step, proposal, operationPlan, sourceFingerprint: currentFingerprint };
+}
+
+app.post('/api/projects/:projectId/operation-plans/:planId/execute', async (c) => {
+  try {
+    requireRole(c, 'admin');
+    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    const plan = await loadCompositePlanOr404(c);
+    if (plan.status === 'executing') throw new CompositeExecutionError('PLAN_ALREADY_EXECUTING');
+    if (plan.status === 'executed') throw new CompositeExecutionError('PLAN_ALREADY_EXECUTED');
+    const policy = evaluateCompositePlanPolicy({
+      actorRole: text(c.get('userRole')),
+      actorUserId: text(c.get('userId')),
+      action: 'execute',
+      status: plan.status,
+      createdByUserId: plan.createdByUserId,
+      preflightAllowed: plan.preflight.allowed,
+      riskLevel: plan.riskLevel,
+    });
+    assertCompositePlanPolicy(policy);
+    const run = await executeCompositeOperationPlan({
+      db: c.env.smart_menu_db,
+      plan,
+      actor: { userId: text(c.get('userId')), role: text(c.get('userRole')) },
+      confirmation: body.confirmation === true,
+      prepareStep: step => prepareCompositeExecutionStep(c, plan, step),
+      executeStep: prepared => executeOperationPlan(
+        c.env.smart_menu_db,
+        prepared.operationPlan,
+        prepared.sourceFingerprint,
+      ),
+      rollbackStep: async (prepared, operationLog) => {
+        const proposal = await getStoredProposal(
+          c.env.smart_menu_db,
+          plan.workspaceId,
+          plan.projectId,
+          prepared.proposal.id,
+        );
+        if (!proposal) throw new RollbackExecutionError('ROLLBACK_NOT_AVAILABLE');
+        const rollbackContext = await buildRollbackContext({
+          db: c.env.smart_menu_db,
+          proposal,
+          role: text(c.get('userRole')),
+        });
+        if (rollbackContext.operationLog?.id !== operationLog.id) {
+          throw new RollbackExecutionError('ROLLBACK_NOT_AVAILABLE');
+        }
+        const rollbackPlan = buildRollbackPlan({
+          proposal,
+          operationLog: rollbackContext.operationLog,
+          currentTarget: rollbackContext.currentTarget,
+          actor: { userId: text(c.get('userId')), role: text(c.get('userRole')) },
+        });
+        return executeRollbackPlan(c.env.smart_menu_db, rollbackPlan);
+      },
+    });
+    const updated = await getStoredCompositePlan(
+      c.env.smart_menu_db,
+      plan.workspaceId,
+      plan.projectId,
+      plan.id,
+    );
+    if (!updated) throw new CompositeExecutionError('PLAN_NOT_FOUND');
+    const [events, runs] = await Promise.all([
+      listCompositePlanEvents(c.env.smart_menu_db, plan.workspaceId, plan.projectId, plan.id),
+      listPlanExecutionRuns(c.env.smart_menu_db, plan.workspaceId, plan.projectId, plan.id),
+    ]);
+    return c.json({
+      success: true,
+      plan: compositePlanResponse(updated, text(c.get('userRole')), text(c.get('userId'))),
+      run,
+      runs,
+      events,
+      refresh: ['guide', 'recommendations'],
+    });
+  } catch (error: unknown) {
+    if (error instanceof CompositeExecutionError) {
+      const status = error.code === 'PLAN_ROLE_NOT_ALLOWED' ? 403
+        : error.code === 'CONFIRMATION_REQUIRED' ? 400 : 409;
+      return c.json({
+        success: false,
+        code: error.code,
+        error: compositePlanErrorMessage(error.code),
+        ...(error.preflight ? { preflight: error.preflight } : {}),
+      }, status);
+    }
+    return compositePlanApiError(c, error);
+  }
+});
 
 app.post('/api/projects/:projectId/publish', async (c) => {
   const projectId = c.req.param('projectId');

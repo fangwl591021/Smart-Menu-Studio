@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
+import { emitGuideEvent } from '../guide-events';
 
 const RISK_META = {
   LOW: { label: '低風險', icon: '🟢', style: 'border-emerald-200 bg-emerald-50 text-emerald-800' },
@@ -11,6 +12,11 @@ const STATUS_META = {
   draft: { label: '草案', style: 'bg-gray-100 text-gray-700' },
   reviewed: { label: '已檢視', style: 'bg-blue-100 text-blue-700' },
   approved: { label: '已核准', style: 'bg-emerald-100 text-emerald-700' },
+  executing: { label: '執行中', style: 'bg-blue-100 text-blue-700' },
+  executed: { label: '已執行', style: 'bg-emerald-100 text-emerald-700' },
+  failed: { label: '執行失敗', style: 'bg-red-100 text-red-700' },
+  rolled_back: { label: '已安全回復', style: 'bg-amber-100 text-amber-800' },
+  partially_compensated: { label: '未完全回復', style: 'bg-red-100 text-red-800' },
   stale: { label: '已失效', style: 'bg-amber-100 text-amber-800' },
   cancelled: { label: '已取消', style: 'bg-gray-200 text-gray-600' },
 };
@@ -33,6 +39,17 @@ const EVENT_LABELS = {
   PLAN_APPROVED: '核准計畫',
   PLAN_STALE: '計畫失效',
   PLAN_CANCELLED: '取消計畫',
+  PLAN_EXECUTION_STARTED: '開始執行',
+  PLAN_STEP_STARTED: '步驟開始',
+  PLAN_STEP_SUCCEEDED: '步驟完成',
+  PLAN_STEP_FAILED: '步驟失敗',
+  PLAN_COMPENSATION_STARTED: '開始安全回復',
+  PLAN_STEP_ROLLBACK_SUCCEEDED: '步驟已回復',
+  PLAN_STEP_ROLLBACK_FAILED: '步驟回復失敗',
+  PLAN_EXECUTED: '計畫執行完成',
+  PLAN_FAILED: '計畫執行失敗',
+  PLAN_ROLLED_BACK: '計畫已安全回復',
+  PLAN_PARTIALLY_COMPENSATED: '計畫未完全回復',
 };
 
 const displayValue = value => value === '' || value === null || value === undefined ? '未設定' : String(value);
@@ -41,9 +58,10 @@ const formatTime = value => value ? new Date(value.replace(' ', 'T') + (value.in
 export default function OperationPlanManagement({ projectId, request, refreshKey = 0 }) {
   const [state, setState] = useState({ status: 'loading', proposals: [], plans: [], permissions: {}, error: '' });
   const [selected, setSelected] = useState([]);
-  const [detail, setDetail] = useState({ status: 'idle', plan: null, events: [], error: '' });
+  const [detail, setDetail] = useState({ status: 'idle', plan: null, events: [], runs: [], error: '' });
   const [busy, setBusy] = useState('');
   const [feedback, setFeedback] = useState(null);
+  const [executeConfirm, setExecuteConfirm] = useState(false);
 
   const load = useCallback(async () => {
     setState(previous => ({ ...previous, status: 'loading', error: '' }));
@@ -120,19 +138,19 @@ export default function OperationPlanManagement({ projectId, request, refreshKey
   };
 
   const openPlan = async planId => {
-    setDetail({ status: 'loading', plan: null, events: [], error: '' });
+    setDetail({ status: 'loading', plan: null, events: [], runs: [], error: '' });
     try {
       const response = await request(`/api/projects/${encodeURIComponent(projectId)}/operation-plans/${encodeURIComponent(planId)}`);
       const payload = await response.json();
       if (!response.ok || !payload.success) throw new Error(payload.error || '執行計畫讀取失敗。');
-      setDetail({ status: 'success', plan: payload.plan, events: payload.events || [], error: '' });
+      setDetail({ status: 'success', plan: payload.plan, events: payload.events || [], runs: payload.runs || [], error: '' });
     } catch (error) {
       console.error('Composite Plan detail request failed', error);
-      setDetail({ status: 'error', plan: null, events: [], error: error.message || '執行計畫讀取失敗。' });
+      setDetail({ status: 'error', plan: null, events: [], runs: [], error: error.message || '執行計畫讀取失敗。' });
     }
   };
 
-  const closePlan = () => setDetail({ status: 'idle', plan: null, events: [], error: '' });
+  const closePlan = () => { setExecuteConfirm(false); setDetail({ status: 'idle', plan: null, events: [], runs: [], error: '' }); };
 
   const runPlanAction = async action => {
     const plan = detail.plan;
@@ -162,12 +180,68 @@ export default function OperationPlanManagement({ projectId, request, refreshKey
     }
   };
 
+  const refreshExecutionState = async planId => {
+    try {
+      const response = await request(`/api/projects/${encodeURIComponent(projectId)}/operation-plans/${encodeURIComponent(planId)}`);
+      const payload = await response.json();
+      if (response.ok && payload.success) {
+        setDetail({ status: 'success', plan: payload.plan, events: payload.events || [], runs: payload.runs || [], error: '' });
+      }
+    } catch {
+      // The execute request remains authoritative; a transient polling failure is non-fatal.
+    }
+  };
+
+  const executePlan = async () => {
+    const plan = detail.plan;
+    if (!plan || busy || !executeConfirm) return;
+    setBusy('execute');
+    setFeedback(null);
+    let pollTimer;
+    try {
+      pollTimer = window.setInterval(() => refreshExecutionState(plan.id), 500);
+      const response = await request(
+        `/api/projects/${encodeURIComponent(projectId)}/operation-plans/${encodeURIComponent(plan.id)}/execute`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ confirmation: true }),
+        },
+      );
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        const failure = new Error(payload.error || '執行計畫失敗。');
+        failure.code = payload.code;
+        throw failure;
+      }
+      setExecuteConfirm(false);
+      setDetail({ status: 'success', plan: payload.plan, events: payload.events || [], runs: payload.runs || [], error: '' });
+      await load();
+      const finalStatus = payload.plan?.status;
+      setFeedback({
+        type: finalStatus === 'executed' || finalStatus === 'rolled_back' ? 'success' : 'error',
+        message: finalStatus === 'executed'
+          ? '✓ 執行計畫完成。'
+          : finalStatus === 'rolled_back'
+            ? '⚠ 計畫執行失敗，已安全回復先前修改。'
+            : '⚠ 計畫未完全回復，請依執行紀錄人工處理。',
+      });
+      emitGuideEvent({ type: 'guide-refresh', source: 'composite-plan-execution', projectId });
+    } catch (error) {
+      console.error('Composite Plan execute request failed', error);
+      setDetail(previous => ({ ...previous, error: error.message || '執行計畫失敗。' }));
+      await refreshExecutionState(plan.id);
+    } finally {
+      if (pollTimer) window.clearInterval(pollTimer);
+      setBusy('');
+    }
+  };
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm" aria-label="AI 執行計畫">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h3 className="font-bold text-gray-900">AI 執行計畫</h3>
-          <p className="mt-1 text-xs text-gray-500">將既有 P001／P002 Proposal 組成有順序與完整安全檢查的計畫；目前不提供批次執行。</p>
+          <p className="mt-1 text-xs text-gray-500">將既有 P001／P002 Proposal 組成有順序與完整安全檢查的計畫；核准後由後端依序安全執行。</p>
         </div>
         <button type="button" onClick={load} className="text-xs font-bold text-blue-600 underline">重新整理</button>
       </div>
@@ -252,12 +326,13 @@ export default function OperationPlanManagement({ projectId, request, refreshKey
               const plan = detail.plan;
               const status = STATUS_META[plan.status] || STATUS_META.draft;
               const risk = RISK_META[plan.riskLevel] || RISK_META.LOW;
+              const currentRun = detail.runs?.[0] || null;
               return (
                 <div className="mt-5 space-y-5">
                   <div className="flex flex-wrap items-center gap-2"><span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${risk.style}`}>{risk.icon} {risk.label}</span><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${status.style}`}>{status.label}</span><span className="text-xs text-gray-500">Policy v{plan.policyVersion}</span></div>
                   <div><div className="font-bold">{plan.title}</div><div className="mt-1 text-sm text-gray-600">{plan.riskReason}</div></div>
                   {plan.status === 'stale' && <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm font-bold text-amber-900">⚠ 此計畫建立後，部分專案設定已改變。</div>}
-                  {plan.status === 'approved' && <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-4 text-sm text-emerald-900"><div className="font-bold">✓ 計畫已核准</div><div className="mt-1">此階段核准的是執行計畫，不會修改專案資料。</div><div className="mt-1 font-bold">目前版本尚未開放批次執行。</div></div>}
+                  {plan.status === 'approved' && <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-4 text-sm text-emerald-900"><div className="font-bold">✓ 計畫已核准</div><div className="mt-1">執行前仍會由後端重建所有 Proposal 並重新執行完整安全檢查。</div></div>}
                   <div className="space-y-3">{plan.steps.map(step => (
                     <div key={step.id} className="rounded-lg border border-gray-200 p-4">
                       <div className="flex items-start justify-between gap-3"><div><div className="text-xs font-bold text-indigo-600">Step {step.sequence}</div><div className="mt-1 font-bold">{step.snapshot.title}</div><div className="mt-1 text-xs text-gray-500">{step.operationType}</div></div><span className="text-xs font-bold text-gray-500">{step.proposalType === 'https-upgrade-candidate' ? 'P002' : 'P001'}</span></div>
@@ -266,13 +341,34 @@ export default function OperationPlanManagement({ projectId, request, refreshKey
                       {step.dependencies.length > 0 && <div className="mt-3 rounded-md bg-blue-50 p-2 text-xs text-blue-800">需在 Step {plan.steps.find(item => item.id === step.dependencies[0])?.sequence || '前一步'} 完成後執行</div>}
                     </div>
                   ))}</div>
+                                    {currentRun && (
+                    <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-4">
+                      <div className="flex items-center justify-between gap-3"><div className="text-sm font-bold">執行紀錄</div><div className="text-xs font-bold">{STATUS_META[currentRun.status]?.label || currentRun.status}</div></div>
+                      <div className="mt-1 text-xs text-gray-500">{currentRun.actorName || '使用者'} · {formatTime(currentRun.startedAt)}</div>
+                      <div className="mt-3 space-y-2">{currentRun.steps.map(runStep => {
+                        const sourceStep = plan.steps.find(item => item.id === runStep.planStepId);
+                        return <div key={runStep.id} className="rounded-md bg-white px-3 py-2 text-xs"><div className="flex items-center justify-between"><span>Step {runStep.sequence} · {sourceStep?.snapshot?.title || runStep.planStepId}</span><span className="font-bold">{runStep.status === 'succeeded' ? '✓ 完成' : runStep.status === 'rollback_succeeded' ? '↩ 已回復' : runStep.status === 'rollback_failed' ? '⚠ 需人工處理' : runStep.status === 'failed' ? '✕ 失敗' : runStep.status === 'executing' ? '執行中…' : '等待中'}</span></div>{runStep.operationLogId && <div className="mt-1 break-all text-[11px] text-gray-500">Operation: {runStep.operationLogId}</div>}{runStep.rollbackOperationLogId && <div className="mt-1 break-all text-[11px] text-gray-500">Rollback: {runStep.rollbackOperationLogId}</div>}</div>;
+                      })}</div>
+                      {currentRun.status === 'rolled_back' && <div className="mt-3 text-sm font-bold text-amber-800">⚠ 計畫執行失敗，已安全回復先前修改。</div>}
+                      {currentRun.status === 'partially_compensated' && <div className="mt-3 text-sm font-bold text-red-700">⚠ 計畫未完全回復；請依失敗步驟人工處理，系統不提供 Force rollback。</div>}
+                    </div>
+                  )}
                   <div className="rounded-lg border border-gray-200 p-4"><div className="text-sm font-bold">Plan Preflight</div><div className="mt-3 grid gap-2 text-xs">{plan.preflight.checks.map(check => <div key={check.code} className="flex items-start gap-2"><span>{check.passed ? '✓' : '○'}</span><span>{PREFLIGHT_LABELS[check.code] || check.code}</span></div>)}</div></div>
                   <div><div className="text-sm font-bold">計畫歷程</div><div className="mt-2 space-y-2">{detail.events.map(event => <div key={event.id} className="rounded-lg border border-gray-200 p-3 text-xs"><div className="font-bold">{EVENT_LABELS[event.eventType] || event.eventType}</div><div className="mt-1 text-gray-500">{event.actorName || '系統'} · {formatTime(event.createdAt)}</div></div>)}</div></div>
                   {detail.error && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{detail.error}</div>}
+                                    {executeConfirm && plan.capabilities?.canExecute && (
+                    <div className="rounded-lg border-2 border-red-300 bg-red-50 p-4 text-sm text-red-900">
+                      <div className="font-bold">確認執行正式專案修改</div>
+                      <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs"><dt>計畫</dt><dd>{plan.title}</dd><dt>風險</dt><dd>{risk.label}</dd><dt>步驟</dt><dd>{plan.steps.length}</dd><dt>Rollback</dt><dd>{plan.steps.every(step => step.rollbackSupported) ? '所有步驟皆支援' : '部分步驟不支援'}</dd></dl>
+                      <div className="mt-3 font-bold">此操作將依序修改正式 Project 資料。</div>
+                      <div className="mt-4 flex justify-end gap-2"><button type="button" onClick={() => setExecuteConfirm(false)} disabled={Boolean(busy)} className="rounded-md border border-gray-300 bg-white px-3 py-2 font-bold">取消</button><button type="button" onClick={executePlan} disabled={Boolean(busy)} className="rounded-md bg-red-700 px-3 py-2 font-bold text-white disabled:opacity-50">{busy === 'execute' ? '等待後端執行結果…' : '確認執行計畫'}</button></div>
+                    </div>
+                  )}
                   <div className="flex flex-wrap justify-end gap-2">
                     {plan.capabilities?.canReview && <button type="button" onClick={() => runPlanAction('review')} disabled={Boolean(busy)} className="rounded-md border border-gray-300 px-3 py-2 text-sm font-bold disabled:opacity-50">標記已檢視</button>}
                     {plan.capabilities?.canApprove && <button type="button" onClick={() => runPlanAction('approve')} disabled={Boolean(busy)} className="rounded-md bg-emerald-700 px-3 py-2 text-sm font-bold text-white disabled:opacity-50">核准計畫</button>}
                     {plan.capabilities?.canCancel && <button type="button" onClick={() => runPlanAction('cancel')} disabled={Boolean(busy)} className="rounded-md bg-gray-700 px-3 py-2 text-sm font-bold text-white disabled:opacity-50">取消計畫</button>}
+                    {plan.capabilities?.canExecute && !executeConfirm && <button type="button" onClick={() => setExecuteConfirm(true)} disabled={Boolean(busy)} className="rounded-md bg-red-700 px-3 py-2 text-sm font-bold text-white disabled:opacity-50">執行已核准計畫</button>}
                   </div>
                 </div>
               );

@@ -393,7 +393,7 @@ export function rollbackPolicyAudit(proposalType: ProposalType) {
 
 export type PolicyAuditMetadata = ReturnType<typeof policyAuditMetadata>;
 
-export type CompositePlanPolicyAction = 'view' | 'create' | 'review' | 'approve' | 'cancel';
+export type CompositePlanPolicyAction = 'view' | 'create' | 'review' | 'approve' | 'cancel' | 'execute';
 export type CompositePlanPolicyReason =
   | 'PLAN_POLICY_ALLOWED'
   | 'PLAN_ROLE_NOT_ALLOWED'
@@ -411,14 +411,18 @@ export type CompositePlanPolicyEvaluation = {
     canReview: boolean;
     canApprove: boolean;
     canCancel: boolean;
-    canExecute: false;
+    canExecute: boolean;
   };
 };
+
+type CompositePolicyStatus =
+  | 'draft' | 'reviewed' | 'approved' | 'executing' | 'executed'
+  | 'failed' | 'rolled_back' | 'partially_compensated' | 'stale' | 'cancelled';
 
 function compositePlanDecision(input: {
   actorRole: WorkspaceRole;
   action: CompositePlanPolicyAction;
-  status?: 'draft' | 'reviewed' | 'approved' | 'stale' | 'cancelled';
+  status?: CompositePolicyStatus;
   actorUserId?: string;
   createdByUserId?: string;
   preflightAllowed?: boolean;
@@ -440,6 +444,13 @@ function compositePlanDecision(input: {
     if (input.preflightAllowed !== true) return 'PLAN_PREFLIGHT_BLOCKED';
     return 'PLAN_POLICY_ALLOWED';
   }
+  if (action === 'execute') {
+    if (!ADMINS.includes(actorRole)) return 'PLAN_ROLE_NOT_ALLOWED';
+    if (status !== 'approved') return 'PLAN_STATUS_NOT_ALLOWED';
+    if (input.riskLevel === 'HIGH') return 'PLAN_HIGH_RISK_APPROVAL_DISABLED';
+    if (input.preflightAllowed !== true) return 'PLAN_PREFLIGHT_BLOCKED';
+    return 'PLAN_POLICY_ALLOWED';
+  }
   if (status === 'cancelled' || status === 'stale' || !status) return 'PLAN_STATUS_NOT_ALLOWED';
   if (ADMINS.includes(actorRole)) return 'PLAN_POLICY_ALLOWED';
   if (
@@ -455,7 +466,7 @@ const cleanPolicyValue = (value: unknown) => String(value ?? '').replace(/[\u000
 export function evaluateCompositePlanPolicy(input: {
   actorRole: string;
   action: CompositePlanPolicyAction;
-  status?: 'draft' | 'reviewed' | 'approved' | 'stale' | 'cancelled';
+  status?: CompositePolicyStatus;
   actorUserId?: string;
   createdByUserId?: string;
   preflightAllowed?: boolean;
@@ -477,7 +488,7 @@ export function evaluateCompositePlanPolicy(input: {
       canReview: decide('review'),
       canApprove: decide('approve'),
       canCancel: decide('cancel'),
-      canExecute: false,
+      canExecute: decide('execute'),
     },
   };
 }
@@ -488,7 +499,7 @@ export function compositePlanPolicyMessage(reason: CompositePlanPolicyReason): s
     PLAN_ROLE_NOT_ALLOWED: '目前角色不允許執行此計畫操作。',
     PLAN_REVIEW_REQUIRED: '執行計畫必須先完成檢視。',
     PLAN_PREFLIGHT_BLOCKED: '執行計畫的安全檢查尚未全部通過。',
-    PLAN_HIGH_RISK_APPROVAL_DISABLED: '高風險執行計畫目前不可核准。',
+    PLAN_HIGH_RISK_APPROVAL_DISABLED: '高風險執行計畫目前不可核准或執行。',
     PLAN_STATUS_NOT_ALLOWED: '此執行計畫目前不能執行該狀態操作。',
   };
   return messages[reason];
