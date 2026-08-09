@@ -1,3 +1,4 @@
+import { calculateCommissionForAttribution } from './calculation-ledger.ts';
 export type CommissionAttributionReason = 'ATTRIBUTED' | 'ALREADY_ATTRIBUTED' | 'NOT_ATTRIBUTABLE' | 'PROGRAM_NOT_ACTIVE' | 'AMBIGUOUS_ACTIVE_PROGRAM' | 'NO_DEALER' | 'DEALER_NOT_ACTIVE' | 'DEALER_NOT_ELIGIBLE' | 'OUTSIDE_ATTRIBUTION_WINDOW' | 'SELF_ATTRIBUTION_BLOCKED';
 
 type StatusEvent = { to_status?: string | null; created_at?: string | null };
@@ -55,6 +56,9 @@ export async function evaluateCommissionAttribution(db: D1Database, input: { wor
 export async function establishCommissionAttribution(db: D1Database, input: { workspaceId: string; lineAccountId: string; conversionReferralEvidenceId: string }) {
   const decision = await evaluateCommissionAttribution(db, input);
   if (decision.reason !== 'ATTRIBUTED') return decision;
-  const result: any = await db.prepare("INSERT INTO commission_attributions(id,workspace_id,line_account_id,conversion_event_id,conversion_referral_evidence_id,member_referral_attribution_id,program_id,dealer_id,attribution_source,attributed_at) VALUES(?,?,?,?,?,?,?,?, 'REFERRAL_EVIDENCE',?) ON CONFLICT DO NOTHING").bind(`cat_${crypto.randomUUID()}`, input.workspaceId, input.lineAccountId, decision.conversionEventId, input.conversionReferralEvidenceId, decision.memberReferralAttributionId, decision.programId, decision.dealerId, decision.attributedAt).run();
-  return Number(result?.meta?.changes || 0) === 1 ? decision : { reason: 'ALREADY_ATTRIBUTED' as const };
+  const attributionId = `cat_${crypto.randomUUID()}`;
+  const result: any = await db.prepare("INSERT INTO commission_attributions(id,workspace_id,line_account_id,conversion_event_id,conversion_referral_evidence_id,member_referral_attribution_id,program_id,dealer_id,attribution_source,attributed_at) VALUES(?,?,?,?,?,?,?,?, 'REFERRAL_EVIDENCE',?) ON CONFLICT DO NOTHING").bind(attributionId, input.workspaceId, input.lineAccountId, decision.conversionEventId, input.conversionReferralEvidenceId, decision.memberReferralAttributionId, decision.programId, decision.dealerId, decision.attributedAt).run();
+  if (Number(result?.meta?.changes || 0) !== 1) return { reason: 'ALREADY_ATTRIBUTED' as const };
+  await calculateCommissionForAttribution(db, { workspaceId: input.workspaceId, lineAccountId: input.lineAccountId, commissionAttributionId: attributionId }).catch(() => {});
+  return decision;
 }
