@@ -5,6 +5,7 @@ import OperationPlanManagement from './components/OperationPlanManagement';
 import LineIntelligencePanel from './components/LineIntelligencePanel';
 import AIUsagePanel from './components/AIUsagePanel';
 import LineIntelligenceHealthPanel from './components/LineIntelligenceHealthPanel';
+import ReferralGrowthHealthPanel from './components/ReferralGrowthHealthPanel';
 import ConversionApiKeyPanel from './components/ConversionApiKeyPanel';
 import LiffReferralConfigPanel from './components/LiffReferralConfigPanel';
 import LiffReferralPage from './components/LiffReferralPage';
@@ -5074,7 +5075,10 @@ function AppShell() {
               <AIUsagePanel request={authFetch} systemAdmin={isPlatformAdminMode} />
             )}
             {currentView === 'intelligence-health' && isPlatformAdminMode && (
-              <LineIntelligenceHealthPanel request={authFetch} />
+              <>
+                <LineIntelligenceHealthPanel request={authFetch} />
+                <ReferralGrowthHealthPanel request={authFetch} />
+              </>
             )}
             {currentView === 'templates' && isPlatformAdminMode && (
               <SystemTemplatesView />
