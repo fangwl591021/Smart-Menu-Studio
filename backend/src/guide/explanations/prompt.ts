@@ -12,6 +12,12 @@ export const RECOMMENDATION_EXPLANATION_SYSTEM_PROMPT = [
 const SAFE_JOURNEY_EVIDENCE_KEYS = new Set(['periodFrom','periodTo','periodDays','observedActions','observedSessions','keywordMatches','webhookRoutes','webhookSuccesses','webhookFailures','webhookFailureRate','conversions','observedConversionRate','aggregateClicks','mappingRatio']);
 export function sanitizeJourneyRecommendationForAi(recommendation: Recommendation): BehaviorExplanationRecommendationInput { const evidence=recommendation.evidence.filter(item=>SAFE_JOURNEY_EVIDENCE_KEYS.has(item.key)&&primitive(item.value)).map(item=>({key:item.key,value:item.value})); const value=(key:string)=>evidence.find(item=>item.key===key)?.value; return {ruleCode:recommendation.ruleCode,category:recommendation.category,priority:recommendation.priority,tone:recommendation.tone==='positive'?'positive':'improvement',title:recommendation.title,message:recommendation.message,period:{from:typeof value('periodFrom')==='string'?value('periodFrom'):'',to:typeof value('periodTo')==='string'?value('periodTo'):'',days:typeof value('periodDays')==='number'?value('periodDays'):0},evidence}; }
 
+const SAFE_OPTIMIZATION_EVIDENCE_KEYS = new Set(['periodFrom','periodTo','periodDays','aggregateLineClicks','trackedUriClicks','attributionCoverage','trackedObservedConversionRate','observedActions','attributedConversions','conversions','activeConversionSources','staleConversionSources','webhookFailureRate','mappingRatio','areaId']);
+export function sanitizeOptimizationRecommendationForAi(recommendation: Recommendation): BehaviorExplanationRecommendationInput {
+  const evidence = recommendation.evidence.filter(item => SAFE_OPTIMIZATION_EVIDENCE_KEYS.has(item.key) && primitive(item.value)).map(item => ({ key:item.key, value:item.value }));
+  const value = (key:string) => evidence.find(item => item.key === key)?.value;
+  return { ruleCode:recommendation.ruleCode, category:recommendation.category, priority:recommendation.priority, tone:recommendation.tone==='positive'?'positive':'improvement', title:recommendation.title, message:recommendation.message, period:{from:typeof value('periodFrom')==='string'?value('periodFrom'):'',to:typeof value('periodTo')==='string'?value('periodTo'):'',days:typeof value('periodDays')==='number'?value('periodDays'):0}, evidence };
+}
 const SAFE_BEHAVIOR_EVIDENCE_KEYS = new Set(['periodFrom', 'periodTo', 'periodDays', 'impressions', 'clicks', 'metricsThrough', 'areaLabel', 'areaClicks', 'shareOfClicks', 'combinedShare', 'areaCount', 'lowEngagementAreaCount', 'lowEngagementRatio', 'uriClicks', 'totalClicks', 'uriShare', 'postbackClicks', 'postbackShare', 'recentClicks', 'previousClicks', 'recentCtr', 'previousCtr']);
 const primitive = (value: unknown): value is string | number | boolean | null => value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
 
@@ -23,6 +29,7 @@ export function sanitizeBehaviorRecommendationForAi(recommendation: Recommendati
 
 export function toExplanationInput(recommendation: Recommendation): ExplanationRecommendationInput | BehaviorExplanationRecommendationInput {
   if (recommendation.source === 'journey') return sanitizeJourneyRecommendationForAi(recommendation);
+  if (recommendation.source === 'optimization') return sanitizeOptimizationRecommendationForAi(recommendation);
   if (recommendation.source === 'behavior') return sanitizeBehaviorRecommendationForAi(recommendation);
   return {
     ruleCode: recommendation.ruleCode,

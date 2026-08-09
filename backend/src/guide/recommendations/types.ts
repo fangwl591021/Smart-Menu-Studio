@@ -8,9 +8,10 @@ export type RecommendationCategory =
   | 'maintainability'
   | 'line-oa'
   | 'structure'
-  | 'journey';
+  | 'journey'
+  | 'optimization';
 
-export type RecommendationSource = 'configuration' | 'behavior' | 'journey';
+export type RecommendationSource = 'configuration' | 'behavior' | 'journey' | 'optimization';
 export type RecommendationTone = 'improvement' | 'positive';
 
 export type RecommendationPriority = 'high' | 'medium' | 'low';

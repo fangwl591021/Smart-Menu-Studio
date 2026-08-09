@@ -1,4 +1,4 @@
-﻿export type GuideStatus = 'complete' | 'incomplete' | 'blocked';
+export type GuideStatus = 'complete' | 'incomplete' | 'blocked';
 
 export type GuideActionType = 'navigate' | 'focus' | 'open_tab' | 'select_entity' | 'none';
 
@@ -51,6 +51,8 @@ export type GuideContext = {
     webhookEnabled: boolean;
   };
   behavior?: any;
+  journey?: any;
+  optimization?: any;
   completeness: {
     projectHasImage: boolean;
     allAreasConfigured: boolean;

@@ -1,6 +1,8 @@
 export const AI_FEATURE_CODES = Object.freeze([
   'recommendation_explanation',
   'behavior_recommendation_explanation',
+  'journey_recommendation_explanation',
+  'optimization_recommendation_explanation',
   'proposal_explanation',
   'rich_menu_image_analysis',
   'guide_explanation',
