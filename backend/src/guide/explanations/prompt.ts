@@ -18,6 +18,8 @@ export function sanitizeOptimizationRecommendationForAi(recommendation: Recommen
   const value = (key:string) => evidence.find(item => item.key === key)?.value;
   return { ruleCode:recommendation.ruleCode, category:recommendation.category, priority:recommendation.priority, tone:recommendation.tone==='positive'?'positive':'improvement', title:recommendation.title, message:recommendation.message, period:{from:typeof value('periodFrom')==='string'?value('periodFrom'):'',to:typeof value('periodTo')==='string'?value('periodTo'):'',days:typeof value('periodDays')==='number'?value('periodDays'):0}, evidence };
 }
+const SAFE_REFERRAL_GROWTH_EVIDENCE_KEYS = new Set(['periodFrom','periodTo','periodDays','landings','authenticated','friendshipConfirmed','memberEstablished','qualified','landingToAuth','authToFriendship','friendshipToMember','memberToQualified','overallQualificationRate','source','sourceLandings','sourceQualified','sourceQualificationRate']);
+export function sanitizeReferralGrowthRecommendationForAi(recommendation: Recommendation): BehaviorExplanationRecommendationInput { const evidence=recommendation.evidence.filter(item=>SAFE_REFERRAL_GROWTH_EVIDENCE_KEYS.has(item.key)&&primitive(item.value)).map(item=>({key:item.key,value:item.value})); const value=(key:string)=>evidence.find(item=>item.key===key)?.value; return {ruleCode:recommendation.ruleCode,category:recommendation.category,priority:recommendation.priority,tone:recommendation.tone==='positive'?'positive':'improvement',title:recommendation.title,message:recommendation.message,period:{from:typeof value('periodFrom')==='string'?value('periodFrom'):'',to:typeof value('periodTo')==='string'?value('periodTo'):'',days:typeof value('periodDays')==='number'?value('periodDays'):0},evidence}; }
 const SAFE_BEHAVIOR_EVIDENCE_KEYS = new Set(['periodFrom', 'periodTo', 'periodDays', 'impressions', 'clicks', 'metricsThrough', 'areaLabel', 'areaClicks', 'shareOfClicks', 'combinedShare', 'areaCount', 'lowEngagementAreaCount', 'lowEngagementRatio', 'uriClicks', 'totalClicks', 'uriShare', 'postbackClicks', 'postbackShare', 'recentClicks', 'previousClicks', 'recentCtr', 'previousCtr']);
 const primitive = (value: unknown): value is string | number | boolean | null => value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
 
@@ -31,6 +33,7 @@ export function toExplanationInput(recommendation: Recommendation): ExplanationR
   if (recommendation.source === 'journey') return sanitizeJourneyRecommendationForAi(recommendation);
   if (recommendation.source === 'optimization') return sanitizeOptimizationRecommendationForAi(recommendation);
   if (recommendation.source === 'behavior') return sanitizeBehaviorRecommendationForAi(recommendation);
+  if (recommendation.source === 'referral_growth') return sanitizeReferralGrowthRecommendationForAi(recommendation);
   return {
     ruleCode: recommendation.ruleCode,
     category: recommendation.category,
