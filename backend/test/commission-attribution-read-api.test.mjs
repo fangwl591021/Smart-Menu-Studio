@@ -48,7 +48,7 @@ test('read-only routes scope account/program, derive dealer identity server-side
   assert.match(tenant, /requireRole\(c,'viewer'\)/);
   assert.match(tenant, /workspace_id=\? AND line_account_id=\?/);
   assert.match(tenant, /programId&&!await db\.prepare\('SELECT id FROM commission_programs WHERE id=\? AND workspace_id=\? AND line_account_id=\? LIMIT 1'\)/);
-  const self = source.slice(source.indexOf("app.get('/api/member/dealer/commission-attributions'"), source.indexOf("app.post('/api/member/conversion-referral-context'"));
+  const self = source.slice(source.indexOf("app.get('/api/member/dealer/commission-attributions'"), source.indexOf("app.get('/api/member/dealer/commission-ledger'"));
   assert.match(self, /verifiedReferralMember/);
   assert.match(self, /member_id=\? LIMIT 1/);
   assert.match(self, /NOT_ENROLLED/);
