@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import SmartGuide from './components/SmartGuide';
 import ProposalManagement from './components/ProposalManagement';
+import OperationPlanManagement from './components/OperationPlanManagement';
 import { emitGuideEvent } from './guide-events';
 import { 
   LayoutDashboard, 
@@ -1000,6 +1001,11 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
             refreshKey={proposalRefreshKey}
             onExecuted={handleProposalExecuted}
             onRolledBack={handleProposalRolledBack}
+          />
+          <OperationPlanManagement
+            projectId={projectId}
+            request={authFetch}
+            refreshKey={proposalRefreshKey}
           />
         </div>
 

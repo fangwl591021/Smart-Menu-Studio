@@ -68,6 +68,24 @@ import {
   policyReasonMessage,
   publicPolicySummary,
 } from './guide/proposals/policy';
+import {
+  compositePlanPolicyMessage,
+  evaluateCompositePlanPolicy,
+} from './guide/proposals/policy';
+import {
+  buildCompositeOperationPlan,
+  CompositePlanError,
+  compositeRiskReason,
+  type CompositeOperationPlan,
+} from './guide/proposals/composite-plan';
+import {
+  createStoredCompositePlan,
+  getStoredCompositePlan,
+  listCompositePlanEvents,
+  listStoredCompositePlans,
+  transitionStoredCompositePlan,
+  updateCompositePlanPreflight,
+} from './guide/proposals/composite-plan-persistence';
 import { GEMINI_MODEL, requestGeminiContent } from './gemini';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -3200,6 +3218,417 @@ app.post('/api/projects/:projectId/proposals/:proposalId/rollback', async (c) =>
     return rollbackApiError(c, error);
   }
 });
+
+class CompositePlanApiError extends Error {
+  readonly code: string;
+  readonly details?: Record<string, unknown>;
+  constructor(code: string, details?: Record<string, unknown>) {
+    super(code);
+    this.code = code;
+    this.details = details;
+    this.name = 'CompositePlanApiError';
+  }
+}
+
+function compositePlanErrorMessage(code: string): string {
+  const messages: Record<string, string> = {
+    PLAN_NOT_FOUND: '找不到執行計畫。',
+    PLAN_PROPOSAL_NOT_FOUND: '找不到選取的改善方案。',
+    INVALID_PLAN_SELECTION: '請選擇 1 至 20 個改善方案。',
+    DUPLICATE_PROPOSAL: '同一個改善方案不能重複加入計畫。',
+    PLAN_CONFLICT: '兩個改善方案要修改同一個欄位，無法建立安全執行計畫。',
+    TARGET_MISSING: '改善方案指定的目標已不存在。',
+    STALE_PROPOSAL: '改善方案已失效，請重新產生。',
+    EXPIRED_PROBE: 'HTTPS SAFE Probe 已過期。',
+    CROSS_WORKSPACE_TARGET: '找不到選取的改善方案或目標。',
+    PROPOSAL_ALREADY_EXECUTED: '已執行的改善方案不能加入新的執行計畫。',
+    PLAN_CONTAINS_NON_EXECUTABLE_PROPOSAL: '此計畫包含目前不可執行的改善方案。',
+    POLICY_VERSION_MISMATCH: '執行政策版本已變更，請重新建立計畫。',
+    PLAN_CREATE_CONFLICT: '執行計畫建立衝突，請重新整理。',
+    PLAN_CONFLICT_STATE: '執行計畫已被其他操作更新。',
+    INVALID_PLAN_TRANSITION: '此執行計畫目前不能執行該狀態操作。',
+  };
+  return messages[code] || '執行計畫操作失敗。';
+}
+
+function compositePlanApiError(c: any, error: unknown) {
+  if (error instanceof CompositePlanError || error instanceof CompositePlanApiError) {
+    const code = error.code;
+    const status = ['PLAN_NOT_FOUND', 'PLAN_PROPOSAL_NOT_FOUND'].includes(code)
+      ? 404
+      : ['INVALID_PLAN_SELECTION'].includes(code)
+        ? 400
+        : 409;
+    return c.json({
+      success: false,
+      code,
+      error: compositePlanErrorMessage(code),
+      ...(error.details ? { details: error.details } : {}),
+    }, status);
+  }
+  const message = (error as { message?: string })?.message || '';
+  if (message.startsWith('PLAN_') || message === 'INVALID_PLAN_TRANSITION') {
+    const code = message === 'PLAN_CONFLICT' ? 'PLAN_CONFLICT_STATE' : message;
+    return c.json({ success: false, code, error: compositePlanErrorMessage(code) }, 409);
+  }
+  console.error(JSON.stringify({ message: 'composite operation plan failed', status: 'error' }));
+  return c.json({ success: false, code: 'PLAN_OPERATION_FAILED', error: '執行計畫操作失敗。' }, 500);
+}
+
+function assertCompositePlanPolicy(evaluation: ReturnType<typeof evaluateCompositePlanPolicy>): void {
+  if (!evaluation.allowed) {
+    throw new CompositePlanApiError(evaluation.reasonCode, {
+      message: compositePlanPolicyMessage(evaluation.reasonCode),
+    });
+  }
+}
+
+function compositePlanResponse(plan: CompositeOperationPlan, actorRole: string, actorUserId: string) {
+  const policy = evaluateCompositePlanPolicy({
+    actorRole,
+    actorUserId,
+    action: 'view',
+    status: plan.status,
+    createdByUserId: plan.createdByUserId,
+    preflightAllowed: plan.preflight.allowed,
+    riskLevel: plan.riskLevel,
+  });
+  return {
+    id: plan.id,
+    projectId: plan.projectId,
+    title: plan.title,
+    status: plan.status,
+    riskLevel: plan.riskLevel,
+    riskReason: compositeRiskReason(plan.riskLevel),
+    policyVersion: plan.policyVersion,
+    steps: plan.steps.map(step => ({
+      id: step.id,
+      sequence: step.sequence,
+      proposalId: step.proposalId,
+      proposalType: step.proposalType,
+      operationType: step.operationType,
+      riskLevel: step.riskLevel,
+      targetEntityType: step.targetEntityType,
+      targetEntityId: step.targetEntityId,
+      dependencies: step.dependencies,
+      executable: step.executable,
+      rollbackSupported: step.rollbackSupported,
+      requirements: step.requirements,
+      snapshot: {
+        title: step.snapshot.title,
+        field: step.snapshot.field,
+        before: step.snapshot.before,
+        after: step.snapshot.after,
+        proposalStatus: step.snapshot.proposalStatus,
+        fingerprintMatches: step.snapshot.fingerprintMatches,
+        targetExists: step.snapshot.targetExists,
+        targetInWorkspace: step.snapshot.targetInWorkspace,
+        probeEligibility: step.snapshot.probeEligibility,
+      },
+    })),
+    preflight: plan.preflight,
+    sourceFingerprint: plan.sourceFingerprint,
+    createdByUserId: plan.createdByUserId,
+    reviewedByUserId: plan.reviewedByUserId,
+    approvedByUserId: plan.approvedByUserId,
+    cancelledByUserId: plan.cancelledByUserId,
+    createdAt: plan.createdAt,
+    updatedAt: plan.updatedAt,
+    reviewedAt: plan.reviewedAt,
+    approvedAt: plan.approvedAt,
+    cancelledAt: plan.cancelledAt,
+    capabilities: { ...policy.capabilities, canExecute: false as const },
+    execution: {
+      enabled: false,
+      message: plan.status === 'approved'
+        ? '目前版本尚未開放批次執行。'
+        : '此階段只建立、檢視與核准執行計畫。',
+    },
+  };
+}
+
+function blockedCompositePreflight(plan: CompositeOperationPlan, reason: string) {
+  const code = reason === 'TARGET_MISSING'
+    ? 'ALL_TARGETS_EXIST'
+    : reason === 'CROSS_WORKSPACE_TARGET'
+      ? 'ALL_TARGETS_IN_WORKSPACE'
+      : reason === 'POLICY_VERSION_MISMATCH'
+        ? 'POLICY_VERSION_VALID'
+        : reason === 'PROPOSAL_ALREADY_EXECUTED'
+          ? 'ALL_STEPS_EXECUTABLE'
+          : 'ALL_FINGERPRINTS_MATCH';
+  return {
+    allowed: false,
+    result: 'BLOCKED' as const,
+    checks: plan.preflight.checks.map(check => check.code === code
+      ? { ...check, passed: false, message: reason }
+      : check),
+  };
+}
+
+async function refreshCompositePlan(c: any, storedPlan: CompositeOperationPlan): Promise<CompositeOperationPlan> {
+  const workspaceId = workspaceIdOf(c);
+  if (storedPlan.workspaceId !== workspaceId || storedPlan.projectId !== c.req.param('projectId')) {
+    throw new CompositePlanApiError('PLAN_NOT_FOUND');
+  }
+  const context = await buildGuideContext({
+    db: c.env.smart_menu_db,
+    workspaceId,
+    userId: text(c.get('userId')),
+    route: `/projects/${storedPlan.projectId}`,
+    entityType: 'project',
+    entityId: storedPlan.projectId,
+  });
+  if (!context) throw new CompositePlanApiError('PLAN_NOT_FOUND');
+  let staleReason = '';
+  const proposalInputs: Array<{
+    proposal: StoredProposal;
+    fingerprintMatches: boolean;
+    probeEligibility: HttpsProbeEligibility;
+  }> = [];
+  for (const step of storedPlan.steps) {
+    let proposal = await getStoredProposal(
+      c.env.smart_menu_db,
+      workspaceId,
+      storedPlan.projectId,
+      step.proposalId,
+    );
+    if (!proposal) {
+      staleReason = 'TARGET_MISSING';
+      break;
+    }
+    proposal = await refreshStaleStatus(c, proposal);
+    if (proposal.status === 'stale') {
+      staleReason = 'STALE_PROPOSAL';
+      break;
+    }
+    if (proposal.status === 'executed') {
+      staleReason = 'PROPOSAL_ALREADY_EXECUTED';
+      break;
+    }
+    const probe = await loadHttpsProbeState(c, proposal);
+    proposalInputs.push({
+      proposal,
+      fingerprintMatches: proposal.sourceFingerprint === step.snapshot.proposalFingerprint,
+      probeEligibility: probe.eligibility,
+    });
+  }
+  let rebuilt: CompositeOperationPlan | null = null;
+  if (!staleReason) {
+    try {
+      rebuilt = await buildCompositeOperationPlan({
+        id: storedPlan.id,
+        workspaceId,
+        projectId: storedPlan.projectId,
+        title: storedPlan.title,
+        proposals: proposalInputs,
+        context,
+        actorUserId: storedPlan.createdByUserId,
+        now: storedPlan.createdAt,
+      });
+      if (rebuilt.sourceFingerprint !== storedPlan.sourceFingerprint) staleReason = 'STALE_PROPOSAL';
+    } catch (error) {
+      if (error instanceof CompositePlanError) staleReason = error.code;
+      else throw error;
+    }
+  }
+  if (staleReason) {
+    const preflight = blockedCompositePreflight(storedPlan, staleReason);
+    if (['draft', 'reviewed', 'approved'].includes(storedPlan.status)) {
+      try {
+        await transitionStoredCompositePlan(c.env.smart_menu_db, {
+          plan: storedPlan,
+          toStatus: 'stale',
+          preflight,
+          metadata: { reason: staleReason },
+        });
+      } catch (error: any) {
+        if (!['PLAN_CONFLICT', 'INVALID_PLAN_TRANSITION'].includes(error?.message)) throw error;
+      }
+      const stale = await getStoredCompositePlan(
+        c.env.smart_menu_db,
+        workspaceId,
+        storedPlan.projectId,
+        storedPlan.id,
+      );
+      if (stale) return { ...stale, preflight };
+    }
+    return { ...storedPlan, status: storedPlan.status === 'cancelled' ? 'cancelled' : 'stale', preflight };
+  }
+  const live = {
+    ...storedPlan,
+    steps: rebuilt!.steps,
+    preflight: rebuilt!.preflight,
+    riskLevel: rebuilt!.riskLevel,
+  };
+  if (
+    ['draft', 'reviewed', 'approved'].includes(storedPlan.status)
+    && JSON.stringify(storedPlan.preflight) !== JSON.stringify(live.preflight)
+  ) {
+    try {
+      await updateCompositePlanPreflight(c.env.smart_menu_db, storedPlan, live.preflight);
+    } catch (error: any) {
+      if (error?.message !== 'PLAN_CONFLICT') throw error;
+    }
+  }
+  return live;
+}
+
+async function loadCompositePlanOr404(c: any): Promise<CompositeOperationPlan> {
+  const plan = await getStoredCompositePlan(
+    c.env.smart_menu_db,
+    workspaceIdOf(c),
+    c.req.param('projectId'),
+    c.req.param('planId'),
+  );
+  if (!plan) throw new CompositePlanApiError('PLAN_NOT_FOUND');
+  return refreshCompositePlan(c, plan);
+}
+
+app.post('/api/projects/:projectId/operation-plans', async (c) => {
+  try {
+    requireRole(c, 'editor');
+    const planPolicy = evaluateCompositePlanPolicy({
+      actorRole: text(c.get('userRole')),
+      action: 'create',
+    });
+    assertCompositePlanPolicy(planPolicy);
+    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    const proposalIds = Array.isArray(body.proposalIds)
+      ? body.proposalIds.map(text).filter(Boolean)
+      : [];
+    if (proposalIds.length < 1 || proposalIds.length > 20) {
+      throw new CompositePlanApiError('INVALID_PLAN_SELECTION');
+    }
+    const workspaceId = workspaceIdOf(c);
+    const projectId = c.req.param('projectId');
+    const context = await buildGuideContext({
+      db: c.env.smart_menu_db,
+      workspaceId,
+      userId: text(c.get('userId')),
+      route: `/projects/${projectId}`,
+      entityType: 'project',
+      entityId: projectId,
+    });
+    if (!context) throw new CompositePlanApiError('PLAN_NOT_FOUND');
+    const inputs = [];
+    for (const proposalId of proposalIds) {
+      let proposal = await getStoredProposal(c.env.smart_menu_db, workspaceId, projectId, proposalId);
+      if (!proposal) throw new CompositePlanApiError('PLAN_PROPOSAL_NOT_FOUND');
+      proposal = await refreshStaleStatus(c, proposal);
+      const probe = await loadHttpsProbeState(c, proposal);
+      inputs.push({ proposal, fingerprintMatches: proposal.status !== 'stale', probeEligibility: probe.eligibility });
+    }
+    const planId = `aiop_${Date.now()}_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
+    const plan = await buildCompositeOperationPlan({
+      id: planId,
+      workspaceId,
+      projectId,
+      proposals: inputs,
+      context,
+      actorUserId: text(c.get('userId')),
+    });
+    await createStoredCompositePlan(c.env.smart_menu_db, plan);
+    const stored = await getStoredCompositePlan(c.env.smart_menu_db, workspaceId, projectId, planId);
+    if (!stored) throw new Error('PLAN_CREATE_READ_FAILED');
+    return c.json({
+      success: true,
+      plan: compositePlanResponse(stored, text(c.get('userRole')), text(c.get('userId'))),
+    }, 201);
+  } catch (error) {
+    return compositePlanApiError(c, error);
+  }
+});
+
+app.get('/api/projects/:projectId/operation-plans', async (c) => {
+  try {
+    const plans = await listStoredCompositePlans(
+      c.env.smart_menu_db,
+      workspaceIdOf(c),
+      c.req.param('projectId'),
+    );
+    const refreshed = await Promise.all(plans.map(plan => refreshCompositePlan(c, plan)));
+    const permissionPolicy = evaluateCompositePlanPolicy({
+      actorRole: text(c.get('userRole')),
+      action: 'view',
+    });
+    return c.json({
+      success: true,
+      plans: refreshed.map(plan => compositePlanResponse(plan, text(c.get('userRole')), text(c.get('userId')))),
+      permissions: permissionPolicy.capabilities,
+    });
+  } catch (error) {
+    return compositePlanApiError(c, error);
+  }
+});
+
+app.get('/api/projects/:projectId/operation-plans/:planId', async (c) => {
+  try {
+    const plan = await loadCompositePlanOr404(c);
+    const events = await listCompositePlanEvents(
+      c.env.smart_menu_db,
+      workspaceIdOf(c),
+      c.req.param('projectId'),
+      plan.id,
+    );
+    return c.json({
+      success: true,
+      plan: compositePlanResponse(plan, text(c.get('userRole')), text(c.get('userId'))),
+      events,
+    });
+  } catch (error) {
+    return compositePlanApiError(c, error);
+  }
+});
+
+async function transitionCompositePlanRoute(c: any, action: 'review' | 'approve' | 'cancel') {
+  try {
+    requireRole(c, action === 'approve' ? 'admin' : 'editor');
+    const plan = await loadCompositePlanOr404(c);
+    const evaluation = evaluateCompositePlanPolicy({
+      actorRole: text(c.get('userRole')),
+      actorUserId: text(c.get('userId')),
+      action,
+      status: plan.status,
+      createdByUserId: plan.createdByUserId,
+      preflightAllowed: plan.preflight.allowed,
+      riskLevel: plan.riskLevel,
+    });
+    assertCompositePlanPolicy(evaluation);
+    const toStatus = action === 'review' ? 'reviewed' : action === 'approve' ? 'approved' : 'cancelled';
+    await transitionStoredCompositePlan(c.env.smart_menu_db, {
+      plan,
+      toStatus,
+      actorUserId: text(c.get('userId')),
+      preflight: plan.preflight,
+    });
+    const updated = await getStoredCompositePlan(
+      c.env.smart_menu_db,
+      workspaceIdOf(c),
+      c.req.param('projectId'),
+      plan.id,
+    );
+    if (!updated) throw new CompositePlanApiError('PLAN_NOT_FOUND');
+    return c.json({
+      success: true,
+      plan: compositePlanResponse(updated, text(c.get('userRole')), text(c.get('userId'))),
+    });
+  } catch (error) {
+    if (error instanceof CompositePlanApiError && error.code.startsWith('PLAN_')) {
+      const reason = error.code as Parameters<typeof compositePlanPolicyMessage>[0];
+      if (['PLAN_ROLE_NOT_ALLOWED', 'PLAN_REVIEW_REQUIRED', 'PLAN_PREFLIGHT_BLOCKED', 'PLAN_HIGH_RISK_APPROVAL_DISABLED', 'PLAN_STATUS_NOT_ALLOWED'].includes(reason)) {
+        const status = reason === 'PLAN_ROLE_NOT_ALLOWED' ? 403 : 409;
+        return c.json({ success: false, code: reason, error: compositePlanPolicyMessage(reason) }, status);
+      }
+    }
+    return compositePlanApiError(c, error);
+  }
+}
+
+app.post('/api/projects/:projectId/operation-plans/:planId/review', c => transitionCompositePlanRoute(c, 'review'));
+app.post('/api/projects/:projectId/operation-plans/:planId/approve', c => transitionCompositePlanRoute(c, 'approve'));
+app.post('/api/projects/:projectId/operation-plans/:planId/cancel', c => transitionCompositePlanRoute(c, 'cancel'));
+
 app.post('/api/projects/:projectId/publish', async (c) => {
   const projectId = c.req.param('projectId');
 
