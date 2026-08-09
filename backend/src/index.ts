@@ -106,6 +106,7 @@ import { authenticateConversionApiKey, conversionKeyHash, conversionMetadata, cr
 import { writeGatewayJourneyEvent } from './journey/engine';
 import { funnel, lastObservedTouch, rebuildJourneyDaily } from './journey/core';
 import { appendAttributionToken, createAttributionToken, destinationFingerprint, safeDestination, trackedTokenHash } from './journey/tracked-uri';
+import { conversionSource, sanitizeConversionMetadata, conversionSourceHealthRows } from './journey/conversion-sources';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
@@ -2477,13 +2478,25 @@ app.get('/r/:trackingToken', async c => {
 app.get('/api/workspaces/conversion-api-keys', async c => { try { requireRole(c,'admin'); const rows:any[]=(await c.env.smart_menu_db.prepare('SELECT id,name,key_prefix,status,last_used_at,created_at,revoked_at FROM workspace_conversion_api_keys WHERE workspace_id=? ORDER BY created_at DESC').bind(workspaceIdOf(c)).all()).results||[]; return c.json({success:true,keys:rows.map(x=>({id:x.id,name:x.name,prefix:x.key_prefix,status:x.status,lastUsedAt:x.last_used_at,createdAt:x.created_at,revokedAt:x.revoked_at}))}); } catch { return c.json({success:false,error:'FORBIDDEN'},403); } });
 app.post('/api/workspaces/conversion-api-keys', async c => { try { requireRole(c,'admin'); const body:any=await c.req.json().catch(()=>({})); const created=createConversionApiKey(); const id='cak_'+crypto.randomUUID(); await c.env.smart_menu_db.prepare('INSERT INTO workspace_conversion_api_keys (id,workspace_id,name,key_prefix,key_hash,created_by_user_id) VALUES (?,?,?,?,?,?)').bind(id,workspaceIdOf(c),text(body.name||'Conversion integration').slice(0,80),created.prefix,await conversionKeyHash(created.key),text(c.get('userId'))).run(); return c.json({success:true,key:{id,name:text(body.name||'Conversion integration').slice(0,80),prefix:created.prefix,status:'active',secret:created.key}}); } catch { return c.json({success:false,error:'FORBIDDEN'},403); } });
 app.post('/api/workspaces/conversion-api-keys/:keyId/revoke', async c => { try { requireRole(c,'admin'); await c.env.smart_menu_db.prepare("UPDATE workspace_conversion_api_keys SET status='revoked',revoked_at=CURRENT_TIMESTAMP WHERE id=? AND workspace_id=? AND status='active'").bind(c.req.param('keyId'),workspaceIdOf(c)).run(); return c.json({success:true}); } catch { return c.json({success:false,error:'FORBIDDEN'},403); } });
+app.get('/api/intelligence/conversions/sources/health', async c => {
+  const workspaceId = workspaceIdOf(c);
+  const rows: any[] = (await c.env.smart_menu_db.prepare("SELECT conversion_source,COUNT(*) event_count,MAX(occurred_at) last_event_at,COUNT(*) conversions,COALESCE(SUM(value_minor),0) conversion_value_minor FROM line_conversion_events WHERE workspace_id=? GROUP BY conversion_source ORDER BY conversion_source").bind(workspaceId).all()).results || [];
+  const activeKey = await c.env.smart_menu_db.prepare("SELECT id FROM workspace_conversion_api_keys WHERE workspace_id=? AND status='active' LIMIT 1").bind(workspaceId).first();
+  return c.json({ success: true, sources: conversionSourceHealthRows(rows, Date.now(), Boolean(activeKey)) });
+});
 app.post('/api/intelligence/conversions', async c => {
   const credential = await authenticateConversionApiKey(c.env.smart_menu_db, c.req.header('authorization'));
   if (!credential) return c.json({ success: false, error: 'UNAUTHORIZED' }, 401);
   const body: any = await c.req.json().catch(() => null);
   if (!body || !['lead', 'signup', 'registration', 'booking', 'purchase', 'custom'].includes(text(body.conversionType)) || !text(body.externalEventId)) return c.json({ success: false, error: 'INVALID_CONVERSION' }, 400);
+  const source = conversionSource(text(body.sourceCode), text(body.conversionType));
+  if (!source) return c.json({ success: false, error: text(body.sourceCode) ? 'INVALID_CONVERSION_SOURCE_TYPE' : 'INVALID_CONVERSION_SOURCE' }, 400);
+  const safeMetadata = sanitizeConversionMetadata(body.metadata);
+  void safeMetadata;
   const value = body.valueMinor;
   if (value !== undefined && (!Number.isInteger(value) || value < 0)) return c.json({ success: false, error: 'INVALID_VALUE_MINOR' }, 400);
+  if (!source.supportsValue && value !== undefined) return c.json({ success: false, error: 'VALUE_NOT_SUPPORTED_FOR_SOURCE' }, 400);
+  if (body.currency !== undefined && !/^[A-Za-z]{3}$/.test(text(body.currency, 8))) return c.json({ success: false, error: 'INVALID_CURRENCY' }, 400);
   const workspaceId = credential.workspaceId;
   const occurredAt = new Date().toISOString();
   const projectId = text(body.projectId);
@@ -2516,8 +2529,8 @@ app.post('/api/intelligence/conversions', async c => {
           ? { projectId: text(touch.project_id), projectAreaId: text(touch.project_area_id) }
           : null;
   const conversionEventId = 'lce_' + crypto.randomUUID();
-  await c.env.smart_menu_db.prepare('INSERT INTO line_conversion_events (id,workspace_id,conversion_key_id,external_event_id,conversion_type,journey_session_id,project_id,project_area_id,attributed_project_id,attributed_project_area_id,attribution_model,value_minor,currency,mapping_status,occurred_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(
-    conversionEventId, workspaceId, credential.id, text(body.externalEventId, 120), text(body.conversionType, 30), requestedSessionId || null,
+  await c.env.smart_menu_db.prepare('INSERT INTO line_conversion_events (id,workspace_id,conversion_key_id,external_event_id,conversion_type,conversion_source,journey_session_id,project_id,project_area_id,attributed_project_id,attributed_project_area_id,attribution_model,value_minor,currency,mapping_status,occurred_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(
+    conversionEventId, workspaceId, credential.id, text(body.externalEventId, 120), text(body.conversionType, 30), source.sourceCode, requestedSessionId || null,
     projectId || null, projectAreaId || null, mapped?.projectId || null, mapped?.projectAreaId || null,
     'last_observed_touch', value ?? null, text(body.currency || '', 8) || null, mapped ? 'matched' : 'unmatched', occurredAt,
   ).run();
@@ -2534,10 +2547,11 @@ app.get('/api/projects/:projectId/intelligence/journey', async (c) => {
   if (!validDate(from) || !validDate(to) || from > to || (Date.parse(to + 'T00:00:00.000Z') - Date.parse(from + 'T00:00:00.000Z')) / 86_400_000 > 366) return c.json({ success: false, error: 'INVALID_DATE_RANGE' }, 400);
   const project: any = await c.env.smart_menu_db.prepare('SELECT id FROM projects WHERE id=? AND workspace_id=? AND deleted_at IS NULL').bind(projectId, workspaceId).first();
   if (!project) return c.json({ success: false, error: 'Project not found.' }, 404);
-  const [daily, areas, activeKey] = await Promise.all([
+  const [daily, areas, activeKey, sourceRows] = await Promise.all([
     c.env.smart_menu_db.prepare("SELECT * FROM line_journey_daily WHERE workspace_id=? AND project_id=? AND project_area_id='' AND metric_date>=? AND metric_date<=? ORDER BY metric_date").bind(workspaceId, projectId, from, to).all(),
     c.env.smart_menu_db.prepare('SELECT id,label,action_type FROM project_areas WHERE workspace_id=? AND project_id=? ORDER BY area_index').bind(workspaceId, projectId).all(),
     c.env.smart_menu_db.prepare("SELECT id FROM workspace_conversion_api_keys WHERE workspace_id=? AND status='active' LIMIT 1").bind(workspaceId).first(),
+    c.env.smart_menu_db.prepare("SELECT conversion_source,COUNT(*) event_count,MAX(occurred_at) last_event_at,COUNT(*) conversions,COALESCE(SUM(value_minor),0) conversion_value_minor FROM line_conversion_events WHERE workspace_id=? AND attributed_project_id=? AND occurred_at>=? AND occurred_at<? GROUP BY conversion_source ORDER BY conversion_source").bind(workspaceId, projectId, from + 'T00:00:00.000Z', new Date(Date.parse(to + 'T00:00:00.000Z') + 86400000).toISOString()).all(),
   ]);
   const areaDaily: any[] = (await c.env.smart_menu_db.prepare("SELECT * FROM line_journey_daily WHERE workspace_id=? AND project_id=? AND project_area_id<>'' AND metric_date>=? AND metric_date<=?").bind(workspaceId, projectId, from, to).all()).results || [];
   const [trackedResult, aggregateResult] = await Promise.all([
@@ -2554,7 +2568,8 @@ app.get('/api/projects/:projectId/intelligence/journey', async (c) => {
     const conversions = value('conversions');
     const tracked = trackedByArea.get(area.id) as any; const trackedUriClicks=Number(tracked?.tracked_uri_clicks || 0), attributedConversions=Number(tracked?.attributed_conversions || 0), aggregateLineClicks=Number(aggregateByArea.get(area.id) || 0); const trackingAvailable=area.action_type==='uri'; const trackingEnabled=trackingAvailable && trackedUriClicks>0; return { areaId: area.id, label: area.label, actionType: area.action_type, observedActions, sessions: value('observed_sessions'), keywordMatches: value('keyword_matches'), webhookSuccesses: value('webhook_successes'), conversions, conversionValueMinor: value('conversion_value_minor'), observedConversionRate: observedActions > 0 ? conversions / observedActions : null, aggregateLineClicks, trackedUriClicks, attributedConversions, trackedObservedConversionRate: trackedUriClicks > 0 ? attributedConversions / trackedUriClicks : null, trackingAvailable, trackingEnabled, attributionCoverage: aggregateLineClicks + trackedUriClicks > 0 ? trackedUriClicks / (aggregateLineClicks + trackedUriClicks) : null, trackingReason: !trackingAvailable ? 'URI_TRACKING_NOT_ENABLED' : trackedUriClicks === 0 ? 'URI_TRACKING_INSUFFICIENT' : 'READY' };
   });
-  return c.json({ success: true, period: { from, to }, ...overview, conversionIntegrationAvailable: Boolean(activeKey), areas: areaMetrics });
+  const sourceBreakdown = (sourceRows.results || []).map((row: any) => ({ sourceCode: row.conversion_source || null, displayName: row.conversion_source || 'Legacy / 未記錄來源', eventCount: Number(row.event_count || 0), conversions: Number(row.conversions || 0), conversionValueMinor: Number(row.conversion_value_minor || 0), lastEventAt: row.last_event_at || null }));
+  return c.json({ success: true, period: { from, to }, ...overview, conversionIntegrationAvailable: Boolean(activeKey), sourceBreakdown, areas: areaMetrics });
 });
 
 app.post('/api/projects/:projectId/intelligence/journey/rebuild', async (c) => {
@@ -4086,6 +4101,13 @@ app.get('/api/system/journey-health', async (c) => {
   await requireSystemAdmin(c);
   const rows:any[]=(await c.env.smart_menu_db.prepare("SELECT w.id workspace_id,w.name workspace_name,COALESCE(k.active_key_count,0) active_key_count,e.last_journey_event,v.last_conversion_event,COALESCE(e.webhook_routes,0) webhook_routes,COALESCE(e.webhook_failures,0) webhook_failures,COALESCE(e.mapped_events,0) mapped_events,COALESCE(e.journey_events,0) journey_events FROM workspaces w LEFT JOIN (SELECT workspace_id,COUNT(*) active_key_count FROM workspace_conversion_api_keys WHERE status='active' GROUP BY workspace_id) k ON k.workspace_id=w.id LEFT JOIN (SELECT workspace_id,MAX(occurred_at) last_journey_event,SUM(CASE WHEN event_type='webhook_route' THEN 1 ELSE 0 END) webhook_routes,SUM(CASE WHEN event_type='webhook_failure' THEN 1 ELSE 0 END) webhook_failures,SUM(CASE WHEN project_area_id IS NOT NULL AND project_area_id<>'' THEN 1 ELSE 0 END) mapped_events,COUNT(*) journey_events FROM line_journey_events GROUP BY workspace_id) e ON e.workspace_id=w.id LEFT JOIN (SELECT workspace_id,MAX(occurred_at) last_conversion_event FROM line_conversion_events GROUP BY workspace_id) v ON v.workspace_id=w.id WHERE w.deleted_at IS NULL ORDER BY w.created_at DESC").all()).results||[];
   return c.json({success:true,workspaces:rows.map((row:any)=>{const total=Number(row.journey_events||0),routes=Number(row.webhook_routes||0),mapping=total?Number(row.mapped_events||0)/total:0,reason=!total?'NO_JOURNEY_DATA':!row.last_journey_event||Date.now()-Date.parse(row.last_journey_event)>3*86400000?'STALE_DATA':mapping<.8?'MAPPING_INCOMPLETE':'READY';return {workspaceId:row.workspace_id,workspaceName:row.workspace_name,journeyReady:reason==='READY',journeyReason:reason,conversionIntegrationAvailable:Number(row.active_key_count||0)>0,activeConversionApiKeys:Number(row.active_key_count||0),lastJourneyEvent:row.last_journey_event||null,lastConversionEvent:row.last_conversion_event||null,webhookFailureRate:routes?Number(row.webhook_failures||0)/routes:null};})});
+});
+app.get('/api/system/conversion-source-health', async c => {
+  await requireSystemAdmin(c);
+  const rows: any[] = (await c.env.smart_menu_db.prepare("SELECT w.id workspace_id,w.name workspace_name,c.conversion_source,COUNT(c.id) event_count,MAX(c.occurred_at) last_event_at,COUNT(c.id) conversions,COALESCE(SUM(c.value_minor),0) conversion_value_minor FROM workspaces w LEFT JOIN line_conversion_events c ON c.workspace_id=w.id WHERE w.deleted_at IS NULL GROUP BY w.id,w.name,c.conversion_source ORDER BY w.created_at DESC,c.conversion_source").all()).results || [];
+  const grouped = new Map<string, any>();
+  for (const row of rows) { const key = row.workspace_id; if (!grouped.has(key)) grouped.set(key, { workspaceId: row.workspace_id, workspaceName: row.workspace_name, sources: [] }); grouped.get(key).sources.push(row); }
+  return c.json({ success: true, workspaces: [...grouped.values()].map(workspace => ({ ...workspace, sources: conversionSourceHealthRows(workspace.sources) })) });
 });
 app.get('/api/system/line-intelligence/health', async (c) => {
   await requireSystemAdmin(c);
