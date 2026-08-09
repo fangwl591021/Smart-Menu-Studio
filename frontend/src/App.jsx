@@ -6,6 +6,7 @@ import LineIntelligencePanel from './components/LineIntelligencePanel';
 import AIUsagePanel from './components/AIUsagePanel';
 import LineIntelligenceHealthPanel from './components/LineIntelligenceHealthPanel';
 import ConversionApiKeyPanel from './components/ConversionApiKeyPanel';
+import TrackedUriTool from './components/TrackedUriTool';
 import { emitGuideEvent } from './guide-events';
 import { 
   LayoutDashboard, 
@@ -923,6 +924,7 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
                     className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                   />
                   <p className="text-xs text-gray-500 mt-2">只修改此專案，不會影響模板母版。</p>
+                  <TrackedUriTool projectId={projectId} areaId={currentArea.id} originalDestination={action.uri || ''} request={authFetch} userRole={userRole} />
                 </div>
               )}
 
@@ -937,6 +939,7 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
                     className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
                   />
                   <p className="text-xs text-gray-500 mt-2">只修改此專案，不會影響模板母版。</p>
+                  <TrackedUriTool projectId={projectId} areaId={currentArea.id} originalDestination={action.uri || ''} request={authFetch} userRole={userRole} />
                 </div>
               )}
 

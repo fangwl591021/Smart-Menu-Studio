@@ -105,6 +105,7 @@ import { GEMINI_MODEL, requestGeminiContent } from './gemini';
 import { authenticateConversionApiKey, conversionKeyHash, conversionMetadata, createConversionApiKey } from './journey/conversion-keys';
 import { writeGatewayJourneyEvent } from './journey/engine';
 import { funnel, lastObservedTouch, rebuildJourneyDaily } from './journey/core';
+import { appendAttributionToken, createAttributionToken, destinationFingerprint, safeDestination, trackedTokenHash } from './journey/tracked-uri';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
@@ -2441,6 +2442,38 @@ app.get('/api/projects/:projectId', async (c) => {
 
 
 
+app.post('/api/projects/:projectId/areas/:areaId/tracked-uri', async c => {
+  try {
+    requireRole(c, 'editor');
+    const workspaceId = workspaceIdOf(c), projectId = c.req.param('projectId'), areaId = c.req.param('areaId');
+    const row: any = await c.env.smart_menu_db.prepare('SELECT * FROM project_areas WHERE id=? AND project_id=? AND workspace_id=? LIMIT 1').bind(areaId, projectId, workspaceId).first();
+    if (!row) return c.json({ success: false, error: 'PROJECT_AREA_NOT_FOUND' }, 404);
+    const action = projectAreaActionFromRow(row);
+    const destination = action.type === 'uri' ? safeDestination(action.uri) : null;
+    if (!destination || destination.searchParams.has('sm_at')) return c.json({ success: false, error: 'TRACKED_URI_DESTINATION_INVALID' }, 400);
+    const token = createAttributionToken(), hash = await trackedTokenHash(token), fingerprint = await destinationFingerprint(destination.toString()), expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    await c.env.smart_menu_db.prepare("INSERT INTO tracked_uri_attributions (id,workspace_id,project_id,project_area_id,attribution_token_hash,event_fingerprint,expires_at,status) VALUES (?,?,?,?,?,?,?,'issued')").bind(id('tua'), workspaceId, projectId, areaId, hash, fingerprint, expiresAt).run();
+    return c.json({ success: true, originalDestination: destination.toString(), trackedUri: new URL(`/r/${encodeURIComponent(token)}`, c.req.url).toString(), expiresAt, trackingStatus: 'issued' });
+  } catch (error: any) { return c.json({ success: false, error: error?.message === 'FORBIDDEN_ROLE' ? 'FORBIDDEN' : 'TRACKED_URI_GENERATION_FAILED' }, error?.message === 'FORBIDDEN_ROLE' ? 403 : 500); }
+});
+
+app.get('/r/:trackingToken', async c => {
+  const token = text(c.req.param('trackingToken'));
+  if (!/^smat_[A-Za-z0-9_-]{40,}$/.test(token)) return c.text('Not found', 404);
+  try {
+    const hash = await trackedTokenHash(token);
+    const tracked: any = await c.env.smart_menu_db.prepare("SELECT * FROM tracked_uri_attributions WHERE attribution_token_hash=? AND status='issued' LIMIT 1").bind(hash).first();
+    if (!tracked || Date.parse(tracked.expires_at) < Date.now()) return c.text('Not found', 404);
+    const area: any = await c.env.smart_menu_db.prepare('SELECT * FROM project_areas WHERE id=? AND project_id=? AND workspace_id=? LIMIT 1').bind(tracked.project_area_id, tracked.project_id, tracked.workspace_id).first();
+    const action = area ? projectAreaActionFromRow(area) : null;
+    const destination = action?.type === 'uri' ? safeDestination(action.uri) : null;
+    if (!destination || await destinationFingerprint(destination.toString()) !== tracked.event_fingerprint) return c.text('Not found', 404);
+    const redirectTo = appendAttributionToken(destination.toString(), token);
+    if (!redirectTo) return c.text('Not found', 404);
+    await c.env.smart_menu_db.prepare("UPDATE tracked_uri_attributions SET status='clicked',occurred_at=? WHERE id=? AND status='issued'").bind(new Date().toISOString(), tracked.id).run();
+    return c.redirect(redirectTo, 302);
+  } catch { return c.text('Not found', 404); }
+});
 app.get('/api/workspaces/conversion-api-keys', async c => { try { requireRole(c,'admin'); const rows:any[]=(await c.env.smart_menu_db.prepare('SELECT id,name,key_prefix,status,last_used_at,created_at,revoked_at FROM workspace_conversion_api_keys WHERE workspace_id=? ORDER BY created_at DESC').bind(workspaceIdOf(c)).all()).results||[]; return c.json({success:true,keys:rows.map(x=>({id:x.id,name:x.name,prefix:x.key_prefix,status:x.status,lastUsedAt:x.last_used_at,createdAt:x.created_at,revokedAt:x.revoked_at}))}); } catch { return c.json({success:false,error:'FORBIDDEN'},403); } });
 app.post('/api/workspaces/conversion-api-keys', async c => { try { requireRole(c,'admin'); const body:any=await c.req.json().catch(()=>({})); const created=createConversionApiKey(); const id='cak_'+crypto.randomUUID(); await c.env.smart_menu_db.prepare('INSERT INTO workspace_conversion_api_keys (id,workspace_id,name,key_prefix,key_hash,created_by_user_id) VALUES (?,?,?,?,?,?)').bind(id,workspaceIdOf(c),text(body.name||'Conversion integration').slice(0,80),created.prefix,await conversionKeyHash(created.key),text(c.get('userId'))).run(); return c.json({success:true,key:{id,name:text(body.name||'Conversion integration').slice(0,80),prefix:created.prefix,status:'active',secret:created.key}}); } catch { return c.json({success:false,error:'FORBIDDEN'},403); } });
 app.post('/api/workspaces/conversion-api-keys/:keyId/revoke', async c => { try { requireRole(c,'admin'); await c.env.smart_menu_db.prepare("UPDATE workspace_conversion_api_keys SET status='revoked',revoked_at=CURRENT_TIMESTAMP WHERE id=? AND workspace_id=? AND status='active'").bind(c.req.param('keyId'),workspaceIdOf(c)).run(); return c.json({success:true}); } catch { return c.json({success:false,error:'FORBIDDEN'},403); } });
@@ -2463,6 +2496,9 @@ app.post('/api/intelligence/conversions', async c => {
   const existing = await c.env.smart_menu_db.prepare('SELECT id FROM line_conversion_events WHERE workspace_id=? AND external_event_id=? LIMIT 1').bind(workspaceId, text(body.externalEventId, 120)).first();
   if (existing) return c.json({ success: true, idempotent: true });
 
+  const requestedAttributionToken = text(body.attributionToken, 256);
+  const tracked = requestedAttributionToken ? await c.env.smart_menu_db.prepare("SELECT project_id,project_area_id FROM tracked_uri_attributions WHERE workspace_id=? AND attribution_token_hash=? AND status='clicked' AND expires_at>=? LIMIT 1").bind(workspaceId, await trackedTokenHash(requestedAttributionToken), occurredAt).first() : null;
+  if (requestedAttributionToken && !tracked) return c.json({ success: false, error: 'INVALID_ATTRIBUTION_TOKEN' }, 400);
   const sessionRows: any[] = requestedSessionId
     ? ((await c.env.smart_menu_db.prepare('SELECT journey_session_id,project_id,project_area_id,event_type,occurred_at FROM line_journey_events WHERE workspace_id=? AND journey_session_id=? ORDER BY occurred_at DESC').bind(workspaceId, requestedSessionId).all()).results || [])
     : [];
@@ -2470,18 +2506,22 @@ app.post('/api/intelligence/conversions', async c => {
   // Server-to-server conversion calls have no pseudonymous actor context without an explicit session.
   // Never infer a user's touch from arbitrary events elsewhere in the workspace.
   const touch = lastObservedTouch(sessionRows, occurredAt);
-  const mapped = projectAreaId
-    ? { projectId: text(area?.project_id), projectAreaId }
-    : projectId
-      ? { projectId, projectAreaId: null }
-      : touch
-        ? { projectId: text(touch.project_id), projectAreaId: text(touch.project_area_id) }
-        : null;
+  const mapped = tracked
+    ? { projectId: text((tracked as any).project_id), projectAreaId: text((tracked as any).project_area_id) }
+    : projectAreaId
+      ? { projectId: text(area?.project_id), projectAreaId }
+      : projectId
+        ? { projectId, projectAreaId: null }
+        : touch
+          ? { projectId: text(touch.project_id), projectAreaId: text(touch.project_area_id) }
+          : null;
+  const conversionEventId = 'lce_' + crypto.randomUUID();
   await c.env.smart_menu_db.prepare('INSERT INTO line_conversion_events (id,workspace_id,conversion_key_id,external_event_id,conversion_type,journey_session_id,project_id,project_area_id,attributed_project_id,attributed_project_area_id,attribution_model,value_minor,currency,mapping_status,occurred_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(
-    'lce_' + crypto.randomUUID(), workspaceId, credential.id, text(body.externalEventId, 120), text(body.conversionType, 30), requestedSessionId || null,
+    conversionEventId, workspaceId, credential.id, text(body.externalEventId, 120), text(body.conversionType, 30), requestedSessionId || null,
     projectId || null, projectAreaId || null, mapped?.projectId || null, mapped?.projectAreaId || null,
     'last_observed_touch', value ?? null, text(body.currency || '', 8) || null, mapped ? 'matched' : 'unmatched', occurredAt,
   ).run();
+  if (tracked) await c.env.smart_menu_db.prepare('UPDATE tracked_uri_attributions SET conversion_event_id=? WHERE workspace_id=? AND attribution_token_hash=? AND conversion_event_id IS NULL').bind(conversionEventId, workspaceId, await trackedTokenHash(requestedAttributionToken)).run();
   return c.json({ success: true, idempotent: false });
 });
 
@@ -2500,13 +2540,19 @@ app.get('/api/projects/:projectId/intelligence/journey', async (c) => {
     c.env.smart_menu_db.prepare("SELECT id FROM workspace_conversion_api_keys WHERE workspace_id=? AND status='active' LIMIT 1").bind(workspaceId).first(),
   ]);
   const areaDaily: any[] = (await c.env.smart_menu_db.prepare("SELECT * FROM line_journey_daily WHERE workspace_id=? AND project_id=? AND project_area_id<>'' AND metric_date>=? AND metric_date<=?").bind(workspaceId, projectId, from, to).all()).results || [];
+  const [trackedResult, aggregateResult] = await Promise.all([
+    c.env.smart_menu_db.prepare("SELECT project_area_id,COUNT(*) tracked_uri_clicks,SUM(CASE WHEN conversion_event_id IS NOT NULL THEN 1 ELSE 0 END) attributed_conversions FROM tracked_uri_attributions WHERE workspace_id=? AND project_id=? AND status='clicked' AND occurred_at>=? AND occurred_at<? GROUP BY project_area_id").bind(workspaceId, projectId, from + 'T00:00:00.000Z', new Date(Date.parse(to + 'T00:00:00.000Z') + 86400000).toISOString()).all(),
+    c.env.smart_menu_db.prepare("SELECT project_area_id,SUM(clicks) aggregate_line_clicks FROM line_intelligence_daily WHERE workspace_id=? AND project_id=? AND metric_date>=? AND metric_date<=? GROUP BY project_area_id").bind(workspaceId, projectId, from, to).all(),
+  ]);
+  const trackedByArea = new Map(((trackedResult.results || []) as any[]).map(row => [row.project_area_id, row]));
+  const aggregateByArea = new Map(((aggregateResult.results || []) as any[]).map(row => [row.project_area_id, Number(row.aggregate_line_clicks || 0)]));
   const overview = funnel((daily.results || []) as any[]);
   const areaMetrics = (areas.results || []).map((area: any) => {
     const rows = areaDaily.filter((row) => row.project_area_id === area.id);
     const value = (key: string) => rows.reduce((total, row) => total + Number(row[key] || 0), 0);
     const observedActions = value('message_actions') + value('postback_actions') + value('switch_actions');
     const conversions = value('conversions');
-    return { areaId: area.id, label: area.label, actionType: area.action_type, observedActions, sessions: value('observed_sessions'), keywordMatches: value('keyword_matches'), webhookSuccesses: value('webhook_successes'), conversions, conversionValueMinor: value('conversion_value_minor'), observedConversionRate: observedActions > 0 ? conversions / observedActions : null };
+    const tracked = trackedByArea.get(area.id) as any; const trackedUriClicks=Number(tracked?.tracked_uri_clicks || 0), attributedConversions=Number(tracked?.attributed_conversions || 0), aggregateLineClicks=Number(aggregateByArea.get(area.id) || 0); const trackingAvailable=area.action_type==='uri'; const trackingEnabled=trackingAvailable && trackedUriClicks>0; return { areaId: area.id, label: area.label, actionType: area.action_type, observedActions, sessions: value('observed_sessions'), keywordMatches: value('keyword_matches'), webhookSuccesses: value('webhook_successes'), conversions, conversionValueMinor: value('conversion_value_minor'), observedConversionRate: observedActions > 0 ? conversions / observedActions : null, aggregateLineClicks, trackedUriClicks, attributedConversions, trackedObservedConversionRate: trackedUriClicks > 0 ? attributedConversions / trackedUriClicks : null, trackingAvailable, trackingEnabled, attributionCoverage: aggregateLineClicks + trackedUriClicks > 0 ? trackedUriClicks / (aggregateLineClicks + trackedUriClicks) : null, trackingReason: !trackingAvailable ? 'URI_TRACKING_NOT_ENABLED' : trackedUriClicks === 0 ? 'URI_TRACKING_INSUFFICIENT' : 'READY' };
   });
   return c.json({ success: true, period: { from, to }, ...overview, conversionIntegrationAvailable: Boolean(activeKey), areas: areaMetrics });
 });

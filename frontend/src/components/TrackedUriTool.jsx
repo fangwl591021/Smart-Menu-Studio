@@ -1,0 +1,10 @@
+import React, { useEffect, useState } from 'react';
+export default function TrackedUriTool({ projectId, areaId, originalDestination, request, userRole }) {
+  const allowed=['owner','admin','editor'].includes(String(userRole||'').toLowerCase());
+  const [tracked,setTracked]=useState(''); const [original,setOriginal]=useState(''); const [status,setStatus]=useState(''); const [error,setError]=useState('');
+  useEffect(()=>()=>{setTracked('');setOriginal('');},[]);
+  if(!allowed) return null;
+  const generate=async()=>{setError('');setStatus('loading');try{const r=await request(`/api/projects/${encodeURIComponent(projectId)}/areas/${encodeURIComponent(areaId)}/tracked-uri`,{method:'POST'}),d=await r.json();if(!r.ok||!d.success)throw new Error(d.error||'Unable to generate tracked URI.');setTracked(d.trackedUri);setOriginal(d.originalDestination);setStatus('READY')}catch(e){setStatus('');setError(e.message||'Unable to generate tracked URI.')}};
+  const copy=async()=>{try{await navigator.clipboard.writeText(tracked);setStatus('COPIED')}catch{setError('Unable to copy tracked URI.')}};
+  return <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs"><div className="font-bold text-blue-950">URI Journey 追蹤</div><p className="mt-1 text-blue-900">使用此追蹤連結後，Smart Menu Studio 才能觀測此 URI 入口的實際點擊 Journey。</p><p className="mt-1 text-blue-800">原始目的網址：{original||originalDestination||'—'}</p><button type="button" onClick={generate} disabled={status==='loading'} className="mt-2 rounded border border-blue-300 bg-white px-2 py-1 font-bold">{status==='loading'?'建立中…':'建立追蹤連結'}</button>{tracked&&<><div className="mt-2 break-all rounded bg-white p-2 font-mono">追蹤連結：{tracked}</div><button type="button" onClick={copy} className="mt-2 rounded border border-blue-300 bg-white px-2 py-1 font-bold">複製追蹤連結</button></>}{status==='COPIED'&&<span className="ml-2 text-blue-700">已複製</span>}{error&&<p className="mt-2 text-red-700">{error}</p>}<p className="mt-2 text-gray-600">建立不會自動修改此專案 URI；如要使用，請自行貼入上方欄位。</p></div>;
+}
