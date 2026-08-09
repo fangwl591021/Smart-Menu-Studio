@@ -33,9 +33,9 @@ test('0030 is additive, request-only, and has database active-request authority'
 
 test('dealer payout request APIs derive dealer ownership server-side from finalized immutable settlement items', async () => {
   const source = await readFile(sourceUrl, 'utf8');
-  const slice = source.slice(source.indexOf('async function resolvedDealerPayoutContext'), source.indexOf("app.get('/api/commission-payout-requests'"));
+  const slice = source.slice(source.indexOf("app.get('/api/member/dealer/payout-requests'"), source.indexOf("app.get('/api/commission-payout-requests'"));
   for (const route of ["app.get('/api/member/dealer/payout-requests'", "app.post('/api/member/dealer/payout-requests'", "app.post('/api/member/dealer/payout-requests/:requestId/cancel'"]) assert.equal(slice.includes(route), true);
-  assert.match(slice, /verifiedDealerLedgerMember/);
+  assert.match(source, /async function resolvedDealerPayoutContext[\s\S]*verifiedDealerLedgerMember/);
   assert.match(slice, /dealer\.status!=='ACTIVE'/);
   assert.match(slice, /SETTLEMENT_NOT_FINALIZED/);
   assert.match(slice, /FROM commission_settlement_items WHERE settlement_id=\? AND dealer_id=\?/);
