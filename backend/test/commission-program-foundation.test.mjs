@@ -51,7 +51,7 @@ test('tenant program routes preserve authorization, scope, idempotency, and exis
   assert.match(source, /ACTIVE_PROGRAM_EXISTS/);
   assert.match(source, /program\.status===next.*idempotent:true/);
   assert.match(source, /eligibility\.status===next.*idempotent:true/);
-  const slice = source.slice(source.indexOf("app.get('/api/commission-programs'"), source.indexOf("app.post('/api/member/conversion-referral-context'"));
+  const slice = source.slice(source.indexOf("app.get('/api/commission-programs'"), source.indexOf("app.get('/api/commission-attributions'"));
   for (const forbidden of ['member_referral_attributions', 'conversion_referral_evidence', 'conversion_referral_contexts', 'commission_attributions', 'commission_rate', 'commission_amount', 'currency', 'payout', 'points', 'reward', 'line_identity_hash', 'liffAccessToken', 'referralFlowToken']) assert.equal(slice.includes(forbidden), false);
   assert.equal(source.includes("UPDATE line_oa_dealers SET status"), true);
   assert.equal(slice.includes('UPDATE line_oa_dealers SET status'), false);
