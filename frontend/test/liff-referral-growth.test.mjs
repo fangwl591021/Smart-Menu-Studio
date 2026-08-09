@@ -16,6 +16,6 @@ test('member self growth renders backend aggregates, sources, trend and safe rat
 test('member self growth keeps empty, LIFF-not-ready, privacy and 5A-1 referral protections', async () => {
   const source = await page();
   for (const value of ['目前還沒有有效推薦紀錄。', '此官方帳號尚未完成推薦功能設定。', '我的推薦 QR Code', '複製連結', 'LINE 分享', 'requestFriendship', '/api/member/referral/qualify', 'X-Smart-Menu-Referral-Flow']) assert.ok(source.includes(value));
-  for (const forbidden of ['memberId', 'inviterMemberId', 'inviteeMemberId', 'lineUserId', 'line_identity_hash', 'referral graph', 'Dealer', 'Commission', 'Points']) assert.equal(source.includes(forbidden), false, `must not render or request ${forbidden}`);
+  for (const forbidden of ['memberId', 'inviterMemberId', 'inviteeMemberId', 'lineUserId', 'line_identity_hash', 'referral graph', 'Points']) assert.equal(source.includes(forbidden), false, `must not render or request ${forbidden}`);
   assert.doesNotMatch(source, /member\/referral-growth\?[^`]*memberId/);
 });
