@@ -8,6 +8,7 @@ import LineIntelligenceHealthPanel from './components/LineIntelligenceHealthPane
 import ConversionApiKeyPanel from './components/ConversionApiKeyPanel';
 import LiffReferralConfigPanel from './components/LiffReferralConfigPanel';
 import LiffReferralPage from './components/LiffReferralPage';
+import ReferralGrowthPanel from './components/ReferralGrowthPanel';
 import TrackedUriTool from './components/TrackedUriTool';
 import { emitGuideEvent } from './guide-events';
 import { 
@@ -5067,7 +5068,7 @@ function AppShell() {
               <AccountView session={session} onSessionChanged={loadSession} />
             )}
             {currentView === 'settings' && !isPlatformAdminMode && (
-              <><ConversionApiKeyPanel request={authFetch} userRole={activeRole} /><LiffReferralConfigPanel request={authFetch} userRole={activeRole} /></>
+              <><ConversionApiKeyPanel request={authFetch} userRole={activeRole} /><LiffReferralConfigPanel request={authFetch} userRole={activeRole} /><ReferralGrowthPanel request={authFetch} /></>
             )}
             {currentView === 'ai-usage' && (
               <AIUsagePanel request={authFetch} systemAdmin={isPlatformAdminMode} />

@@ -1,0 +1,7 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+const panel=()=>readFile(new URL('../src/components/ReferralGrowthPanel.jsx',import.meta.url),'utf8');
+test('tenant panel renders backend-safe contributors, periods, funnel, sources and trend',async()=>{const s=await panel();for(const value of ['publicSafeLabel','qualifiedCount','topContributors','7d','30d','Referral Landing','Qualified trend','sourceBreakdown'])assert.ok(s.includes(value));assert.match(s,/No qualified referral contributors yet/);assert.doesNotMatch(s,/line_identity_hash|lineUserId|memberId|inviterMemberId|inviteeMemberId|referral graph/i);});
+test('recommendations consume backend tone and retain advisory-only actions',async()=>{const s=await panel();assert.match(s,/filter\(x=>x\.tone==='improvement'\)/);assert.match(s,/filter\(x=>x\.tone==='positive'\)/);for(const forbidden of ['Proposal','Apply','Execute','Auto Fix'])assert.equal(s.includes(forbidden),false);assert.doesNotMatch(s,/ruleCode===|primaryRuleCode===/);});
+test('AI explanation is lazy and data quality plus null rates remain safe',async()=>{const s=await panel();assert.match(s,/onClick=\{go\}/);assert.match(s,/referral-growth\/recommendations\/\$\{item\.ruleCode\}\/explain/);assert.match(s,/state==='loading'/);assert.match(s,/state==='error'/);assert.match(s,/value==null\?'—'/);for(const code of ['NO_REFERRAL_DATA','INSUFFICIENT_LANDINGS','INSUFFICIENT_QUALIFICATIONS','LIFF_NOT_READY','STALE_DATA','READY'])assert.ok(s.includes(code));});
