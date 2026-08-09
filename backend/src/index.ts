@@ -36,15 +36,29 @@ import {
   operationErrorMessage,
   operationLogEvents,
   OperationExecutionError,
+  publicOperationLog,
+  publicOperationLogs,
+  publicOperationPlan,
   proposalExecutionContract,
 } from './guide/proposals/execution';
 import {
   buildRollbackContext,
   buildRollbackPlan,
   executeRollbackPlan,
+  publicRollbackPlan,
   rollbackErrorMessage,
   RollbackExecutionError,
 } from './guide/proposals/rollback';
+import {
+  getLatestHttpsProbe,
+  httpsProbeEligibility,
+  probeHttpsUpgradeCandidate,
+  saveHttpsProbeResult,
+  toPublicHttpsProbe,
+  type HttpsProbeEligibility,
+  type PublicHttpsProbe,
+  type StoredHttpsProbe,
+} from './guide/proposals/https-probe';
 import { GEMINI_MODEL, requestGeminiContent } from './gemini';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -2514,8 +2528,16 @@ async function rebuildCurrentProposal(
   return { proposal, recommendation, proposalType: recommendation.proposal.type, context };
 }
 
-function proposalResponse(proposal: StoredProposal, role: string, includeSnapshot = false) {
-  const execution = proposalExecutionContract(proposal.proposalType, proposal.sourceEntityId);
+function proposalResponse(
+  proposal: StoredProposal,
+  role: string,
+  includeSnapshot = false,
+  httpsEligibility: HttpsProbeEligibility = 'NEEDS_PROBE',
+) {
+  const contract = proposalExecutionContract(proposal.proposalType, proposal.sourceEntityId);
+  const execution = proposal.proposalType === 'https-upgrade-candidate'
+    ? { ...contract, executable: httpsEligibility === 'SAFE', eligibility: httpsEligibility }
+    : contract;
   return {
     id: proposal.id,
     projectId: proposal.projectId,
@@ -2540,6 +2562,44 @@ function proposalResponse(proposal: StoredProposal, role: string, includeSnapsho
     permissions: proposalPermissions(role, proposal.status, execution.executable),
     ...(includeSnapshot ? { snapshot: proposal.snapshot } : {}),
   };
+}
+
+async function loadHttpsProbeState(c: any, proposal: StoredProposal): Promise<{
+  record: StoredHttpsProbe | null;
+  publicProbe: PublicHttpsProbe | null;
+  eligibility: HttpsProbeEligibility;
+  currentUrl: string;
+  projectAreaId: string | null;
+}> {
+  if (proposal.proposalType !== 'https-upgrade-candidate' || !proposal.sourceEntityId) {
+    return { record: null, publicProbe: null, eligibility: 'NEEDS_PROBE', currentUrl: '', projectAreaId: null };
+  }
+  const row = await c.env.smart_menu_db.prepare(`
+    SELECT id, action_uri
+    FROM project_areas
+    WHERE workspace_id = ? AND project_id = ? AND area_index = ?
+      AND action_type = 'uri'
+    LIMIT 1
+  `).bind(
+    proposal.workspaceId,
+    proposal.projectId,
+    proposal.sourceEntityId,
+  ).first() as Record<string, unknown> | null;
+  if (!row) {
+    return { record: null, publicProbe: null, eligibility: 'NEEDS_PROBE', currentUrl: '', projectAreaId: null };
+  }
+  const projectAreaId = text(row.id);
+  const currentUrl = text(row.action_uri);
+  const record = await getLatestHttpsProbe(
+    c.env.smart_menu_db,
+    proposal.workspaceId,
+    proposal.projectId,
+    proposal.id,
+    projectAreaId,
+  );
+  const eligibility = await httpsProbeEligibility(record, currentUrl);
+  const publicProbe = record ? await toPublicHttpsProbe(record, currentUrl) : null;
+  return { record, publicProbe, eligibility, currentUrl, projectAreaId };
 }
 
 async function refreshStaleStatus(c: any, proposal: StoredProposal): Promise<StoredProposal> {
@@ -2616,9 +2676,13 @@ app.get('/api/projects/:projectId/proposals', async (c) => {
     `).bind(projectId, workspaceId).first();
     if (!project) return c.json({ success: false, error: '找不到專案。' }, 404);
     const proposals = await listStoredProposals(c.env.smart_menu_db, workspaceId, projectId);
+    const responseItems = await Promise.all(proposals.map(async item => {
+      const probeState = await loadHttpsProbeState(c, item);
+      return proposalResponse(item, text(c.get('userRole')), false, probeState.eligibility);
+    }));
     return c.json({
       success: true,
-      proposals: proposals.map(item => proposalResponse(item, text(c.get('userRole')))),
+      proposals: responseItems,
       permissions: proposalPermissions(text(c.get('userRole'))),
     });
   } catch (error: any) {
@@ -2639,15 +2703,17 @@ app.get('/api/projects/:projectId/proposals/:proposalId', async (c) => {
     ]);
     const events = [...proposalEvents, ...operationLogEvents(operationLogs)]
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+    const probeState = await loadHttpsProbeState(c, proposal);
     const rollbackContext = proposal.status === 'executed'
       ? await buildRollbackContext({ db: c.env.smart_menu_db, proposal, role: text(c.get('userRole')) })
       : null;
     return c.json({
       success: true,
-      proposal: proposalResponse(proposal, text(c.get('userRole')), true),
+      proposal: proposalResponse(proposal, text(c.get('userRole')), true, probeState.eligibility),
       events,
-      operationLogs,
+      operationLogs: publicOperationLogs(operationLogs),
       rollbackPreview: rollbackContext?.preview || null,
+      httpsProbe: probeState.publicProbe,
     });
   } catch (error: any) {
     return proposalApiError(c, error, '改善方案讀取失敗。');
@@ -2759,7 +2825,11 @@ app.post('/api/projects/:projectId/proposals/:proposalId/regenerate', async (c) 
 });
 
 function operationApiError(c: any, error: unknown) {
-  const code = error instanceof OperationExecutionError ? error.code : 'EXECUTION_FAILED';
+  const code = error instanceof OperationExecutionError
+    ? error.code
+    : (error as { message?: string })?.message === 'FORBIDDEN_ROLE'
+      ? 'FORBIDDEN_ROLE'
+      : 'EXECUTION_FAILED';
   const status = code === 'FORBIDDEN_ROLE'
     ? 403
     : code === 'PROPOSAL_NOT_FOUND' || code === 'TARGET_NOT_FOUND'
@@ -2786,6 +2856,72 @@ async function markExecutionProposalStale(c: any, proposal: StoredProposal, reas
     if (!['PROPOSAL_CONFLICT', 'INVALID_PROPOSAL_TRANSITION'].includes(error?.message)) throw error;
   }
 }
+
+app.post('/api/projects/:projectId/proposals/:proposalId/https-probe', async (c) => {
+  try {
+    requireRole(c, 'editor');
+    const projectId = c.req.param('projectId');
+    const workspaceId = workspaceIdOf(c);
+    let proposal = await getStoredProposal(
+      c.env.smart_menu_db,
+      workspaceId,
+      projectId,
+      c.req.param('proposalId'),
+    );
+    if (!proposal) throw new OperationExecutionError('PROPOSAL_NOT_FOUND');
+    proposal = await refreshStaleStatus(c, proposal);
+    if (proposal.status === 'stale') throw new OperationExecutionError('PROPOSAL_STALE');
+    if (proposal.status === 'executed') throw new OperationExecutionError('PROPOSAL_ALREADY_EXECUTED');
+    if (proposal.proposalType !== 'https-upgrade-candidate') {
+      throw new OperationExecutionError('PROPOSAL_NOT_EXECUTABLE');
+    }
+
+    const current = await rebuildCurrentProposal(c, projectId, {
+      recommendationId: proposal.recommendationId,
+    });
+    if (!current || current.proposalType !== proposal.proposalType) {
+      await markExecutionProposalStale(c, proposal, 'CURRENT_PROPOSAL_NOT_FOUND');
+      throw new OperationExecutionError('PROPOSAL_STALE');
+    }
+    const currentFingerprint = await fingerprintProposal(
+      current.proposal,
+      current.proposalType,
+      current.recommendation.evidence,
+    );
+    if (currentFingerprint !== proposal.sourceFingerprint) {
+      await markExecutionProposalStale(c, proposal, 'SOURCE_FINGERPRINT_MISMATCH');
+      throw new OperationExecutionError('PROPOSAL_STALE');
+    }
+
+    const change = current.proposal.changes[0];
+    const area = current.context.areas.find(item => item.id === change?.entityId);
+    if (!area?.recordId || area.actionType !== 'uri') {
+      throw new OperationExecutionError('TARGET_NOT_FOUND');
+    }
+    const result = await probeHttpsUpgradeCandidate({ originalUrl: area.uri });
+    const saved = await saveHttpsProbeResult(c.env.smart_menu_db, {
+      workspaceId,
+      proposalId: proposal.id,
+      projectId,
+      projectAreaId: area.recordId,
+      actorUserId: text(c.get('userId')),
+      result,
+    });
+    const publicProbe = await toPublicHttpsProbe(saved, area.uri);
+    return c.json({
+      success: true,
+      httpsProbe: publicProbe,
+      proposal: proposalResponse(
+        proposal,
+        text(c.get('userRole')),
+        true,
+        publicProbe.eligibility,
+      ),
+    });
+  } catch (error: unknown) {
+    return operationApiError(c, error);
+  }
+});
 
 app.post('/api/projects/:projectId/proposals/:proposalId/execute', async (c) => {
   try {
@@ -2828,6 +2964,7 @@ app.post('/api/projects/:projectId/proposals/:proposalId/execute', async (c) => 
       throw new OperationExecutionError('PROPOSAL_STALE');
     }
 
+    const probeState = await loadHttpsProbeState(c, proposal);
     const operationPlan = buildOperationPlan({
       proposal,
       currentProposal: current.proposal,
@@ -2836,6 +2973,7 @@ app.post('/api/projects/:projectId/proposals/:proposalId/execute', async (c) => 
         userId: text(c.get('userId')),
         role: text(c.get('userRole')),
       },
+      httpsProbe: { record: probeState.record, eligibility: probeState.eligibility },
     });
     const operationLog = await executeOperationPlan(
       c.env.smart_menu_db,
@@ -2854,9 +2992,14 @@ app.post('/api/projects/:projectId/proposals/:proposalId/execute', async (c) => 
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
     return c.json({
       success: true,
-      proposal: proposalResponse(proposal, text(c.get('userRole')), true),
-      operation: { plan: operationPlan, log: operationLog },
-      operationLogs,
+      proposal: proposalResponse(
+        proposal,
+        text(c.get('userRole')),
+        true,
+        operationPlan.probe ? 'SAFE' : 'NEEDS_PROBE',
+      ),
+      operation: { plan: publicOperationPlan(operationPlan), log: publicOperationLog(operationLog) },
+      operationLogs: publicOperationLogs(operationLogs),
       events,
     });
   } catch (error: unknown) {
@@ -2942,9 +3085,9 @@ app.post('/api/projects/:projectId/proposals/:proposalId/rollback', async (c) =>
     return c.json({
       success: true,
       proposal: proposalResponse(proposal, text(c.get('userRole')), true),
-      rollback: { plan: rollbackPlan, log: rollbackLog },
+      rollback: { plan: publicRollbackPlan(rollbackPlan), log: publicOperationLog(rollbackLog) },
       rollbackPreview: refreshedRollback.preview,
-      operationLogs,
+      operationLogs: publicOperationLogs(operationLogs),
       events,
     });
   } catch (error: unknown) {

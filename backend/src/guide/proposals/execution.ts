@@ -1,8 +1,15 @@
 import type { GuideContext } from '../types.ts';
 import type { Proposal, ProposalType } from './types.ts';
 import type { ProposalEvent, StoredProposal, WorkspaceRole } from './persistence.ts';
+import {
+  buildHttpsCandidate,
+  fingerprintUrl,
+  sanitizeUrlForAudit,
+  type HttpsProbeEligibility,
+  type StoredHttpsProbe,
+} from './https-probe.ts';
 
-export type OperationType = 'SET_PROJECT_AREA_DISPLAY_TEXT';
+export type OperationType = 'SET_PROJECT_AREA_DISPLAY_TEXT' | 'UPGRADE_PROJECT_AREA_URI_TO_HTTPS';
 export type OperationLogStatus = 'started' | 'succeeded' | 'failed';
 
 export type ProposalExecutionContract = {
@@ -25,9 +32,21 @@ export type OperationPlan = {
     areaLabel: string;
   };
   mutation: {
-    field: 'action_display_text';
-    before: '';
+    field: 'action_display_text' | 'action_uri';
+    before: string;
     after: string;
+  };
+  probe: {
+    probeId: string;
+    status: 'SAFE';
+    probedAt: string;
+    expiresAt: string;
+    originalUrlFingerprint: string;
+  } | null;
+  targetGuards: {
+    actionType: string;
+    actionData: string;
+    actionDisplayText: string;
   };
   preconditions: string[];
   actor: {
@@ -45,8 +64,8 @@ export type OperationLog = {
   targetEntityType: 'project_area';
   targetEntityId: string;
   status: OperationLogStatus;
-  before: { actionDisplayText: string };
-  after: { actionDisplayText: string } | null;
+  before: { actionDisplayText?: string; actionUri?: string };
+  after: { actionDisplayText?: string; actionUri?: string } | null;
   actorUserId: string;
   actorName: string | null;
   errorCode: string | null;
@@ -56,6 +75,9 @@ export type OperationLog = {
   revertsOperationId: string | null;
   rootOperationId: string | null;
   rollbackOperationId: string | null;
+  probeId: string | null;
+  beforeValueFingerprint: string | null;
+  afterValueFingerprint: string | null;
 };
 
 export class OperationExecutionError extends Error {
@@ -90,6 +112,10 @@ const ERROR_MESSAGES: Record<string, string> = {
   STALE_DURING_EXECUTION: '執行期間專案內容已變更，系統沒有覆寫新的設定。',
   EXECUTION_FAILED: '改善方案套用失敗，正式專案未被修改。',
   VERIFICATION_FAILED: '套用後驗證失敗。',
+  HTTPS_PROBE_REQUIRED: '必須先完成 HTTPS 安全檢查。',
+  HTTPS_PROBE_EXPIRED: 'HTTPS 安全檢查已過期，請重新檢查。',
+  HTTPS_PROBE_UNSAFE: 'HTTPS 安全檢查結果不允許自動套用。',
+  HTTPS_PROBE_UNKNOWN: '系統無法確認 HTTPS 可安全自動套用。',
 };
 
 export function operationErrorMessage(code: string): string {
@@ -104,6 +130,14 @@ export function proposalExecutionContract(
     return {
       executable: true,
       operationType: 'SET_PROJECT_AREA_DISPLAY_TEXT',
+      targetEntityType: 'project_area',
+      targetEntityId,
+    };
+  }
+  if (proposalType === 'https-upgrade-candidate') {
+    return {
+      executable: true,
+      operationType: 'UPGRADE_PROJECT_AREA_URI_TO_HTTPS',
       targetEntityType: 'project_area',
       targetEntityId,
     };
@@ -128,6 +162,7 @@ export function buildOperationPlan(input: {
   currentProposal: Proposal;
   context: GuideContext;
   actor: { userId: string; role: string };
+  httpsProbe?: { record: StoredHttpsProbe | null; eligibility: HttpsProbeEligibility };
 }): OperationPlan {
   const { proposal, currentProposal, context } = input;
   const role = clean(input.actor.role).toLowerCase() as WorkspaceRole;
@@ -143,24 +178,86 @@ export function buildOperationPlan(input: {
     || proposal.projectId !== context.project.id
     || currentProposal.workspaceId !== context.workspaceId
     || currentProposal.projectId !== context.project.id
-    || proposal.proposalType !== 'postback-display-text'
     || currentProposal.ruleCode !== proposal.ruleCode
   ) throw new OperationExecutionError('PROPOSAL_STALE');
 
   const changes = currentProposal.changes;
   if (changes.length !== 1) throw new OperationExecutionError('PROPOSAL_NOT_EXECUTABLE');
   const change = changes[0];
+  if (change.entityType !== 'project_area' || (proposal.sourceEntityId && proposal.sourceEntityId !== change.entityId)) {
+    throw new OperationExecutionError('PROPOSAL_NOT_EXECUTABLE');
+  }
+
+  const area = context.areas.find(item => item.id === change.entityId);
+  if (!area?.recordId) throw new OperationExecutionError('TARGET_NOT_FOUND');
+  if (proposal.proposalType === 'https-upgrade-candidate') {
+    const probe = input.httpsProbe;
+    if (!probe?.record) throw new OperationExecutionError('HTTPS_PROBE_REQUIRED');
+    if (probe.eligibility === 'EXPIRED') throw new OperationExecutionError('HTTPS_PROBE_EXPIRED');
+    if (probe.eligibility === 'UNSAFE') throw new OperationExecutionError('HTTPS_PROBE_UNSAFE');
+    if (probe.eligibility === 'UNKNOWN') throw new OperationExecutionError('HTTPS_PROBE_UNKNOWN');
+    if (probe.eligibility !== 'SAFE' || probe.record.status !== 'SAFE') {
+      throw new OperationExecutionError('HTTPS_PROBE_REQUIRED');
+    }
+    if (change.field !== 'action_uri' || change.operation !== 'replace' || area.actionType !== 'uri') {
+      throw new OperationExecutionError('PROPOSAL_NOT_EXECUTABLE');
+    }
+    let candidate;
+    try {
+      candidate = buildHttpsCandidate(area.uri);
+    } catch {
+      throw new OperationExecutionError('TARGET_CHANGED');
+    }
+    if (
+      change.before !== sanitizeUrlForAudit(area.uri)
+      || change.after !== candidate.candidateUrlSanitized
+      || probe.record.projectAreaId !== area.recordId
+      || probe.record.workspaceId !== context.workspaceId
+      || probe.record.projectId !== context.project.id
+      || probe.record.proposalId !== proposal.id
+    ) throw new OperationExecutionError('TARGET_CHANGED');
+
+    return {
+      proposalId: proposal.id,
+      operationType: 'UPGRADE_PROJECT_AREA_URI_TO_HTTPS',
+      workspaceId: context.workspaceId,
+      projectId: context.project.id,
+      projectName: context.project.name,
+      target: {
+        entityType: 'project_area', entityId: area.recordId,
+        areaIndex: area.id, areaLabel: area.label,
+      },
+      mutation: { field: 'action_uri', before: area.uri, after: candidate.candidateUrl },
+      probe: {
+        probeId: probe.record.id,
+        status: 'SAFE',
+        probedAt: probe.record.probedAt,
+        expiresAt: probe.record.expiresAt,
+        originalUrlFingerprint: probe.record.originalUrlFingerprint,
+      },
+      targetGuards: {
+        actionType: area.actionType,
+        actionData: area.data,
+        actionDisplayText: area.displayText,
+      },
+      preconditions: [
+        'proposal.status = approved',
+        'proposal.source_fingerprint = current source fingerprint',
+        'fresh SAFE HTTPS probe matches current action_uri fingerprint',
+        "project_area.action_type = 'uri'",
+        'project_area.action_uri equals expected before value',
+      ],
+      actor: { userId: clean(input.actor.userId), role: role as 'admin' | 'owner' },
+    };
+  }
+
   if (
-    change.entityType !== 'project_area'
+    proposal.proposalType !== 'postback-display-text'
     || change.field !== 'action_display_text'
     || change.operation !== 'set'
     || change.before !== ''
     || !validDisplayText(change.after)
-    || (proposal.sourceEntityId && proposal.sourceEntityId !== change.entityId)
   ) throw new OperationExecutionError('PROPOSAL_NOT_EXECUTABLE');
-
-  const area = context.areas.find(item => item.id === change.entityId);
-  if (!area?.recordId) throw new OperationExecutionError('TARGET_NOT_FOUND');
   if (area.actionType !== 'postback' || !area.data || area.displayText !== '') {
     throw new OperationExecutionError('TARGET_CHANGED');
   }
@@ -182,6 +279,12 @@ export function buildOperationPlan(input: {
       before: '',
       after: change.after,
     },
+    probe: null,
+    targetGuards: {
+      actionType: area.actionType,
+      actionData: area.data,
+      actionDisplayText: area.displayText,
+    },
     preconditions: [
       'proposal.status = approved',
       'proposal.source_fingerprint = current source fingerprint',
@@ -197,27 +300,33 @@ export function buildOperationPlan(input: {
   };
 }
 
-function safeSnapshot(value: unknown): { actionDisplayText: string } {
+function safeSnapshot(value: unknown, operationType: OperationType): OperationLog['before'] {
   try {
     const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    if (operationType === 'UPGRADE_PROJECT_AREA_URI_TO_HTTPS') {
+      return { actionUri: sanitizeUrlForAudit(clean((parsed as Record<string, unknown>)?.actionUri)) };
+    }
     return { actionDisplayText: clean((parsed as Record<string, unknown>)?.actionDisplayText) };
   } catch {
-    return { actionDisplayText: '' };
+    return operationType === 'UPGRADE_PROJECT_AREA_URI_TO_HTTPS'
+      ? { actionUri: '' }
+      : { actionDisplayText: '' };
   }
 }
 
 function operationLogFromRow(row: Record<string, unknown>): OperationLog {
+  const operationType = clean(row.operation_type) as OperationType;
   return {
     id: clean(row.id),
     proposalId: clean(row.proposal_id),
     workspaceId: clean(row.workspace_id),
     projectId: clean(row.project_id),
-    operationType: clean(row.operation_type) as OperationType,
+    operationType,
     targetEntityType: 'project_area',
     targetEntityId: clean(row.target_entity_id),
     status: clean(row.status) as OperationLogStatus,
-    before: safeSnapshot(row.before_snapshot),
-    after: row.after_snapshot ? safeSnapshot(row.after_snapshot) : null,
+    before: safeSnapshot(row.before_snapshot, operationType),
+    after: row.after_snapshot ? safeSnapshot(row.after_snapshot, operationType) : null,
     actorUserId: clean(row.actor_user_id),
     actorName: clean(row.actor_name) || null,
     errorCode: clean(row.error_code) || null,
@@ -227,8 +336,22 @@ function operationLogFromRow(row: Record<string, unknown>): OperationLog {
     revertsOperationId: clean(row.reverts_operation_id) || null,
     rootOperationId: clean(row.root_operation_id) || null,
     rollbackOperationId: clean(row.rollback_operation_id) || null,
+    probeId: clean(row.probe_id) || null,
+    beforeValueFingerprint: clean(row.before_value_fingerprint) || null,
+    afterValueFingerprint: clean(row.after_value_fingerprint) || null,
   };
 }
+
+export function publicOperationLog(log: OperationLog) {
+  const {
+    beforeValueFingerprint: _beforeValueFingerprint,
+    afterValueFingerprint: _afterValueFingerprint,
+    ...safe
+  } = log;
+  return safe;
+}
+
+export const publicOperationLogs = (logs: OperationLog[]) => logs.map(publicOperationLog);
 
 export async function listOperationLogs(
   db: D1Database,
@@ -269,6 +392,7 @@ export function operationLogEvents(logs: OperationLog[]): ProposalEvent[] {
       toStatus: isRollback ? 'executed' : 'approved',
       metadata: {
         operationType: log.operationType,
+        ...(log.probeId ? { probeId: log.probeId } : {}),
         ...(log.revertsOperationId ? { revertsOperationId: log.revertsOperationId } : {}),
       },
       createdAt: log.createdAt,
@@ -283,6 +407,7 @@ export function operationLogEvents(logs: OperationLog[]): ProposalEvent[] {
         toStatus: 'executed',
         metadata: {
           operationType: log.operationType,
+          ...(log.probeId ? { probeId: log.probeId } : {}),
           ...(log.revertsOperationId ? { revertsOperationId: log.revertsOperationId } : {}),
         },
         createdAt: log.completedAt || log.createdAt,
@@ -299,12 +424,18 @@ export function operationLogEvents(logs: OperationLog[]): ProposalEvent[] {
         actorName: log.actorName,
         fromStatus: isRollback ? 'executed' : 'approved',
         toStatus: isRollback ? 'executed' : 'approved',
-        metadata: { errorCode: log.errorCode || 'EXECUTION_FAILED' },
+        metadata: { errorCode: log.errorCode || 'EXECUTION_FAILED', ...(log.probeId ? { probeId: log.probeId } : {}) },
         createdAt: log.completedAt || log.createdAt,
       });
     }
     return events;
   });
+}
+
+function operationSnapshot(plan: OperationPlan, value: string): Record<string, string> {
+  return plan.mutation.field === 'action_uri'
+    ? { actionUri: sanitizeUrlForAudit(value) }
+    : { actionDisplayText: value };
 }
 
 async function recordFailedExecution(
@@ -315,16 +446,22 @@ async function recordFailedExecution(
   markStale: boolean,
 ): Promise<void> {
   const completedAt = new Date().toISOString();
+  const beforeFingerprint = plan.mutation.field === 'action_uri' ? await fingerprintUrl(plan.mutation.before) : null;
+  const afterFingerprint = plan.mutation.field === 'action_uri' ? await fingerprintUrl(plan.mutation.after) : null;
   const statements: D1PreparedStatement[] = [
     db.prepare(`
       INSERT INTO ai_operation_logs (
         id, workspace_id, proposal_id, project_id, operation_type,
         target_entity_type, target_entity_id, status, before_snapshot,
-        after_snapshot, actor_user_id, error_code, error_message, created_at, completed_at
-      ) VALUES (?, ?, ?, ?, ?, 'project_area', ?, 'failed', ?, NULL, ?, ?, ?, ?, ?)
+        after_snapshot, actor_user_id, error_code, error_message, created_at, completed_at,
+        probe_id, before_value_fingerprint, after_value_fingerprint
+      ) VALUES (?, ?, ?, ?, ?, 'project_area', ?, 'failed', ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         status = 'failed', after_snapshot = NULL, error_code = excluded.error_code,
-        error_message = excluded.error_message, completed_at = excluded.completed_at
+        error_message = excluded.error_message, completed_at = excluded.completed_at,
+        probe_id = excluded.probe_id,
+        before_value_fingerprint = excluded.before_value_fingerprint,
+        after_value_fingerprint = excluded.after_value_fingerprint
     `).bind(
       logId,
       plan.workspaceId,
@@ -332,12 +469,15 @@ async function recordFailedExecution(
       plan.projectId,
       plan.operationType,
       plan.target.entityId,
-      JSON.stringify({ actionDisplayText: plan.mutation.before }),
+      JSON.stringify(operationSnapshot(plan, plan.mutation.before)),
       plan.actor.userId,
       code,
       operationErrorMessage(code),
       completedAt,
       completedAt,
+      plan.probe?.probeId || null,
+      beforeFingerprint,
+      afterFingerprint,
     ),
   ];
 
@@ -383,13 +523,19 @@ async function classifyExecutionConflict(db: D1Database, plan: OperationPlan): P
       WHERE id = ? AND workspace_id = ? AND project_id = ? LIMIT 1
     `).bind(plan.proposalId, plan.workspaceId, plan.projectId).first<Record<string, unknown>>(),
     db.prepare(`
-      SELECT action_display_text FROM project_areas
+      SELECT action_type, action_uri, action_display_text FROM project_areas
       WHERE id = ? AND workspace_id = ? AND project_id = ? LIMIT 1
     `).bind(plan.target.entityId, plan.workspaceId, plan.projectId).first<Record<string, unknown>>(),
   ]);
   if (clean(proposal?.status) === 'executed') return 'PROPOSAL_ALREADY_EXECUTED';
   if (clean(proposal?.status) === 'stale') return 'PROPOSAL_STALE';
   if (!target) return 'TARGET_NOT_FOUND';
+  if (plan.operationType === 'UPGRADE_PROJECT_AREA_URI_TO_HTTPS') {
+    if (clean(target.action_type) !== 'uri' || clean(target.action_uri) !== plan.mutation.before) {
+      return 'STALE_DURING_EXECUTION';
+    }
+    return 'EXECUTION_FAILED';
+  }
   if (clean(target.action_display_text) !== '') return 'STALE_DURING_EXECUTION';
   return 'EXECUTION_FAILED';
 }
@@ -399,6 +545,9 @@ async function executeSetProjectAreaDisplayText(
   plan: OperationPlan,
   sourceFingerprint: string,
 ): Promise<OperationLog> {
+  if (plan.operationType !== 'SET_PROJECT_AREA_DISPLAY_TEXT' || plan.mutation.field !== 'action_display_text') {
+    throw new OperationExecutionError('PROPOSAL_NOT_EXECUTABLE');
+  }
   const logId = recordId('aiol');
   const executedAt = new Date().toISOString();
   try {
@@ -564,11 +713,260 @@ async function executeSetProjectAreaDisplayText(
   return log;
 }
 
+async function executeUpgradeProjectAreaUri(
+  db: D1Database,
+  plan: OperationPlan,
+  sourceFingerprint: string,
+): Promise<OperationLog> {
+  if (
+    plan.operationType !== 'UPGRADE_PROJECT_AREA_URI_TO_HTTPS'
+    || plan.mutation.field !== 'action_uri'
+    || !plan.probe
+  ) throw new OperationExecutionError('PROPOSAL_NOT_EXECUTABLE');
+
+  const beforeFingerprint = await fingerprintUrl(plan.mutation.before);
+  const afterFingerprint = await fingerprintUrl(plan.mutation.after);
+  if (!beforeFingerprint || beforeFingerprint !== plan.probe.originalUrlFingerprint) {
+    throw new OperationExecutionError('TARGET_CHANGED');
+  }
+  if (!afterFingerprint) throw new OperationExecutionError('PROPOSAL_NOT_EXECUTABLE');
+  if (Date.parse(plan.probe.expiresAt) <= Date.now()) {
+    throw new OperationExecutionError('HTTPS_PROBE_EXPIRED');
+  }
+
+  const logId = recordId('aiol');
+  const executedAt = new Date().toISOString();
+  try {
+    await db.batch([
+      db.prepare(`
+        INSERT INTO ai_operation_logs (
+          id, workspace_id, proposal_id, project_id, operation_type,
+          target_entity_type, target_entity_id, status, before_snapshot,
+          actor_user_id, created_at, probe_id,
+          before_value_fingerprint, after_value_fingerprint
+        ) VALUES (?, ?, ?, ?, ?, 'project_area', ?, 'started', ?, ?, ?, ?, ?, ?)
+      `).bind(
+        logId,
+        plan.workspaceId,
+        plan.proposalId,
+        plan.projectId,
+        plan.operationType,
+        plan.target.entityId,
+        JSON.stringify(operationSnapshot(plan, plan.mutation.before)),
+        plan.actor.userId,
+        executedAt,
+        plan.probe.probeId,
+        beforeFingerprint,
+        afterFingerprint,
+      ),
+      db.prepare(`
+        UPDATE project_areas
+        SET action_uri = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND workspace_id = ? AND project_id = ?
+          AND action_type = 'uri' AND action_uri = ?
+          AND EXISTS (
+            SELECT 1 FROM ai_proposals
+            WHERE id = ? AND workspace_id = ? AND project_id = ?
+              AND proposal_type = 'https-upgrade-candidate'
+              AND status = 'approved' AND source_fingerprint = ?
+          )
+          AND EXISTS (
+            SELECT 1 FROM ai_https_probe_results
+            WHERE id = ? AND workspace_id = ? AND project_id = ? AND proposal_id = ?
+              AND project_area_id = ? AND status = 'SAFE'
+              AND original_url_fingerprint = ? AND expires_at > ?
+          )
+      `).bind(
+        plan.mutation.after,
+        plan.target.entityId,
+        plan.workspaceId,
+        plan.projectId,
+        plan.mutation.before,
+        plan.proposalId,
+        plan.workspaceId,
+        plan.projectId,
+        sourceFingerprint,
+        plan.probe.probeId,
+        plan.workspaceId,
+        plan.projectId,
+        plan.proposalId,
+        plan.target.entityId,
+        beforeFingerprint,
+        executedAt,
+      ),
+      db.prepare(`
+        UPDATE ai_operation_logs
+        SET status = 'succeeded', after_snapshot = ?, completed_at = ?
+        WHERE id = ? AND workspace_id = ? AND proposal_id = ?
+          AND operation_type = 'UPGRADE_PROJECT_AREA_URI_TO_HTTPS'
+          AND status = 'started' AND changes() = 1
+          AND EXISTS (
+            SELECT 1 FROM project_areas
+            WHERE id = ? AND workspace_id = ? AND project_id = ?
+              AND action_type = ? AND action_uri = ?
+              AND COALESCE(action_data, '') = ?
+              AND COALESCE(action_display_text, '') = ?
+          )
+      `).bind(
+        JSON.stringify(operationSnapshot(plan, plan.mutation.after)),
+        executedAt,
+        logId,
+        plan.workspaceId,
+        plan.proposalId,
+        plan.target.entityId,
+        plan.workspaceId,
+        plan.projectId,
+        plan.targetGuards.actionType,
+        plan.mutation.after,
+        plan.targetGuards.actionData,
+        plan.targetGuards.actionDisplayText,
+      ),
+      db.prepare(`
+        UPDATE ai_proposals
+        SET status = 'executed', executed_at = ?, updated_at = ?
+        WHERE id = ? AND workspace_id = ? AND project_id = ?
+          AND status = 'approved' AND source_fingerprint = ?
+          AND EXISTS (
+            SELECT 1 FROM ai_operation_logs
+            WHERE id = ? AND workspace_id = ? AND proposal_id = ?
+              AND status = 'succeeded' AND probe_id = ?
+          )
+      `).bind(
+        executedAt,
+        executedAt,
+        plan.proposalId,
+        plan.workspaceId,
+        plan.projectId,
+        sourceFingerprint,
+        logId,
+        plan.workspaceId,
+        plan.proposalId,
+        plan.probe.probeId,
+      ),
+      db.prepare(`
+        INSERT INTO ai_operation_logs (
+          id, workspace_id, proposal_id, project_id, operation_type,
+          target_entity_type, target_entity_id, status, before_snapshot,
+          actor_user_id, created_at, probe_id,
+          before_value_fingerprint, after_value_fingerprint
+        )
+        SELECT ?, ?, ?, ?, ?, 'project_area', ?, '__ROLLBACK__', ?, ?, ?, ?, ?, ?
+        WHERE NOT EXISTS (
+          SELECT 1 FROM ai_operation_logs operation
+          JOIN ai_proposals proposal ON proposal.id = operation.proposal_id
+          JOIN project_areas target ON target.id = operation.target_entity_id
+          JOIN ai_https_probe_results probe ON probe.id = operation.probe_id
+          WHERE operation.id = ? AND operation.workspace_id = ? AND operation.proposal_id = ?
+            AND operation.status = 'succeeded'
+            AND operation.before_value_fingerprint = ?
+            AND operation.after_value_fingerprint = ?
+            AND proposal.workspace_id = ? AND proposal.project_id = ?
+            AND proposal.status = 'executed' AND proposal.executed_at = ?
+            AND target.workspace_id = ? AND target.project_id = ?
+            AND target.action_type = 'uri' AND target.action_uri = ?
+            AND COALESCE(target.action_data, '') = ?
+            AND COALESCE(target.action_display_text, '') = ?
+            AND probe.workspace_id = ? AND probe.project_id = ?
+            AND probe.proposal_id = ? AND probe.status = 'SAFE'
+        )
+      `).bind(
+        recordId('assert'),
+        plan.workspaceId,
+        plan.proposalId,
+        plan.projectId,
+        plan.operationType,
+        plan.target.entityId,
+        JSON.stringify(operationSnapshot(plan, plan.mutation.before)),
+        plan.actor.userId,
+        executedAt,
+        plan.probe.probeId,
+        beforeFingerprint,
+        afterFingerprint,
+        logId,
+        plan.workspaceId,
+        plan.proposalId,
+        beforeFingerprint,
+        afterFingerprint,
+        plan.workspaceId,
+        plan.projectId,
+        executedAt,
+        plan.workspaceId,
+        plan.projectId,
+        plan.mutation.after,
+        plan.targetGuards.actionData,
+        plan.targetGuards.actionDisplayText,
+        plan.workspaceId,
+        plan.projectId,
+        plan.proposalId,
+      ),
+    ]);
+  } catch {
+    const code = await classifyExecutionConflict(db, plan);
+    try {
+      await recordFailedExecution(
+        db,
+        plan,
+        logId,
+        code,
+        ['TARGET_NOT_FOUND', 'TARGET_CHANGED', 'STALE_DURING_EXECUTION'].includes(code),
+      );
+    } catch {
+      console.error(JSON.stringify({ message: 'operation failure audit write failed', code }));
+    }
+    throw new OperationExecutionError(code);
+  }
+
+  const [target, proposal, logs] = await Promise.all([
+    db.prepare(`
+      SELECT action_type, action_uri, action_data, action_display_text
+      FROM project_areas
+      WHERE id = ? AND workspace_id = ? AND project_id = ? LIMIT 1
+    `).bind(plan.target.entityId, plan.workspaceId, plan.projectId).first<Record<string, unknown>>(),
+    db.prepare(`
+      SELECT status, executed_at FROM ai_proposals
+      WHERE id = ? AND workspace_id = ? AND project_id = ? LIMIT 1
+    `).bind(plan.proposalId, plan.workspaceId, plan.projectId).first<Record<string, unknown>>(),
+    listOperationLogs(db, plan.workspaceId, plan.projectId, plan.proposalId),
+  ]);
+  const log = logs.find(item => item.id === logId);
+  if (
+    !target
+    || clean(target.action_type) !== plan.targetGuards.actionType
+    || clean(target.action_uri) !== plan.mutation.after
+    || clean(target.action_data) !== plan.targetGuards.actionData
+    || clean(target.action_display_text) !== plan.targetGuards.actionDisplayText
+    || clean(proposal?.status) !== 'executed'
+    || !clean(proposal?.executed_at)
+    || log?.status !== 'succeeded'
+    || log.probeId !== plan.probe.probeId
+    || log.beforeValueFingerprint !== beforeFingerprint
+    || log.afterValueFingerprint !== afterFingerprint
+  ) throw new OperationExecutionError('VERIFICATION_FAILED');
+  return log;
+}
+
+export function publicOperationPlan(plan: OperationPlan) {
+  const probe = plan.probe ? {
+    probeId: plan.probe.probeId,
+    status: plan.probe.status,
+    probedAt: plan.probe.probedAt,
+    expiresAt: plan.probe.expiresAt,
+  } : null;
+  return {
+    ...plan,
+    mutation: plan.mutation.field === 'action_uri'
+      ? { ...plan.mutation, before: sanitizeUrlForAudit(plan.mutation.before), after: sanitizeUrlForAudit(plan.mutation.after) }
+      : plan.mutation,
+    probe,
+  };
+}
+
 export const OPERATION_EXECUTORS: Record<
   OperationType,
   (db: D1Database, plan: OperationPlan, sourceFingerprint: string) => Promise<OperationLog>
 > = {
   SET_PROJECT_AREA_DISPLAY_TEXT: executeSetProjectAreaDisplayText,
+  UPGRADE_PROJECT_AREA_URI_TO_HTTPS: executeUpgradeProjectAreaUri,
 };
 
 export async function executeOperationPlan(

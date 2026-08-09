@@ -98,8 +98,16 @@ test('P001 exposes the only executable proposal contract', () => {
   });
 });
 
+test('P002 exposes the HTTPS upgrade typed operation contract', () => {
+  assert.deepEqual(proposalExecutionContract('https-upgrade-candidate', '1'), {
+    executable: true,
+    operationType: 'UPGRADE_PROJECT_AREA_URI_TO_HTTPS',
+    targetEntityType: 'project_area',
+    targetEntityId: '1',
+  });
+});
+
 for (const [label, type] of [
-  ['P002', 'https-upgrade-candidate'],
   ['P003', 'duplicate-message-review'],
   ['P004', 'duplicate-postback-review'],
   ['P005', 'multi-page-structure-draft'],
@@ -170,8 +178,11 @@ test('invalid or empty deterministic after value is rejected', () => {
   expectCode('PROPOSAL_NOT_EXECUTABLE', () => planFor('admin', storedProposal(), proposalNow));
 });
 
-test('executor registry contains one typed executor and no generic updater', () => {
-  assert.deepEqual(Object.keys(OPERATION_EXECUTORS), ['SET_PROJECT_AREA_DISPLAY_TEXT']);
+test('executor registry contains only the P001 and P002 typed executors', () => {
+  assert.deepEqual(Object.keys(OPERATION_EXECUTORS), [
+    'SET_PROJECT_AREA_DISPLAY_TEXT',
+    'UPGRADE_PROJECT_AREA_URI_TO_HTTPS',
+  ]);
 });
 
 test('0013 creates only the operation log table and required indexes', async () => {
@@ -196,7 +207,7 @@ test('executor uses a conditional typed update and transactional rollback assert
 
 test('successful atomic unit updates only action_display_text and proposal execution state', async () => {
   const source = await readFile(new URL('../src/guide/proposals/execution.ts', import.meta.url), 'utf8');
-  const executor = source.slice(source.indexOf('async function executeSetProjectAreaDisplayText'), source.indexOf('export const OPERATION_EXECUTORS'));
+  const executor = source.slice(source.indexOf('async function executeSetProjectAreaDisplayText'), source.indexOf('async function executeUpgradeProjectAreaUri'));
   for (const forbidden of [
     'SET action_type', 'SET action_data', 'SET action_uri', 'SET action_text', 'SET target_page_id',
     'UPDATE templates', 'UPDATE template_areas', 'smart_menu_assets', 'api.line.me', 'GEMINI_API_KEY',
@@ -204,13 +215,12 @@ test('successful atomic unit updates only action_display_text and proposal execu
   assert.match(executor, /SET status = 'executed', executed_at = \?/);
 });
 
-test('operation logs expose only sanitized actionDisplayText snapshots', async () => {
+test('P001 operation logs expose only sanitized actionDisplayText snapshots', async () => {
   const migration = await readFile(new URL('../migrations/0013_ai_operation_logs.sql', import.meta.url), 'utf8');
   const source = await readFile(new URL('../src/guide/proposals/execution.ts', import.meta.url), 'utf8');
   assert.match(migration, /before_snapshot TEXT NOT NULL/);
   assert.match(migration, /after_snapshot TEXT/);
-  assert.match(source, /JSON\.stringify\(\{ actionDisplayText: plan\.mutation\.before \}\)/);
-  assert.match(source, /JSON\.stringify\(\{ actionDisplayText: plan\.mutation\.after \}\)/);
+  assert.match(source, /actionDisplayText: value/);
   assert.doesNotMatch(source, /JSON\.stringify\(area\)|SELECT \* FROM project_areas/);
 });
 

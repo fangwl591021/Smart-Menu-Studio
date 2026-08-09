@@ -75,6 +75,8 @@ test('admin can build a typed rollback plan', () => {
   assert.equal(canRoleRollback('admin'), true);
   assert.deepEqual(planFor('admin').mutation, {
     field: 'action_display_text', expectedCurrent: '聯絡我們', restoreTo: '',
+    expectedCurrentFingerprint: null,
+    restoreToFingerprint: null,
   });
 });
 
@@ -111,8 +113,11 @@ test('null and empty display text normalize to the same restore value', () => {
   assert.equal(eligibility(operation({ before: { actionDisplayText: null } })).eligible, true);
 });
 
-test('rollback registry contains only the P001 typed operation', () => {
-  assert.deepEqual(Object.keys(ROLLBACK_EXECUTORS), ['SET_PROJECT_AREA_DISPLAY_TEXT']);
+test('rollback registry contains only the P001 and P002 typed operations', () => {
+  assert.deepEqual(Object.keys(ROLLBACK_EXECUTORS), [
+    'SET_PROJECT_AREA_DISPLAY_TEXT',
+    'UPGRADE_PROJECT_AREA_URI_TO_HTTPS',
+  ]);
 });
 
 test('0014 only extends operation audit and links rollback to original operation', async () => {
@@ -125,12 +130,13 @@ test('0014 only extends operation audit and links rollback to original operation
 
 test('rollback update changes only action_display_text with expected-current concurrency guard', async () => {
   const source = await readFile(new URL('../src/guide/proposals/rollback.ts', import.meta.url), 'utf8');
-  assert.match(source, /UPDATE project_areas\s+SET action_display_text = \?/);
-  assert.match(source, /COALESCE\(action_display_text, ''\) = \?/);
-  assert.match(source, /changes\(\) = 1/);
-  assert.match(source, /'__ROLLBACK__'/);
+  const executor = source.slice(source.indexOf('async function rollbackSetProjectAreaDisplayText'), source.indexOf('async function rollbackUpgradeProjectAreaUri'));
+  assert.match(executor, /UPDATE project_areas\s+SET action_display_text = \?/);
+  assert.match(executor, /COALESCE\(action_display_text, ''\) = \?/);
+  assert.match(executor, /changes\(\) = 1/);
+  assert.match(executor, /'__ROLLBACK__'/);
   for (const forbidden of ['SET action_type', 'SET action_data', 'SET action_uri', 'SET action_text', 'SET target_page_id']) {
-    assert.equal(source.includes(forbidden), false);
+    assert.equal(executor.includes(forbidden), false);
   }
 });
 

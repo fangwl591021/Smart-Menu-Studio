@@ -694,6 +694,18 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
     }
   };
 
+  const refreshProjectFromServer = async () => {
+    try {
+      const response = await authFetch(`/api/projects/${projectId}`);
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.error || '專案讀取失敗');
+      setProject(payload.project);
+      setSwitchTargets(payload.switchTargets || []);
+    } catch (error) {
+      console.error('Project refresh after Proposal operation failed', error);
+    }
+  };
+
   const handleProposalExecuted = (operation) => {
     const plan = operation?.plan;
     if (plan?.operationType === 'SET_PROJECT_AREA_DISPLAY_TEXT') {
@@ -709,6 +721,8 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
             }
           : area),
       }));
+    } else if (plan?.operationType === 'UPGRADE_PROJECT_AREA_URI_TO_HTTPS') {
+      void refreshProjectFromServer();
     }
     setProposalRefreshKey(value => value + 1);
     emitGuideEvent({
@@ -733,6 +747,8 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
             }
           : area),
       }));
+    } else if (plan?.operationType === 'UPGRADE_PROJECT_AREA_URI_TO_HTTPS') {
+      void refreshProjectFromServer();
     }
     setProposalRefreshKey(value => value + 1);
     emitGuideEvent({
