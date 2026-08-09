@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const page = () => readFile(new URL('../src/components/LiffReferralPage.jsx', import.meta.url), 'utf8');
-const selfSection = source => source.slice(source.indexOf('function SelfAttributionPanel'), source.indexOf('export default function LiffReferralPage'));
+const selfSection = source => source.slice(source.indexOf('function SelfAttributionPanel'), source.indexOf('function SelfLedgerPanel'));
 
 test('member self attribution uses only the existing LIFF-scoped API and backend aggregates', async () => {
   const source = selfSection(await page());
