@@ -6,6 +6,8 @@ import LineIntelligencePanel from './components/LineIntelligencePanel';
 import AIUsagePanel from './components/AIUsagePanel';
 import LineIntelligenceHealthPanel from './components/LineIntelligenceHealthPanel';
 import ConversionApiKeyPanel from './components/ConversionApiKeyPanel';
+import LiffReferralConfigPanel from './components/LiffReferralConfigPanel';
+import LiffReferralPage from './components/LiffReferralPage';
 import TrackedUriTool from './components/TrackedUriTool';
 import { emitGuideEvent } from './guide-events';
 import { 
@@ -4772,7 +4774,7 @@ const EditorView = ({ onBack, mode = 'project', templateId = null }) => {
   );
 };
 
-export default function App() {
+function AppShell() {
   const [currentView, setCurrentView] = useState('dashboard');
   const [currentTemplateId, setCurrentTemplateId] = useState(null);
   const [currentProjectId, setCurrentProjectId] = useState(null);
@@ -5065,7 +5067,7 @@ export default function App() {
               <AccountView session={session} onSessionChanged={loadSession} />
             )}
             {currentView === 'settings' && !isPlatformAdminMode && (
-              <ConversionApiKeyPanel request={authFetch} userRole={activeRole} />
+              <><ConversionApiKeyPanel request={authFetch} userRole={activeRole} /><LiffReferralConfigPanel request={authFetch} userRole={activeRole} /></>
             )}
             {currentView === 'ai-usage' && (
               <AIUsagePanel request={authFetch} systemAdmin={isPlatformAdminMode} />
@@ -5094,4 +5096,8 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+export default function App() {
+  return window.location.pathname === '/liff/referral' ? <LiffReferralPage /> : <AppShell />;
 }
