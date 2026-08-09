@@ -38,6 +38,7 @@ export type OperationPlan = {
 
 export type OperationLog = {
   id: string;
+  workspaceId: string;
   proposalId: string;
   projectId: string;
   operationType: OperationType;
@@ -52,6 +53,9 @@ export type OperationLog = {
   errorMessage: string | null;
   createdAt: string;
   completedAt: string | null;
+  revertsOperationId: string | null;
+  rootOperationId: string | null;
+  rollbackOperationId: string | null;
 };
 
 export class OperationExecutionError extends Error {
@@ -206,6 +210,7 @@ function operationLogFromRow(row: Record<string, unknown>): OperationLog {
   return {
     id: clean(row.id),
     proposalId: clean(row.proposal_id),
+    workspaceId: clean(row.workspace_id),
     projectId: clean(row.project_id),
     operationType: clean(row.operation_type) as OperationType,
     targetEntityType: 'project_area',
@@ -219,6 +224,9 @@ function operationLogFromRow(row: Record<string, unknown>): OperationLog {
     errorMessage: clean(row.error_message) || null,
     createdAt: clean(row.created_at),
     completedAt: clean(row.completed_at) || null,
+    revertsOperationId: clean(row.reverts_operation_id) || null,
+    rootOperationId: clean(row.root_operation_id) || null,
+    rollbackOperationId: clean(row.rollback_operation_id) || null,
   };
 }
 
@@ -229,7 +237,18 @@ export async function listOperationLogs(
   proposalId: string,
 ): Promise<OperationLog[]> {
   const result = await db.prepare(`
-    SELECT l.*, actor.display_name AS actor_name
+    SELECT l.*, actor.display_name AS actor_name,
+      (
+        SELECT rollback.id
+        FROM ai_operation_logs rollback
+        WHERE rollback.workspace_id = l.workspace_id
+          AND rollback.project_id = l.project_id
+          AND rollback.proposal_id = l.proposal_id
+          AND rollback.reverts_operation_id = l.id
+          AND rollback.status = 'succeeded'
+        ORDER BY rollback.completed_at DESC, rollback.id DESC
+        LIMIT 1
+      ) AS rollback_operation_id
     FROM ai_operation_logs l
     LEFT JOIN users actor ON actor.id = l.actor_user_id
     WHERE l.workspace_id = ? AND l.project_id = ? AND l.proposal_id = ?
@@ -240,35 +259,46 @@ export async function listOperationLogs(
 
 export function operationLogEvents(logs: OperationLog[]): ProposalEvent[] {
   return logs.flatMap(log => {
+    const isRollback = Boolean(log.revertsOperationId);
     const events: ProposalEvent[] = [{
       id: `${log.id}:started`,
-      eventType: 'EXECUTION_STARTED',
+      eventType: isRollback ? 'ROLLBACK_STARTED' : 'EXECUTION_STARTED',
       actorUserId: log.actorUserId,
       actorName: log.actorName,
-      fromStatus: 'approved',
-      toStatus: 'approved',
-      metadata: { operationType: log.operationType },
+      fromStatus: isRollback ? 'executed' : 'approved',
+      toStatus: isRollback ? 'executed' : 'approved',
+      metadata: {
+        operationType: log.operationType,
+        ...(log.revertsOperationId ? { revertsOperationId: log.revertsOperationId } : {}),
+      },
       createdAt: log.createdAt,
     }];
     if (log.status === 'succeeded') {
       events.push({
         id: `${log.id}:succeeded`,
-        eventType: 'EXECUTION_SUCCEEDED',
+        eventType: isRollback ? 'ROLLBACK_SUCCEEDED' : 'EXECUTION_SUCCEEDED',
         actorUserId: log.actorUserId,
         actorName: log.actorName,
-        fromStatus: 'approved',
+        fromStatus: isRollback ? 'executed' : 'approved',
         toStatus: 'executed',
-        metadata: { operationType: log.operationType },
+        metadata: {
+          operationType: log.operationType,
+          ...(log.revertsOperationId ? { revertsOperationId: log.revertsOperationId } : {}),
+        },
         createdAt: log.completedAt || log.createdAt,
       });
     } else if (log.status === 'failed') {
       events.push({
         id: `${log.id}:failed`,
-        eventType: 'EXECUTION_FAILED',
+        eventType: isRollback && [
+          'ROLLBACK_TARGET_CHANGED',
+          'ROLLBACK_TARGET_NOT_FOUND',
+          'ROLLBACK_ALREADY_COMPLETED',
+        ].includes(log.errorCode || '') ? 'ROLLBACK_BLOCKED' : isRollback ? 'ROLLBACK_FAILED' : 'EXECUTION_FAILED',
         actorUserId: log.actorUserId,
         actorName: log.actorName,
-        fromStatus: 'approved',
-        toStatus: 'approved',
+        fromStatus: isRollback ? 'executed' : 'approved',
+        toStatus: isRollback ? 'executed' : 'approved',
         metadata: { errorCode: log.errorCode || 'EXECUTION_FAILED' },
         createdAt: log.completedAt || log.createdAt,
       });

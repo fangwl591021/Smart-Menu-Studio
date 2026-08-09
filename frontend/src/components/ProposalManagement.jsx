@@ -20,6 +20,10 @@ const EVENT_LABELS = {
   EXECUTION_STARTED: '開始套用方案',
   EXECUTION_SUCCEEDED: '方案套用成功',
   EXECUTION_FAILED: '方案套用失敗',
+  ROLLBACK_STARTED: '開始回復操作',
+  ROLLBACK_SUCCEEDED: '操作回復成功',
+  ROLLBACK_FAILED: '操作回復失敗',
+  ROLLBACK_BLOCKED: '操作回復已阻擋',
 };
 
 const FIELD_LABELS = {
@@ -62,13 +66,14 @@ function ProposalChanges({ snapshot }) {
   );
 }
 
-export default function ProposalManagement({ projectId, project, userRole = 'viewer', request, refreshKey = 0, onExecuted }) {
+export default function ProposalManagement({ projectId, project, userRole = 'viewer', request, refreshKey = 0, onExecuted, onRolledBack }) {
   const [state, setState] = useState({ status: 'loading', proposals: [], error: '' });
-  const [detail, setDetail] = useState({ status: 'idle', proposal: null, events: [], operationLogs: [], error: '' });
+  const [detail, setDetail] = useState({ status: 'idle', proposal: null, events: [], operationLogs: [], rollbackPreview: null, error: '' });
   const [busy, setBusy] = useState('');
   const [rejectReason, setRejectReason] = useState('');
   const [approveConfirm, setApproveConfirm] = useState(false);
   const [executeConfirm, setExecuteConfirm] = useState(false);
+  const [rollbackConfirm, setRollbackConfirm] = useState(false);
   const [executionFeedback, setExecutionFeedback] = useState(null);
 
   const loadList = useCallback(async () => {
@@ -89,10 +94,11 @@ export default function ProposalManagement({ projectId, project, userRole = 'vie
   }, [loadList, projectId, refreshKey]);
 
   const openDetail = async proposalId => {
-    setDetail({ status: 'loading', proposal: null, events: [], operationLogs: [], error: '' });
+    setDetail({ status: 'loading', proposal: null, events: [], operationLogs: [], rollbackPreview: null, error: '' });
     setApproveConfirm(false);
     setExecuteConfirm(false);
     setRejectReason('');
+    setRollbackConfirm(false);
     setExecutionFeedback(null);
     try {
       const response = await request(`/api/projects/${encodeURIComponent(projectId)}/proposals/${encodeURIComponent(proposalId)}`);
@@ -104,20 +110,22 @@ export default function ProposalManagement({ projectId, project, userRole = 'vie
         events: payload.events || [],
         operationLogs: payload.operationLogs || [],
         error: '',
+        rollbackPreview: payload.rollbackPreview || null,
       });
       await loadList();
     } catch (error) {
       console.error('Proposal detail request failed', error);
-      setDetail({ status: 'error', proposal: null, events: [], operationLogs: [], error: '目前無法讀取改善方案。' });
+      setDetail({ status: 'error', proposal: null, events: [], operationLogs: [], rollbackPreview: null, error: '目前無法讀取改善方案。' });
     }
   };
 
   const closeDetail = () => {
-    setDetail({ status: 'idle', proposal: null, events: [], operationLogs: [], error: '' });
+    setDetail({ status: 'idle', proposal: null, events: [], operationLogs: [], rollbackPreview: null, error: '' });
     setApproveConfirm(false);
     setExecuteConfirm(false);
     setRejectReason('');
     setExecutionFeedback(null);
+    setRollbackConfirm(false);
   };
 
   const runAction = async (action, options = {}) => {
@@ -172,9 +180,10 @@ export default function ProposalManagement({ projectId, project, userRole = 'vie
         operationLogs: payload.operationLogs || [],
         error: '',
       });
-      setExecutionFeedback({ type: 'success', message: '✓ 改善方案已套用' });
       await loadList();
       onExecuted?.(payload.operation);
+      await openDetail(payload.proposal.id);
+      setExecutionFeedback({ type: 'success', message: '✓ 改善方案已套用' });
     } catch (error) {
       console.error('Proposal execution request failed', error);
       setExecuteConfirm(false);
@@ -188,6 +197,60 @@ export default function ProposalManagement({ projectId, project, userRole = 'vie
         message: isStale
           ? '⚠ 方案已失效：專案內容在核准後已發生變更，系統沒有覆寫新的設定。'
           : error.message || '改善方案套用失敗。',
+      });
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const rollbackProposal = async () => {
+    const proposal = detail.proposal;
+    if (!proposal) return;
+    setBusy('rollback');
+    setExecutionFeedback(null);
+    try {
+      const response = await request(
+        `/api/projects/${encodeURIComponent(projectId)}/proposals/${encodeURIComponent(proposal.id)}/rollback`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ confirmation: true }),
+        },
+      );
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        const failure = new Error(payload.error || '操作回復失敗。');
+        failure.code = payload.code || 'ROLLBACK_EXECUTION_FAILED';
+        throw failure;
+      }
+      setRollbackConfirm(false);
+      setDetail({
+        status: 'success',
+        proposal: payload.proposal,
+        events: payload.events || [],
+        operationLogs: payload.operationLogs || [],
+        rollbackPreview: payload.rollbackPreview || null,
+        error: '',
+      });
+      setExecutionFeedback({ type: 'success', message: '↩ 已安全回復這次修改' });
+      await loadList();
+      onRolledBack?.(payload.rollback);
+    } catch (error) {
+      console.error('Proposal rollback request failed', error);
+      setRollbackConfirm(false);
+      const blocked = ['ROLLBACK_TARGET_CHANGED', 'ROLLBACK_TARGET_NOT_FOUND'].includes(error.code);
+      const completed = error.code === 'ROLLBACK_ALREADY_COMPLETED';
+      if (blocked || completed) {
+        await loadList();
+        await openDetail(proposal.id);
+      }
+      setExecutionFeedback({
+        type: blocked ? 'blocked' : completed ? 'success' : 'error',
+        message: blocked
+          ? '⚠ 無法自動回復：此欄位在執行後又被修改，為避免覆蓋較新的資料，系統已阻擋回復。'
+          : completed
+            ? '此操作已經回復。'
+            : error.message || '操作回復失敗。',
       });
     } finally {
       setBusy('');
@@ -252,12 +315,18 @@ export default function ProposalManagement({ projectId, project, userRole = 'vie
               const meta = STATUS_META[proposal.status] || STATUS_META.draft;
               const change = proposal.snapshot?.changes?.[0];
               const area = project?.areas?.find(item => String(item.id) === String(change?.entityId));
-              const succeededLog = [...detail.operationLogs].reverse().find(log => log.status === 'succeeded');
-              const roleCanExecute = ['admin', 'owner'].includes(String(userRole).toLowerCase());
+              const succeededLog = [...detail.operationLogs].reverse().find(log => log.status === 'succeeded' && !log.revertsOperationId);
+              const rollbackLog = [...detail.operationLogs].reverse().find(log => log.status === 'succeeded' && log.revertsOperationId);
+              const roleCanManage = ['admin', 'owner'].includes(String(userRole).toLowerCase());
               const canExecute = proposal.status === 'approved'
                 && proposal.execution?.executable === true
                 && proposal.permissions?.canExecute === true
-                && roleCanExecute;
+                && roleCanManage;
+              const rollbackPreview = detail.rollbackPreview;
+              const canRollback = proposal.status === 'executed'
+                && rollbackPreview?.eligible === true
+                && rollbackPreview?.canRollback === true
+                && roleCanManage;
               return (
                 <div className="mt-5 space-y-5">
                   <div>
@@ -274,9 +343,14 @@ export default function ProposalManagement({ projectId, project, userRole = 'vie
                       ⚠ 方案已失效：專案內容在核准後已發生變更，系統沒有覆寫新的設定。
                     </div>
                   )}
+                  {rollbackPreview?.reasonCode === 'TARGET_CHANGED_AFTER_EXECUTION' && (
+                    <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm font-medium text-amber-900">
+                      ⚠ 無法自動回復：此欄位在執行後又被修改，為避免覆蓋較新的資料，系統已阻擋回復。
+                    </div>
+                  )}
 
                   {executionFeedback && (
-                    <div className={`rounded-lg border p-4 text-sm font-bold ${executionFeedback.type === 'success' ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : executionFeedback.type === 'stale' ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-red-300 bg-red-50 text-red-700'}`}>
+                    <div className={`rounded-lg border p-4 text-sm font-bold ${executionFeedback.type === 'success' ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : ['stale', 'blocked'].includes(executionFeedback.type) ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-red-300 bg-red-50 text-red-700'}`}>
                       {executionFeedback.message}
                     </div>
                   )}
@@ -307,6 +381,33 @@ export default function ProposalManagement({ projectId, project, userRole = 'vie
                       </dl>
                     </div>
                   )}
+
+
+                  {rollbackLog && (
+                    <div className="rounded-lg border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
+                      <div className="font-bold">↩ 已回復</div>
+                      <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
+                        <dt className="font-bold">Before</dt><dd>{displayValue(rollbackLog.before?.actionDisplayText)}</dd>
+                        <dt className="font-bold">After</dt><dd>{displayValue(rollbackLog.after?.actionDisplayText)}</dd>
+                        <dt className="font-bold">回復者</dt><dd>{rollbackLog.actorName || '使用者'}</dd>
+                        <dt className="font-bold">回復時間</dt><dd>{formatTime(rollbackLog.completedAt)}</dd>
+                      </dl>
+                    </div>
+                  )}
+
+                  <div>
+                    <div className="text-sm font-bold">操作歷程</div>
+                    <div className="mt-2 space-y-2">
+                      {detail.operationLogs.map(log => (
+                        <div key={log.id} className="rounded-lg border border-gray-200 p-3 text-xs">
+                          <div className="font-bold">{log.revertsOperationId ? '↩ 回復 Postback 顯示文字' : '套用 Postback 顯示文字'}</div>
+                          <div className="mt-1 text-gray-500">{log.actorName || '使用者'} · {formatTime(log.completedAt || log.createdAt)}</div>
+                          <div className="mt-2">{displayValue(log.before?.actionDisplayText)} → {displayValue(log.after?.actionDisplayText)}</div>
+                          <div className="mt-1 font-medium">狀態：{log.status === 'succeeded' ? '成功' : log.status === 'failed' ? '失敗' : '處理中'}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
 
                   <div>
                     <div className="text-sm font-bold">Timeline</div>
@@ -354,6 +455,24 @@ export default function ProposalManagement({ projectId, project, userRole = 'vie
                     </div>
                   )}
 
+                  {rollbackConfirm && canRollback && (
+                    <div className="rounded-lg border-2 border-sky-300 bg-sky-50 p-4 text-sm text-sky-950">
+                      <div className="font-bold">即將回復這次 AI Operation</div>
+                      <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">
+                        <dt className="font-bold">區域</dt><dd>{rollbackPreview.target?.label || '專案區域'}</dd>
+                        <dt className="font-bold">欄位</dt><dd>Postback 顯示文字</dd>
+                        <dt className="font-bold">目前</dt><dd>{displayValue(rollbackPreview.rollback?.current)}</dd>
+                        <dt className="font-bold">回復為</dt><dd>{displayValue(rollbackPreview.rollback?.restoreTo)}</dd>
+                      </dl>
+                      <div className="mt-4 font-bold">只有這次 AI Operation 所修改的欄位會被回復。</div>
+                      <div className="mt-1">如果資料已被其他操作修改，系統將拒絕回復。</div>
+                      <div className="mt-4 flex justify-end gap-2">
+                        <button type="button" onClick={() => setRollbackConfirm(false)} className="rounded-md border border-sky-300 px-3 py-2 font-bold">取消</button>
+                        <button type="button" onClick={rollbackProposal} disabled={busy === 'rollback'} className="rounded-md bg-sky-700 px-3 py-2 font-bold text-white disabled:opacity-50">{busy === 'rollback' ? '回復中…' : '確認回復'}</button>
+                      </div>
+                    </div>
+                  )}
+
                   {proposal.permissions?.canReject && (
                     <div className="rounded-lg border border-gray-200 p-4">
                       <label className="block text-xs font-bold text-gray-600">拒絕原因</label>
@@ -367,10 +486,11 @@ export default function ProposalManagement({ projectId, project, userRole = 'vie
                     {proposal.permissions?.canReject && <button type="button" onClick={() => runAction('reject', { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rejectReason }) })} disabled={Boolean(busy) || rejectReason.trim().length < 3} className="rounded-md bg-red-600 px-3 py-2 text-sm font-bold text-white disabled:opacity-50">拒絕方案</button>}
                     {proposal.permissions?.canRegenerate && <button type="button" onClick={() => runAction('regenerate')} disabled={Boolean(busy)} className="rounded-md bg-amber-600 px-3 py-2 text-sm font-bold text-white disabled:opacity-50">重新產生方案</button>}
                     {canExecute && !executeConfirm && <button type="button" onClick={() => setExecuteConfirm(true)} disabled={Boolean(busy)} className="rounded-md bg-violet-700 px-3 py-2 text-sm font-bold text-white disabled:opacity-50">套用已核准方案</button>}
+                    {canRollback && !rollbackConfirm && <button type="button" onClick={() => setRollbackConfirm(true)} disabled={Boolean(busy)} className="rounded-md bg-sky-700 px-3 py-2 text-sm font-bold text-white disabled:opacity-50">回復這次修改</button>}
                   </div>
 
                   <div className="rounded-lg bg-indigo-50 p-3 text-xs font-medium text-indigo-800">
-                    只有已核准的 P001 可由 admin／owner 套用；不會修改 Template、R2 或發布 LINE Rich Menu。
+                    只有已核准的 P001 可由 admin／owner 套用與安全回復；不會修改 Template、R2 或發布 LINE Rich Menu，也不提供強制回復。
                   </div>
                 </div>
               );

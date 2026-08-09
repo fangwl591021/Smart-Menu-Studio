@@ -11,7 +11,11 @@ export type ProposalEventType =
   | 'REGENERATED'
   | 'EXECUTION_STARTED'
   | 'EXECUTION_SUCCEEDED'
-  | 'EXECUTION_FAILED';
+  | 'EXECUTION_FAILED'
+  | 'ROLLBACK_STARTED'
+  | 'ROLLBACK_SUCCEEDED'
+  | 'ROLLBACK_FAILED'
+  | 'ROLLBACK_BLOCKED';
 export type WorkspaceRole = 'viewer' | 'editor' | 'admin' | 'owner';
 
 export type ProposalPermissions = {

@@ -38,6 +38,13 @@ import {
   OperationExecutionError,
   proposalExecutionContract,
 } from './guide/proposals/execution';
+import {
+  buildRollbackContext,
+  buildRollbackPlan,
+  executeRollbackPlan,
+  rollbackErrorMessage,
+  RollbackExecutionError,
+} from './guide/proposals/rollback';
 import { GEMINI_MODEL, requestGeminiContent } from './gemini';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -2632,11 +2639,15 @@ app.get('/api/projects/:projectId/proposals/:proposalId', async (c) => {
     ]);
     const events = [...proposalEvents, ...operationLogEvents(operationLogs)]
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+    const rollbackContext = proposal.status === 'executed'
+      ? await buildRollbackContext({ db: c.env.smart_menu_db, proposal, role: text(c.get('userRole')) })
+      : null;
     return c.json({
       success: true,
       proposal: proposalResponse(proposal, text(c.get('userRole')), true),
       events,
       operationLogs,
+      rollbackPreview: rollbackContext?.preview || null,
     });
   } catch (error: any) {
     return proposalApiError(c, error, '改善方案讀取失敗。');
@@ -2853,6 +2864,93 @@ app.post('/api/projects/:projectId/proposals/:proposalId/execute', async (c) => 
   }
 });
 
+
+function rollbackApiError(c: any, error: unknown) {
+  const code = error instanceof RollbackExecutionError
+    ? error.code
+    : (error as { message?: string })?.message === 'FORBIDDEN_ROLE'
+      ? 'ROLLBACK_FORBIDDEN'
+      : 'ROLLBACK_EXECUTION_FAILED';
+  const status = code === 'ROLLBACK_FORBIDDEN'
+    ? 403
+    : code === 'ROLLBACK_TARGET_NOT_FOUND' || code === 'ROLLBACK_TENANT_MISMATCH'
+      ? 404
+      : code === 'ROLLBACK_EXECUTION_FAILED' || code === 'ROLLBACK_VERIFICATION_FAILED'
+        ? 500
+        : 409;
+  if (status === 500) console.error(JSON.stringify({ message: 'proposal rollback failed', code }));
+  return c.json({ success: false, code, error: rollbackErrorMessage(code) }, status);
+}
+
+app.get('/api/projects/:projectId/proposals/:proposalId/rollback-preview', async (c) => {
+  try {
+    const projectId = c.req.param('projectId');
+    const workspaceId = workspaceIdOf(c);
+    const proposal = await getStoredProposal(
+      c.env.smart_menu_db,
+      workspaceId,
+      projectId,
+      c.req.param('proposalId'),
+    );
+    if (!proposal) throw new RollbackExecutionError('ROLLBACK_NOT_AVAILABLE');
+    const rollbackContext = await buildRollbackContext({
+      db: c.env.smart_menu_db,
+      proposal,
+      role: text(c.get('userRole')),
+    });
+    return c.json({ success: true, rollbackPreview: rollbackContext.preview });
+  } catch (error: unknown) {
+    return rollbackApiError(c, error);
+  }
+});
+
+app.post('/api/projects/:projectId/proposals/:proposalId/rollback', async (c) => {
+  try {
+    requireRole(c, 'admin');
+    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    if (body.confirmation !== true) {
+      return c.json({ success: false, code: 'CONFIRMATION_REQUIRED', error: '請先確認回復正式專案資料。' }, 400);
+    }
+    const projectId = c.req.param('projectId');
+    const workspaceId = workspaceIdOf(c);
+    const proposal = await getStoredProposal(
+      c.env.smart_menu_db,
+      workspaceId,
+      projectId,
+      c.req.param('proposalId'),
+    );
+    if (!proposal) throw new RollbackExecutionError('ROLLBACK_NOT_AVAILABLE');
+    const rollbackContext = await buildRollbackContext({
+      db: c.env.smart_menu_db,
+      proposal,
+      role: text(c.get('userRole')),
+    });
+    const rollbackPlan = buildRollbackPlan({
+      proposal,
+      operationLog: rollbackContext.operationLog,
+      currentTarget: rollbackContext.currentTarget,
+      actor: { userId: text(c.get('userId')), role: text(c.get('userRole')) },
+    });
+    const rollbackLog = await executeRollbackPlan(c.env.smart_menu_db, rollbackPlan);
+    const [operationLogs, proposalEvents, refreshedRollback] = await Promise.all([
+      listOperationLogs(c.env.smart_menu_db, workspaceId, projectId, proposal.id),
+      listProposalEvents(c.env.smart_menu_db, workspaceId, proposal.id),
+      buildRollbackContext({ db: c.env.smart_menu_db, proposal, role: text(c.get('userRole')) }),
+    ]);
+    const events = [...proposalEvents, ...operationLogEvents(operationLogs)]
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+    return c.json({
+      success: true,
+      proposal: proposalResponse(proposal, text(c.get('userRole')), true),
+      rollback: { plan: rollbackPlan, log: rollbackLog },
+      rollbackPreview: refreshedRollback.preview,
+      operationLogs,
+      events,
+    });
+  } catch (error: unknown) {
+    return rollbackApiError(c, error);
+  }
+});
 app.post('/api/projects/:projectId/publish', async (c) => {
   const projectId = c.req.param('projectId');
 

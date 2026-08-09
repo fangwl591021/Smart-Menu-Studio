@@ -718,6 +718,30 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
     });
   };
 
+  const handleProposalRolledBack = (rollback) => {
+    const plan = rollback?.plan;
+    if (plan?.operationType === 'SET_PROJECT_AREA_DISPLAY_TEXT') {
+      setProject(previous => ({
+        ...previous,
+        areas: (previous?.areas || []).map(area => String(area.id) === String(plan.target?.areaIndex)
+          ? {
+              ...area,
+              action: {
+                ...(area.action || {}),
+                displayText: plan.mutation?.restoreTo || '',
+              },
+            }
+          : area),
+      }));
+    }
+    setProposalRefreshKey(value => value + 1);
+    emitGuideEvent({
+      type: 'guide-refresh',
+      workflowId: 'rich-menu-project-setup',
+      stepId: 'PROJECT_ACTIONS',
+    });
+  };
+
   const focusGuideTarget = (target) => {
     const areaTarget = /^project-area-(.+)-(action-type|uri|message|postback-data|switch-target)$/.exec(target);
     if (areaTarget) {
@@ -959,6 +983,7 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
             request={authFetch}
             refreshKey={proposalRefreshKey}
             onExecuted={handleProposalExecuted}
+            onRolledBack={handleProposalRolledBack}
           />
         </div>
 
