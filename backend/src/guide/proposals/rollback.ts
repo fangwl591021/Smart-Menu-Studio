@@ -9,6 +9,7 @@ import {
   fingerprintUrl,
   sanitizeUrlForAudit,
 } from './https-probe.ts';
+import { rollbackPolicyAudit, type PolicyAuditMetadata } from './policy.ts';
 
 export type RollbackReasonCode =
   | 'ELIGIBLE'
@@ -80,6 +81,7 @@ export type RollbackPlan = {
     expectedCurrentFingerprint: string | null;
     restoreToFingerprint: string | null;
   };
+  policyAudit: PolicyAuditMetadata;
   probeId: string | null;
   actor: {
     userId: string;
@@ -318,6 +320,7 @@ export function buildRollbackPlan(input: {
       expectedCurrentFingerprint: isUri ? input.operationLog.afterValueFingerprint : null,
       restoreToFingerprint: isUri ? input.operationLog.beforeValueFingerprint : null,
     },
+    policyAudit: rollbackPolicyAudit(input.proposal.proposalType),
     probeId: input.operationLog.probeId,
     actor: { userId: clean(input.actor.userId), role },
   };
@@ -353,10 +356,11 @@ async function classifyRollbackConflict(db: D1Database, plan: RollbackPlan): Pro
   return 'ROLLBACK_EXECUTION_FAILED';
 }
 
-function rollbackSnapshot(plan: RollbackPlan, value: string): Record<string, string> {
-  return plan.mutation.field === 'action_uri'
+function rollbackSnapshot(plan: RollbackPlan, value: string): Record<string, unknown> {
+  const action = plan.mutation.field === 'action_uri'
     ? { actionUri: sanitizeUrlForAudit(value) }
     : { actionDisplayText: value };
+  return { ...action, _policy: plan.policyAudit };
 }
 
 async function recordFailedRollback(

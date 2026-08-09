@@ -45,6 +45,22 @@ const PROBE_REASON_LABELS = {
   HTTPS_REDIRECT_HOST_CHANGED: '重新導向至不同 hostname，已阻擋。',
   HTTPS_REDIRECT_DOWNGRADE: '重新導向回 HTTP，已阻擋。',
 };
+const RISK_META = {
+  LOW: { label: '低風險', icon: '🟢', style: 'border-emerald-200 bg-emerald-50 text-emerald-800' },
+  MEDIUM: { label: '中風險', icon: '🟡', style: 'border-amber-200 bg-amber-50 text-amber-900' },
+  HIGH: { label: '高風險', icon: '🔴', style: 'border-red-200 bg-red-50 text-red-800' },
+  REVIEW_ONLY: { label: '僅供檢視', icon: '🔵', style: 'border-blue-200 bg-blue-50 text-blue-800' },
+};
+const PREFLIGHT_LABELS = {
+  POLICY_EXECUTION_ALLOWED: '政策允許執行',
+  PROPOSAL_REVIEWED: '已完成檢視',
+  PROPOSAL_APPROVED: '已核准',
+  CONFIRMATION_PRESENT: '已明確確認',
+  FINGERPRINT_MATCH: '方案 fingerprint 一致',
+  CURRENT_STATE_VALID: '目前資料未變',
+  PROBE_FRESH: 'HTTPS SAFE Probe 尚未過期',
+  ROLLBACK_SUPPORTED: '支援安全回復',
+};
 const displayValue = value => value === '' || value === null ? '未設定' : String(value);
 const formatTime = value => value ? new Date(value.replace(' ', 'T') + (value.includes('T') ? '' : 'Z')).toLocaleString('zh-TW') : '—';
 
@@ -371,32 +387,59 @@ export default function ProposalManagement({ projectId, project, userRole = 'vie
               const area = project?.areas?.find(item => String(item.id) === String(change?.entityId));
               const succeededLog = [...detail.operationLogs].reverse().find(log => log.status === 'succeeded' && !log.revertsOperationId);
               const rollbackLog = [...detail.operationLogs].reverse().find(log => log.status === 'succeeded' && log.revertsOperationId);
-              const roleCanManage = ['admin', 'owner'].includes(String(userRole).toLowerCase());
               const roleCanProbe = ['editor', 'admin', 'owner'].includes(String(userRole).toLowerCase());
+              const policy = proposal.policy || {};
+              const riskMeta = RISK_META[policy.riskLevel] || RISK_META.REVIEW_ONLY;
+              const preflightChecks = Array.isArray(policy.preflight?.checks) ? policy.preflight.checks : [];
               const isHttpsProposal = proposal.proposalType === 'https-upgrade-candidate';
               const httpsProbe = detail.httpsProbe;
               const probeEligibility = proposal.execution?.eligibility || httpsProbe?.eligibility || 'NEEDS_PROBE';
               const canProbe = isHttpsProposal
                 && roleCanProbe
                 && !['executed', 'stale', 'rejected'].includes(proposal.status);
-              const canExecute = proposal.status === 'approved'
-                && proposal.execution?.executable === true
-                && proposal.permissions?.canExecute === true
-                && roleCanManage;
+              const canExecute = policy.capabilities?.canExecute === true
+                && proposal.execution?.executable === true;
               const rollbackPreview = detail.rollbackPreview;
-              const canRollback = proposal.status === 'executed'
+              const canRollback = policy.capabilities?.canRollback === true
                 && rollbackPreview?.eligible === true
-                && rollbackPreview?.canRollback === true
-                && roleCanManage;
+                && rollbackPreview?.canRollback === true;
               return (
                 <div className="mt-5 space-y-5">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${meta.style}`}>{meta.label}</span>
+                      <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${riskMeta.style}`}>{riskMeta.icon} {riskMeta.label}</span>
                       <span className="text-xs text-gray-500">{proposal.ruleCode} · {proposal.generatedBy}</span>
                     </div>
                     <div className="mt-3 font-bold">{proposal.title}</div>
                     <div className="mt-1 text-sm leading-6 text-gray-600">{proposal.summary}</div>
+                  </div>
+
+                  <div className={`rounded-lg border p-4 text-sm ${riskMeta.style}`}>
+                    <div className="font-bold">Operation Policy · v{policy.policyVersion || '—'}</div>
+                    {policy.riskLevel === 'LOW' && (
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
+                        <li>只修改一個 Project Area 欄位</li>
+                        <li>支援安全回復</li>
+                        <li>不影響 Template，也不呼叫 LINE API</li>
+                      </ul>
+                    )}
+                    {policy.riskLevel === 'REVIEW_ONLY' && (
+                      <div className="mt-2 text-xs">此方案需要人工判斷內容差異，目前不提供自動修改。</div>
+                    )}
+                    {policy.riskLevel === 'HIGH' && (
+                      <div className="mt-2 text-xs">此方案涉及 Rich Menu 結構與頁面關係，目前僅提供規劃預覽，尚未開放自動執行。</div>
+                    )}
+                    {policy.riskLevel === 'MEDIUM' && (
+                      <div className="mt-3 grid gap-1 text-xs">
+                        {preflightChecks.map(check => (
+                          <div key={check.code} className="flex items-center gap-2">
+                            <span aria-hidden="true">{check.passed ? '✓' : '○'}</span>
+                            <span>{PREFLIGHT_LABELS[check.code] || check.code}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {proposal.status === 'stale' && (
@@ -554,6 +597,7 @@ export default function ProposalManagement({ projectId, project, userRole = 'vie
                   {executeConfirm && canExecute && (
                     <div className="rounded-lg border-2 border-violet-300 bg-violet-50 p-4 text-sm text-violet-950">
                       <div className="font-bold">即將修改正式專案資料</div>
+                      <div className={`mt-3 inline-flex rounded-full border px-2.5 py-1 text-xs font-bold ${riskMeta.style}`}>{riskMeta.icon} {riskMeta.label}</div>
                       <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">
                         <dt className="font-bold">專案</dt><dd>{project?.name || '目前專案'}</dd>
                         <dt className="font-bold">區域</dt><dd>{area?.label || `區域 ${change?.entityId ?? ''}`}</dd>
@@ -562,6 +606,15 @@ export default function ProposalManagement({ projectId, project, userRole = 'vie
                         <dt className="font-bold">修改後</dt><dd>{displayValue(change?.after)}</dd>
                       </dl>
                       {isHttpsProposal && <div className="mt-3 text-xs font-bold">HTTPS Probe：{httpsProbe?.status || '—'} · {formatTime(httpsProbe?.probedAt)}</div>}
+                      {policy.requirements?.confirmationLevel === 'elevated' && (
+                        <div className="mt-3 rounded-md border border-violet-200 bg-white/70 p-3 text-xs">
+                          <div className="font-bold">執行前檢查</div>
+                          {preflightChecks.map(check => (
+                            <div key={check.code} className="mt-1">{check.passed ? '✓' : '○'} {PREFLIGHT_LABELS[check.code] || check.code}</div>
+                          ))}
+                          <div className="mt-1">{policy.requirements?.rollbackSupported ? '✓ 支援安全回復' : '○ 不支援自動回復'}</div>
+                        </div>
+                      )}
                       <div className="mt-4 font-bold">{isHttpsProposal ? '此操作只修改此 Project Area 的網址，不會修改 Template。' : '此操作會修改正式專案資料。'}</div>
                       <div className="mt-4 flex justify-end gap-2">
                         <button type="button" onClick={() => setExecuteConfirm(false)} className="rounded-md border border-violet-300 px-3 py-2 font-bold">取消</button>

@@ -59,6 +59,15 @@ import {
   type PublicHttpsProbe,
   type StoredHttpsProbe,
 } from './guide/proposals/https-probe';
+import {
+  assertPolicyAllowed,
+  buildExecutionPreflight,
+  evaluateOperationPolicy,
+  OperationPolicyError,
+  policyAuditMetadata,
+  policyReasonMessage,
+  publicPolicySummary,
+} from './guide/proposals/policy';
 import { GEMINI_MODEL, requestGeminiContent } from './gemini';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -2533,11 +2542,21 @@ function proposalResponse(
   role: string,
   includeSnapshot = false,
   httpsEligibility: HttpsProbeEligibility = 'NEEDS_PROBE',
+  rollbackAvailable = false,
 ) {
   const contract = proposalExecutionContract(proposal.proposalType, proposal.sourceEntityId);
-  const execution = proposal.proposalType === 'https-upgrade-candidate'
-    ? { ...contract, executable: httpsEligibility === 'SAFE', eligibility: httpsEligibility }
-    : contract;
+  const policy = publicPolicySummary({
+    proposal,
+    actorRole: role,
+    probeEligibility: httpsEligibility,
+    rollbackAvailable,
+  });
+  const execution = {
+    ...contract,
+    executable: policy.capabilities.canExecute,
+    ...(proposal.proposalType === 'https-upgrade-candidate' ? { eligibility: httpsEligibility } : {}),
+  };
+  const lifecyclePermissions = proposalPermissions(role, proposal.status, execution.executable);
   return {
     id: proposal.id,
     projectId: proposal.projectId,
@@ -2559,7 +2578,14 @@ function proposalResponse(
     rejectedAt: proposal.rejectedAt,
     executedAt: proposal.executedAt,
     execution,
-    permissions: proposalPermissions(role, proposal.status, execution.executable),
+    policy,
+    permissions: {
+      ...lifecyclePermissions,
+      canReview: policy.capabilities.canReview,
+      canApprove: policy.capabilities.canApprove,
+      canExecute: policy.capabilities.canExecute,
+      canRollback: policy.capabilities.canRollback,
+    },
     ...(includeSnapshot ? { snapshot: proposal.snapshot } : {}),
   };
 }
@@ -2630,6 +2656,9 @@ async function refreshStaleStatus(c: any, proposal: StoredProposal): Promise<Sto
 }
 
 function proposalApiError(c: any, error: any, fallback: string) {
+  if (error instanceof OperationPolicyError) {
+    return c.json({ success: false, code: error.code, error: policyReasonMessage(error.code) }, error.code === 'ROLE_NOT_ALLOWED' ? 403 : 409);
+  }
   if (error?.message === 'FORBIDDEN_ROLE') {
     return c.json({ success: false, error: '權限不足。' }, 403);
   }
@@ -2709,7 +2738,13 @@ app.get('/api/projects/:projectId/proposals/:proposalId', async (c) => {
       : null;
     return c.json({
       success: true,
-      proposal: proposalResponse(proposal, text(c.get('userRole')), true, probeState.eligibility),
+      proposal: proposalResponse(
+        proposal,
+        text(c.get('userRole')),
+        true,
+        probeState.eligibility,
+        rollbackContext?.preview?.eligible === true,
+      ),
       events,
       operationLogs: publicOperationLogs(operationLogs),
       rollbackPreview: rollbackContext?.preview || null,
@@ -2729,11 +2764,22 @@ app.post('/api/projects/:projectId/proposals/:proposalId/review', async (c) => {
     if (!proposal) return c.json({ success: false, error: '找不到改善方案。' }, 404);
     proposal = await refreshStaleStatus(c, proposal);
     if (proposal.status === 'stale') return c.json({ success: false, error: '此改善方案已失效，請重新產生。' }, 409);
+    const policyEvaluation = evaluateOperationPolicy({
+      proposal,
+      actorRole: text(c.get('userRole')),
+      action: 'review',
+    });
+    assertPolicyAllowed(policyEvaluation);
     await transitionStoredProposal(c.env.smart_menu_db, {
       proposal,
       toStatus: 'reviewed',
       eventType: 'REVIEWED',
       actorUserId: text(c.get('userId')),
+      eventMetadata: {
+        policyVersion: policyEvaluation.policyVersion,
+        riskLevel: policyEvaluation.riskLevel,
+        policyResult: policyEvaluation.reasonCode,
+      },
     });
     const updated = await getStoredProposal(c.env.smart_menu_db, workspaceId, projectId, proposal.id);
     return c.json({ success: true, proposal: proposalResponse(updated!, text(c.get('userRole')), true) });
@@ -2751,11 +2797,22 @@ app.post('/api/projects/:projectId/proposals/:proposalId/approve', async (c) => 
     if (!proposal) return c.json({ success: false, error: '找不到改善方案。' }, 404);
     proposal = await refreshStaleStatus(c, proposal);
     if (proposal.status === 'stale') return c.json({ success: false, error: '此改善方案已失效，不能核准。' }, 409);
+    const policyEvaluation = evaluateOperationPolicy({
+      proposal,
+      actorRole: text(c.get('userRole')),
+      action: 'approve',
+    });
+    assertPolicyAllowed(policyEvaluation);
     await transitionStoredProposal(c.env.smart_menu_db, {
       proposal,
       toStatus: 'approved',
       eventType: 'APPROVED',
       actorUserId: text(c.get('userId')),
+      eventMetadata: {
+        policyVersion: policyEvaluation.policyVersion,
+        riskLevel: policyEvaluation.riskLevel,
+        policyResult: policyEvaluation.reasonCode,
+      },
     });
     const updated = await getStoredProposal(c.env.smart_menu_db, workspaceId, projectId, proposal.id);
     return c.json({ success: true, proposal: proposalResponse(updated!, text(c.get('userRole')), true) });
@@ -2825,11 +2882,17 @@ app.post('/api/projects/:projectId/proposals/:proposalId/regenerate', async (c) 
 });
 
 function operationApiError(c: any, error: unknown) {
-  const code = error instanceof OperationExecutionError
+  const code = error instanceof OperationPolicyError
     ? error.code
+    : error instanceof OperationExecutionError
+      ? error.code
     : (error as { message?: string })?.message === 'FORBIDDEN_ROLE'
       ? 'FORBIDDEN_ROLE'
       : 'EXECUTION_FAILED';
+  if (error instanceof OperationPolicyError) {
+    const status = code === 'ROLE_NOT_ALLOWED' ? 403 : code === 'CONFIRMATION_REQUIRED' ? 400 : 409;
+    return c.json({ success: false, code, error: policyReasonMessage(error.code) }, status);
+  }
   const status = code === 'FORBIDDEN_ROLE'
     ? 403
     : code === 'PROPOSAL_NOT_FOUND' || code === 'TARGET_NOT_FOUND'
@@ -2927,10 +2990,6 @@ app.post('/api/projects/:projectId/proposals/:proposalId/execute', async (c) => 
   try {
     requireRole(c, 'admin');
     const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
-    if (body.confirmation !== true) {
-      return c.json({ success: false, code: 'CONFIRMATION_REQUIRED', error: '請先確認套用正式專案資料。' }, 400);
-    }
-
     const projectId = c.req.param('projectId');
     const workspaceId = workspaceIdOf(c);
     let proposal = await getStoredProposal(
@@ -2940,12 +2999,26 @@ app.post('/api/projects/:projectId/proposals/:proposalId/execute', async (c) => 
       c.req.param('proposalId'),
     );
     if (!proposal) throw new OperationExecutionError('PROPOSAL_NOT_FOUND');
+    const probeState = await loadHttpsProbeState(c, proposal);
+    const policyEvaluation = evaluateOperationPolicy({
+      proposal,
+      actorRole: text(c.get('userRole')),
+      action: 'execute',
+      context: {
+        confirmationProvided: body.confirmation === true,
+        probeEligibility: probeState.eligibility,
+      },
+    });
     if (proposal.status === 'executed') throw new OperationExecutionError('PROPOSAL_ALREADY_EXECUTED');
     if (proposal.status === 'stale') throw new OperationExecutionError('PROPOSAL_STALE');
-    if (proposal.status !== 'approved') throw new OperationExecutionError('PROPOSAL_NOT_APPROVED');
-    if (!proposalExecutionContract(proposal.proposalType).executable) {
-      throw new OperationExecutionError('PROPOSAL_NOT_EXECUTABLE');
+    if (proposal.status !== 'approved'
+      && policyEvaluation.allowed === false
+      && ['REVIEW_REQUIRED', 'APPROVAL_REQUIRED'].includes(policyEvaluation.reasonCode)
+    ) {
+      throw new OperationExecutionError('PROPOSAL_NOT_APPROVED');
     }
+    assertPolicyAllowed(policyEvaluation);
+    if (body.confirmation !== true) throw new OperationExecutionError('CONFIRMATION_REQUIRED');
 
     const current = await rebuildCurrentProposal(c, projectId, {
       recommendationId: proposal.recommendationId,
@@ -2964,7 +3037,14 @@ app.post('/api/projects/:projectId/proposals/:proposalId/execute', async (c) => 
       throw new OperationExecutionError('PROPOSAL_STALE');
     }
 
-    const probeState = await loadHttpsProbeState(c, proposal);
+    const preflight = buildExecutionPreflight({
+      proposal,
+      actorRole: text(c.get('userRole')),
+      confirmationProvided: body.confirmation === true,
+      fingerprintMatches: true,
+      currentStateValid: true,
+      probeEligibility: probeState.eligibility,
+    });
     const operationPlan = buildOperationPlan({
       proposal,
       currentProposal: current.proposal,
@@ -2974,6 +3054,7 @@ app.post('/api/projects/:projectId/proposals/:proposalId/execute', async (c) => 
         role: text(c.get('userRole')),
       },
       httpsProbe: { record: probeState.record, eligibility: probeState.eligibility },
+      policyAudit: policyAuditMetadata(preflight),
     });
     const operationLog = await executeOperationPlan(
       c.env.smart_menu_db,
@@ -3009,6 +3090,10 @@ app.post('/api/projects/:projectId/proposals/:proposalId/execute', async (c) => 
 
 
 function rollbackApiError(c: any, error: unknown) {
+  if (error instanceof OperationPolicyError) {
+    const status = error.code === 'ROLE_NOT_ALLOWED' ? 403 : error.code === 'CONFIRMATION_REQUIRED' ? 400 : 409;
+    return c.json({ success: false, code: error.code, error: policyReasonMessage(error.code) }, status);
+  }
   const code = error instanceof RollbackExecutionError
     ? error.code
     : (error as { message?: string })?.message === 'FORBIDDEN_ROLE'
@@ -3036,6 +3121,13 @@ app.get('/api/projects/:projectId/proposals/:proposalId/rollback-preview', async
       c.req.param('proposalId'),
     );
     if (!proposal) throw new RollbackExecutionError('ROLLBACK_NOT_AVAILABLE');
+    const policyEvaluation = evaluateOperationPolicy({
+      proposal,
+      actorRole: text(c.get('userRole')),
+      action: 'rollback',
+      context: { confirmationProvided: true, rollbackAvailable: true },
+    });
+    assertPolicyAllowed(policyEvaluation);
     const rollbackContext = await buildRollbackContext({
       db: c.env.smart_menu_db,
       proposal,
@@ -3051,9 +3143,6 @@ app.post('/api/projects/:projectId/proposals/:proposalId/rollback', async (c) =>
   try {
     requireRole(c, 'admin');
     const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
-    if (body.confirmation !== true) {
-      return c.json({ success: false, code: 'CONFIRMATION_REQUIRED', error: '請先確認回復正式專案資料。' }, 400);
-    }
     const projectId = c.req.param('projectId');
     const workspaceId = workspaceIdOf(c);
     const proposal = await getStoredProposal(
@@ -3063,6 +3152,17 @@ app.post('/api/projects/:projectId/proposals/:proposalId/rollback', async (c) =>
       c.req.param('proposalId'),
     );
     if (!proposal) throw new RollbackExecutionError('ROLLBACK_NOT_AVAILABLE');
+    const policyEvaluation = evaluateOperationPolicy({
+      proposal,
+      actorRole: text(c.get('userRole')),
+      action: 'rollback',
+      context: {
+        confirmationProvided: body.confirmation === true,
+        rollbackAvailable: true,
+      },
+    });
+    assertPolicyAllowed(policyEvaluation);
+    if (body.confirmation !== true) throw new RollbackExecutionError('ROLLBACK_CONFIRMATION_REQUIRED');
     const rollbackContext = await buildRollbackContext({
       db: c.env.smart_menu_db,
       proposal,
@@ -3084,7 +3184,13 @@ app.post('/api/projects/:projectId/proposals/:proposalId/rollback', async (c) =>
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
     return c.json({
       success: true,
-      proposal: proposalResponse(proposal, text(c.get('userRole')), true),
+      proposal: proposalResponse(
+        proposal,
+        text(c.get('userRole')),
+        true,
+        'NEEDS_PROBE',
+        refreshedRollback.preview.eligible === true,
+      ),
       rollback: { plan: publicRollbackPlan(rollbackPlan), log: publicOperationLog(rollbackLog) },
       rollbackPreview: refreshedRollback.preview,
       operationLogs: publicOperationLogs(operationLogs),

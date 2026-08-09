@@ -8,6 +8,7 @@ import {
   type HttpsProbeEligibility,
   type StoredHttpsProbe,
 } from './https-probe.ts';
+import { policyAuditMetadata, policyForProposalType, type PolicyAuditMetadata } from './policy.ts';
 
 export type OperationType = 'SET_PROJECT_AREA_DISPLAY_TEXT' | 'UPGRADE_PROJECT_AREA_URI_TO_HTTPS';
 export type OperationLogStatus = 'started' | 'succeeded' | 'failed';
@@ -43,6 +44,7 @@ export type OperationPlan = {
     expiresAt: string;
     originalUrlFingerprint: string;
   } | null;
+  policyAudit: PolicyAuditMetadata;
   targetGuards: {
     actionType: string;
     actionData: string;
@@ -163,6 +165,7 @@ export function buildOperationPlan(input: {
   context: GuideContext;
   actor: { userId: string; role: string };
   httpsProbe?: { record: StoredHttpsProbe | null; eligibility: HttpsProbeEligibility };
+  policyAudit?: PolicyAuditMetadata;
 }): OperationPlan {
   const { proposal, currentProposal, context } = input;
   const role = clean(input.actor.role).toLowerCase() as WorkspaceRole;
@@ -173,6 +176,14 @@ export function buildOperationPlan(input: {
   if (!proposalExecutionContract(proposal.proposalType).executable) {
     throw new OperationExecutionError('PROPOSAL_NOT_EXECUTABLE');
   }
+  const policy = policyForProposalType(proposal.proposalType);
+  const operationPolicyAudit = input.policyAudit || policyAuditMetadata({
+    allowed: true,
+    policyVersion: policy.policyVersion,
+    riskLevel: policy.riskLevel,
+    confirmationLevel: policy.confirmation.level,
+    checks: [{ code: 'POLICY_EXECUTION_ALLOWED', passed: true }],
+  });
   if (
     proposal.workspaceId !== context.workspaceId
     || proposal.projectId !== context.project.id
@@ -235,6 +246,7 @@ export function buildOperationPlan(input: {
         expiresAt: probe.record.expiresAt,
         originalUrlFingerprint: probe.record.originalUrlFingerprint,
       },
+      policyAudit: operationPolicyAudit,
       targetGuards: {
         actionType: area.actionType,
         actionData: area.data,
@@ -279,6 +291,7 @@ export function buildOperationPlan(input: {
       before: '',
       after: change.after,
     },
+    policyAudit: operationPolicyAudit,
     probe: null,
     targetGuards: {
       actionType: area.actionType,
@@ -432,10 +445,11 @@ export function operationLogEvents(logs: OperationLog[]): ProposalEvent[] {
   });
 }
 
-function operationSnapshot(plan: OperationPlan, value: string): Record<string, string> {
-  return plan.mutation.field === 'action_uri'
+function operationSnapshot(plan: OperationPlan, value: string): Record<string, unknown> {
+  const action = plan.mutation.field === 'action_uri'
     ? { actionUri: sanitizeUrlForAudit(value) }
     : { actionDisplayText: value };
+  return { ...action, _policy: plan.policyAudit };
 }
 
 async function recordFailedExecution(

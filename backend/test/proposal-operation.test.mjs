@@ -278,12 +278,12 @@ test('execute endpoint returns explicit safe failure codes and scopes tenant loo
   assert.doesNotMatch(source, /raw database error|error\.stack/);
 });
 
-test('frontend shows apply only after backend permission and explicit admin or owner role', async () => {
+test('frontend shows apply only when backend policy capability and execution eligibility allow it', async () => {
   const source = await readFile(new URL('../../frontend/src/components/ProposalManagement.jsx', import.meta.url), 'utf8');
-  assert.match(source, /proposal\.status === 'approved'/);
+  assert.match(source, /policy\.capabilities\?\.canExecute === true/);
   assert.match(source, /proposal\.execution\?\.executable === true/);
-  assert.match(source, /proposal\.permissions\?\.canExecute === true/);
-  assert.match(source, /\['admin', 'owner'\]/);
+  assert.doesNotMatch(source, /roleCanManage/);
+  assert.match(source, /policy\.capabilities\?\.canRollback === true/);
   for (const marker of ['套用已核准方案', '此操作會修改正式專案資料。', '確認套用', '取消']) {
     assert.match(source, new RegExp(marker));
   }
