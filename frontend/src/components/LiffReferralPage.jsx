@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { CheckCircle2, Copy, Loader2, QrCode, Share2, UserPlus } from 'lucide-react';
 import { loadLiffSdk, referralContextFromLocation, usableLiffConfig } from '../liff-referral';
+import { applyReferralFlowTerminalResult, getReferralFlowToken, setReferralFlowToken } from '../referral-flow';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_PRODUCTION_WORKER_BASE_URL || (import.meta.env.PROD ? 'https://smart-menu-backend.fangwl591021.workers.dev' : 'http://127.0.0.1:8788');
 const api = (path, options) => fetch(`${API_BASE_URL}${path}`, options);
@@ -13,19 +14,19 @@ export default function LiffReferralPage() {
     if (!initial.lineAccountId) { if (active) setState({ loading: false, status: 'NOT_CONFIGURED', error: '缺少安全的 LINE 帳號入口資訊。', referral: null, friendship: null }); return; }
     try {
       const response = await api(`/api/member/referral/bootstrap?lineAccountId=${encodeURIComponent(initial.lineAccountId)}`);
-      const bootstrap = await response.json();
+      const bootstrap = await response.json(); if (bootstrap?.referralFlowToken) setReferralFlowToken(bootstrap.referralFlowToken);
       if (!response.ok || !bootstrap.success || !usableLiffConfig(bootstrap.config)) { if (active) setState({ loading: false, status: bootstrap?.config?.status || 'NOT_CONFIGURED', error: '', referral: null, friendship: null }); return; }
       const liff = await loadLiffSdk(); await liff.init({ liffId: bootstrap.config.liffId });
       const context = referralContextFromLocation();
       if (!liff.isLoggedIn()) { liff.login(); return; }
       const token = liff.getAccessToken(); if (!token) throw new Error('無法取得 LINE 登入憑證。');
       const headers = { Authorization: `Bearer ${token}` };
-      const establish = await api('/api/member/establish', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ lineAccountId: context.lineAccountId, liffAccessToken: token }) });
+      const establish = await api('/api/member/establish', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ lineAccountId: context.lineAccountId, liffAccessToken: token, referralFlowToken: getReferralFlowToken() || undefined }) });
       if (!establish.ok) throw new Error('無法建立會員驗證。');
       const referralResponse = await api(`/api/member/referral?lineAccountId=${encodeURIComponent(context.lineAccountId)}`, { headers });
       const referral = await referralResponse.json(); if (!referralResponse.ok || !referral.success) throw new Error(referral.error || '無法建立推薦資訊。');
       const friend = await liff.getFriendship();
-      if (context.referralCode) { const qualification = await (await api('/api/member/referral/qualify', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ lineAccountId: context.lineAccountId, liffAccessToken: token, referralCode: context.referralCode, src: context.source, returnTo: context.returnTo }) })).json(); if (qualification.status === 'NOT_FRIEND') throw new Error('請先加入官方帳號好友後再重新確認。'); }
+      if (context.referralCode) { const qualification = await (await api('/api/member/referral/qualify', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ lineAccountId: context.lineAccountId, liffAccessToken: token, referralCode: context.referralCode, src: context.source, returnTo: context.returnTo, referralFlowToken: getReferralFlowToken() || undefined }) })).json(); applyReferralFlowTerminalResult(qualification.status); if (qualification.status === 'NOT_FRIEND') throw new Error('請先加入官方帳號好友後再重新確認。'); }
       if (active) setState({ loading: false, status: 'READY', error: '', referral, friendship: Boolean(friend?.friendFlag) });
     } catch (error) { if (active) setState({ loading: false, status: 'ERROR', error: error?.message || '推薦功能暫時無法使用。', referral: null, friendship: null }); }
   })(); return () => { active = false; }; }, []);
