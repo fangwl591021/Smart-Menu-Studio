@@ -16,6 +16,17 @@ export type ExplanationRecommendationInput = Pick<
   'ruleCode' | 'category' | 'priority' | 'title' | 'message' | 'reason' | 'evidence'
 >;
 
+export type BehaviorExplanationRecommendationInput = {
+  ruleCode: string;
+  category: string;
+  priority: string;
+  tone: 'improvement' | 'positive';
+  title: string;
+  message: string;
+  period: { from: string; to: string; days: number };
+  evidence: Array<{ key: string; value: string | number | boolean }>;
+};
+
 export type ExplanationLogger = (event: {
   message: 'recommendation explanation';
   status: 'success' | 'timeout' | 'request_error' | 'parse_error' | 'missing_key';

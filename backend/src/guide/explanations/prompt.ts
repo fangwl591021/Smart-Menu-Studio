@@ -1,5 +1,5 @@
 import type { Recommendation } from '../recommendations/types.ts';
-import type { ExplanationRecommendationInput } from './types.ts';
+import type { BehaviorExplanationRecommendationInput, ExplanationRecommendationInput } from './types.ts';
 
 export const RECOMMENDATION_EXPLANATION_SYSTEM_PROMPT = [
   '你是 Smart Menu Studio 的建議說明器，只能解釋已存在的確定性建議。',
@@ -9,7 +9,17 @@ export const RECOMMENDATION_EXPLANATION_SYSTEM_PROMPT = [
   '只輸出 summary、whyItMatters、suggestedApproach 三個字串欄位；依序不超過 80、160、180 個字元。',
 ].join('\n');
 
-export function toExplanationInput(recommendation: Recommendation): ExplanationRecommendationInput {
+const SAFE_BEHAVIOR_EVIDENCE_KEYS = new Set(['periodFrom', 'periodTo', 'periodDays', 'impressions', 'clicks', 'metricsThrough', 'areaLabel', 'areaClicks', 'shareOfClicks', 'combinedShare', 'areaCount', 'lowEngagementAreaCount', 'lowEngagementRatio', 'uriClicks', 'totalClicks', 'uriShare', 'postbackClicks', 'postbackShare', 'recentClicks', 'previousClicks', 'recentCtr', 'previousCtr']);
+const primitive = (value: unknown): value is string | number | boolean => typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
+
+export function sanitizeBehaviorRecommendationForAi(recommendation: Recommendation): BehaviorExplanationRecommendationInput {
+  const evidence = recommendation.evidence.filter(item => SAFE_BEHAVIOR_EVIDENCE_KEYS.has(item.key) && primitive(item.value)).map(item => ({ key: item.key, value: item.value }));
+  const value = (key: string) => evidence.find(item => item.key === key)?.value;
+  return { ruleCode: recommendation.ruleCode, category: recommendation.category, priority: recommendation.priority, tone: recommendation.tone === 'positive' ? 'positive' : 'improvement', title: recommendation.title, message: recommendation.message, period: { from: typeof value('periodFrom') === 'string' ? value('periodFrom') : '', to: typeof value('periodTo') === 'string' ? value('periodTo') : '', days: typeof value('periodDays') === 'number' ? value('periodDays') : 0 }, evidence };
+}
+
+export function toExplanationInput(recommendation: Recommendation): ExplanationRecommendationInput | BehaviorExplanationRecommendationInput {
+  if (recommendation.source === 'behavior') return sanitizeBehaviorRecommendationForAi(recommendation);
   return {
     ruleCode: recommendation.ruleCode,
     category: recommendation.category,

@@ -1,4 +1,4 @@
-import type { GuideContext } from '../types.ts';
+﻿import type { GuideContext } from '../types.ts';
 import type { ProposalAvailability } from '../proposals/types.ts';
 
 export type RecommendationCategory =
@@ -8,6 +8,9 @@ export type RecommendationCategory =
   | 'maintainability'
   | 'line-oa'
   | 'structure';
+
+export type RecommendationSource = 'configuration' | 'behavior';
+export type RecommendationTone = 'improvement' | 'positive';
 
 export type RecommendationPriority = 'high' | 'medium' | 'low';
 
@@ -39,10 +42,16 @@ export type Recommendation = {
   canGenerateProposal: boolean;
   proposal: ProposalAvailability;
   explanationSource: 'rule';
+  source?: RecommendationSource;
+  tone?: RecommendationTone;
+  relatedRuleCodes?: string[];
+  groupKey?: string;
+  primaryRuleCode?: string;
 };
 
 export type RecommendationResult = {
   recommendations: Recommendation[];
+  behaviorDataQuality?: { sufficient: boolean; reasonCode: string; mappedAreaRatio?: number; metricsThrough?: string; lastSyncAt?: string };
   summary: {
     total: number;
     high: number;

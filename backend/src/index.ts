@@ -2513,7 +2513,7 @@ app.post('/api/projects/:projectId/guide/recommendations/:recommendationId/expla
       db: c.env.smart_menu_db,
       workspaceId,
       userId: text(c.get('userId')),
-      featureCode: 'recommendation_explanation',
+      featureCode: recommendation.source === 'behavior' ? 'behavior_recommendation_explanation' : 'recommendation_explanation',
       operationCode: recommendation.ruleCode,
       provider: 'google',
       model: GEMINI_MODEL,
@@ -2590,7 +2590,8 @@ app.post('/api/projects/:projectId/guide/recommendations/:recommendationId/propo
       return c.json({ success: false, error: '找不到此智慧建議。' }, 404);
     }
 
-    const proposal = sanitizeProposal(buildProposal({ context, recommendation }));
+    if (recommendation.source === 'behavior') return null;
+  const proposal = sanitizeProposal(buildProposal({ context, recommendation }));
     if (!proposal) {
       return c.json({
         success: false,
@@ -3943,7 +3944,7 @@ app.post('/api/projects/:projectId/intelligence/sync', async (c) => {
 app.get('/api/system/line-intelligence/health', async (c) => {
   await requireSystemAdmin(c);
   const rows: any[] = (await c.env.smart_menu_db.prepare("SELECT b.workspace_id,b.project_id,p.name project_name,b.line_rich_menu_id,b.status,b.last_synced_at,b.last_sync_status,COUNT(i.id) cached_rows,SUM(CASE WHEN i.data_status='privacy_suppressed' THEN 1 ELSE 0 END) privacy_rows,SUM(CASE WHEN i.data_status='mapping_unmatched' THEN 1 ELSE 0 END) unmatched_rows FROM workspace_rich_menu_bindings b LEFT JOIN projects p ON p.id=b.project_id AND p.workspace_id=b.workspace_id LEFT JOIN line_rich_menu_insight_daily i ON i.workspace_id=b.workspace_id AND i.project_id=b.project_id GROUP BY b.id ORDER BY b.updated_at DESC").all()).results || [];
-  return c.json({ success: true, bindings: rows.map(row => ({ workspaceId: row.workspace_id, projectId: row.project_id, projectName: row.project_name, lineRichMenuId: row.line_rich_menu_id, status: row.status, lastSyncedAt: row.last_synced_at, lastSyncStatus: row.last_sync_status, cachedRows: Number(row.cached_rows || 0), privacyRows: Number(row.privacy_rows || 0), unmatchedRows: Number(row.unmatched_rows || 0) })) });
+  return c.json({ success: true, bindings: rows.map(row => ({ workspaceId: row.workspace_id, projectId: row.project_id, projectName: row.project_name, lineRichMenuId: row.line_rich_menu_id, status: row.status, lastSyncedAt: row.last_synced_at, lastSyncStatus: row.last_sync_status, cachedRows: Number(row.cached_rows || 0), privacyRows: Number(row.privacy_rows || 0), unmatchedRows: Number(row.unmatched_rows || 0), behaviorReady: Number(row.cached_rows || 0) > 0 && Number(row.privacy_rows || 0) === 0 && Number(row.unmatched_rows || 0) === 0, behaviorReason: Number(row.cached_rows || 0) === 0 ? 'NO_SYNC' : Number(row.privacy_rows || 0) > 0 ? 'PRIVACY_SUPPRESSED' : Number(row.unmatched_rows || 0) > 0 ? 'MAPPING_INCOMPLETE' : 'READY' })) });
 });
 
 app.post('/api/projects/:projectId/publish', async (c) => {

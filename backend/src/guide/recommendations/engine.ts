@@ -1,5 +1,6 @@
-import type { GuideContext } from '../types.ts';
+﻿import type { GuideContext } from '../types.ts';
 import { RECOMMENDATION_RULES } from './rules.ts';
+import { BEHAVIOR_RECOMMENDATION_RULES } from './behavioralRules.ts';
 import { proposalAvailabilityForRule } from '../proposals/availability.ts';
 import type {
   Recommendation,
@@ -24,7 +25,7 @@ function stableFingerprint(value: string): string {
 }
 
 export function evaluateRecommendations(context: GuideContext): RecommendationResult {
-  const rules = [...RECOMMENDATION_RULES].sort((left, right) => left.order - right.order);
+  const rules = [...RECOMMENDATION_RULES, ...BEHAVIOR_RECOMMENDATION_RULES].sort((left, right) => left.order - right.order);
   const orderByCode = new Map(rules.map(rule => [rule.code, rule.order]));
   const deduplicated = new Map<string, Recommendation>();
 
@@ -33,7 +34,7 @@ export function evaluateRecommendations(context: GuideContext): RecommendationRe
       const { stableKey, ...fields } = candidate;
       const id = `rec:${rule.code}:${context.project.id}:${stableFingerprint(stableKey)}`;
       if (deduplicated.has(id)) continue;
-      const proposal = proposalAvailabilityForRule(rule.code);
+      const proposal = fields.source === 'behavior' ? { available: false, type: null, reason: 'PROPOSAL_NOT_AVAILABLE' } as any : proposalAvailabilityForRule(rule.code);
       deduplicated.set(id, {
         id,
         ruleCode: rule.code,
@@ -45,13 +46,14 @@ export function evaluateRecommendations(context: GuideContext): RecommendationRe
     }
   }
 
-  const recommendations = [...deduplicated.values()].sort((left, right) =>
+  const raw = [...deduplicated.values()]; const has = (code: string) => raw.some(item => item.ruleCode === code); const recommendations = raw.filter(item => !(item.ruleCode === 'R109' && has('R110'))).map(item => ({ ...item, groupKey: item.ruleCode === 'R104' || item.ruleCode === 'R003' ? 'structure-optimization' : item.ruleCode === 'R107' || item.ruleCode === 'R001' || item.ruleCode === 'R002' ? 'external-uri-usage' : item.ruleCode === 'R110' ? 'click-trend' : undefined, primaryRuleCode: item.ruleCode === 'R110' ? 'R110' : undefined, relatedRuleCodes: item.ruleCode === 'R110' && has('R109') ? [...new Set([...(item.relatedRuleCodes || []), 'R109'])] : item.relatedRuleCodes })).sort((left, right) =>
     PRIORITY_ORDER[left.priority] - PRIORITY_ORDER[right.priority]
     || (orderByCode.get(left.ruleCode) || 0) - (orderByCode.get(right.ruleCode) || 0)
     || left.id.localeCompare(right.id));
 
   return {
     recommendations,
+    ...(context.behavior?.dataQuality ? { behaviorDataQuality: { sufficient: Boolean(context.behavior.dataQuality.sufficient), reasonCode: String(context.behavior.dataQuality.reasonCode || 'NO_SYNC'), mappedAreaRatio: Number(context.behavior.dataQuality.mappedAreaRatio || 0), metricsThrough: context.behavior.dataQuality.metricsThrough || undefined, lastSyncAt: context.behavior.dataQuality.lastSyncAt || undefined } } : {}),
     summary: {
       total: recommendations.length,
       high: recommendations.filter(item => item.priority === 'high').length,

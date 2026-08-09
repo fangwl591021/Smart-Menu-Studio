@@ -41,10 +41,10 @@ function RecommendationContent({ result, onAction, request, projectId, userRole 
   const proposalRequestRef = useRef(0);
   const recommendations = Array.isArray(result?.recommendations) ? result.recommendations : [];
   const visible = showAll ? recommendations : recommendations.slice(0, 5);
-  const groups = useMemo(() => ['high', 'medium', 'low'].map(priority => ({
-    priority,
-    items: visible.filter(item => item?.priority === priority),
-  })).filter(group => group.items.length), [visible]);
+  const groups = useMemo(() => [
+    { priority: 'improvement', label: '改善建議', items: visible.filter(item => item?.tone !== 'positive') },
+    { priority: 'positive', label: '表現良好', items: visible.filter(item => item?.tone === 'positive') },
+  ].filter(group => group.items.length), [visible]);
 
   if (result?.error) {
     return <div className="border-t border-current/15 pt-3 text-sm text-red-700">目前無法取得智慧建議。</div>;
@@ -53,9 +53,14 @@ function RecommendationContent({ result, onAction, request, projectId, userRole 
   const viewSetting = async recommendation => {
     setFallbackId('');
     const action = recommendation.suggestedAction;
+    const intelligenceTarget = recommendation.ruleCode === 'R109' || recommendation.ruleCode === 'R110'
+      ? 'intelligence-trend'
+      : recommendation.entityType === 'project_area'
+        ? `intelligence-area-${recommendation.entityId}`
+        : 'intelligence-summary';
     const handled = await onAction?.({
       type: action?.type || 'none',
-      target: action?.target || recommendation.target || '',
+      target: action?.target === 'intelligence' ? intelligenceTarget : (action?.target || recommendation.target || ''),
     });
     if (handled === false) setFallbackId(recommendation.id);
   };
@@ -163,12 +168,14 @@ function RecommendationContent({ result, onAction, request, projectId, userRole 
         <span className="rounded-full bg-white/75 px-2 py-1 text-xs font-bold">{recommendations.length}</span>
       </div>
 
+      {result?.behaviorDataQuality?.sufficient === false && (<div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">Data quality: {result.behaviorDataQuality.reasonCode}. Behavior insights are withheld until reliable LINE intelligence is available.</div>)}
+
       {recommendations.length === 0 ? (
         <div className="mt-2 text-xs opacity-70">目前沒有智慧建議。</div>
       ) : (
         <div className="mt-3 max-h-72 space-y-3 overflow-y-auto pr-1">
           {groups.map(group => {
-            const meta = PRIORITY_META[group.priority];
+            const meta = PRIORITY_META[group.priority] || (group.priority === 'positive' ? { label: group.label, symbol: 'OK', style: 'border-emerald-200 bg-emerald-50 text-emerald-900' } : { label: group.label, symbol: '!', style: 'border-amber-200 bg-amber-50 text-amber-900' });
             return (
               <div key={group.priority}>
                 <div className="mb-1.5 text-[11px] font-bold opacity-70">{meta.label}</div>
@@ -232,7 +239,7 @@ function RecommendationContent({ result, onAction, request, projectId, userRole 
                           <button type="button" onClick={() => setExpandedId(expanded ? '' : recommendation.id)} className="font-bold underline">
                             {expanded ? '收合' : '查看'}
                           </button>
-                          {recommendation.proposal?.available && (
+                          {recommendation.tone !== 'positive' && recommendation.proposal?.available && (
                             <button
                               type="button"
                               onClick={() => loadProposal(recommendation)}

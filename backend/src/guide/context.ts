@@ -1,4 +1,4 @@
-import type { BuildGuideContextInput, GuideArea, GuideContext } from './types.ts';
+﻿import type { BuildGuideContextInput, GuideArea, GuideContext } from './types.ts';
 
 const clean = (value: unknown) => String(value ?? '').trim();
 
@@ -74,7 +74,17 @@ export async function buildGuideContext(input: BuildGuideContextInput): Promise<
   const selectedArea = areas.find(area => area.id === clean(selectedAreaId)) || null;
   const allAreasConfigured = areas.length > 0 && areas.every(hasConfiguredType);
   const hasInvalidActions = areas.length === 0 || areas.some(area => !hasValidRequiredField(area));
-  const accountExists = Boolean(lineAccount?.id);
+  const today = new Date().toISOString().slice(0,10); const from = new Date(Date.now()-29*86400000).toISOString().slice(0,10);
+  const [binding, metricsResult, areaMetricsResult, dailyResult, mappingResult] = await Promise.all([
+    db.prepare(`SELECT last_synced_at FROM workspace_rich_menu_bindings WHERE workspace_id=? AND project_id=? AND status='active' LIMIT 1`).bind(workspaceId, entityId).first<Record<string, unknown>>(),
+    db.prepare(`SELECT SUM(impressions) impressions,SUM(clicks) clicks,MAX(metric_date) metrics_through,MAX(data_status) data_status FROM line_intelligence_daily WHERE workspace_id=? AND project_id=? AND project_area_id='' AND metric_date>=? AND metric_date<=?`).bind(workspaceId,entityId,from,today).first<Record<string, unknown>>(),
+    db.prepare(`SELECT d.project_area_id id,pa.label,pa.action_type,SUM(d.clicks) clicks FROM line_intelligence_daily d JOIN project_areas pa ON pa.id=d.project_area_id AND pa.workspace_id=d.workspace_id WHERE d.workspace_id=? AND d.project_id=? AND d.project_area_id<>'' AND d.metric_date>=? GROUP BY d.project_area_id`).bind(workspaceId,entityId,from).all<Record<string, unknown>>(),
+    db.prepare(`SELECT metric_date date,impressions,clicks FROM line_intelligence_daily WHERE workspace_id=? AND project_id=? AND project_area_id='' AND metric_date>=? ORDER BY metric_date`).bind(workspaceId,entityId,new Date(Date.now()-13*86400000).toISOString().slice(0,10)).all<Record<string, unknown>>(),
+    db.prepare(`SELECT SUM(CASE WHEN project_area_id IS NOT NULL AND project_area_id<>'' THEN 1 ELSE 0 END) mapped,COUNT(*) total FROM line_rich_menu_insight_daily WHERE workspace_id=? AND project_id=? AND click_count IS NOT NULL AND bounds_width>=0 AND bounds_height>=0 AND metric_date>=?`).bind(workspaceId,entityId,from).first<Record<string, unknown>>(),
+  ]);
+  const impressions=Number(metricsResult?.impressions||0), clicks=Number(metricsResult?.clicks||0), metricsThrough=clean(metricsResult?.metrics_through), lastSyncAt=clean(binding?.last_synced_at); const freshness=metricsThrough ? Math.floor((Date.now()-Date.parse(metricsThrough+'T00:00:00Z'))/86400000) : Infinity;
+  const mappedAreaRatio=Number(mappingResult?.total||0)?Number(mappingResult?.mapped||0)/Number(mappingResult?.total||0):0;
+  const behavior:any={ period:{from,to:today,days:30}, project:{impressions,clicks}, areas:(areaMetricsResult.results||[]).map(row=>({id:clean(row.id),label:clean(row.label),actionType:clean(row.action_type),clicks:Number(row.clicks||0)})), daily:dailyResult.results||[], dataQuality:{sufficient:Boolean(binding)&&impressions>=100&&freshness<=3&&mappedAreaRatio>=.8&&metricsResult?.data_status!=='privacy_suppressed',reasonCode:!binding?'NO_BINDING':!metricsThrough?'NO_SYNC':metricsResult?.data_status==='privacy_suppressed'?'PRIVACY_SUPPRESSED':impressions<100?'INSUFFICIENT_IMPRESSIONS':freshness>3?'STALE_DATA':mappedAreaRatio<.8?'MAPPING_INCOMPLETE':'OK',metricsThrough,lastSyncAt,mappedAreaRatio} };  const accountExists = Boolean(lineAccount?.id);
   const hasBotToken = Number(lineAccount?.has_bot_token || 0) === 1;
 
   return {
@@ -103,6 +113,7 @@ export async function buildGuideContext(input: BuildGuideContextInput): Promise<
       actionType: selectedArea.actionType,
     } : null,
     areas,
+    behavior,
     lineAccount: {
       exists: accountExists,
       hasBotToken,
@@ -118,6 +129,12 @@ export async function buildGuideContext(input: BuildGuideContextInput): Promise<
   };
 }
 
+export function mappedMappableClickBoundsRatio(rows: Array<{ project_area_id?: unknown; bounds_width?: unknown; bounds_height?: unknown }>): number {
+  const mappable = rows.filter(row => Number(row.bounds_width) >= 0 && Number(row.bounds_height) >= 0);
+  if (!mappable.length) return 0;
+  return mappable.filter(row => clean(row.project_area_id)).length / mappable.length;
+}
+
 const publicUriParts = (value: string) => {
   try {
     const url = new URL(value);
@@ -130,6 +147,7 @@ const publicUriParts = (value: string) => {
 export function toPublicGuideContext(context: GuideContext) {
   return {
     ...context,
+    behavior: context.behavior ? { period: context.behavior.period, project: context.behavior.project, areas: context.behavior.areas, dataQuality: context.behavior.dataQuality } : undefined,
     areas: context.areas.map(area => ({
       id: area.id,
       label: area.label,
