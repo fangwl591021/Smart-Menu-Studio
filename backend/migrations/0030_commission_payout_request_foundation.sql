@@ -32,7 +32,7 @@ WHEN EXISTS (
 )
 BEGIN
   SELECT RAISE(ABORT,'ACTIVE_PAYOUT_REQUEST_EXISTS');
-END;
+end;
 
 CREATE TABLE IF NOT EXISTS commission_payout_request_status_events (
   id TEXT PRIMARY KEY,

@@ -65,7 +65,7 @@ WHEN EXISTS (
 )
 BEGIN
   SELECT RAISE(ABORT,'LEDGER_ALREADY_SETTLED');
-END;
+end;
 
 CREATE TABLE IF NOT EXISTS commission_settlement_status_events (
   id TEXT PRIMARY KEY,
