@@ -26,5 +26,5 @@ export function publicPayoutRequestRow(row: Record<string, unknown>, ordinal = 0
 }
 
 export function publicDealerPayoutRequestRow(row: Record<string, unknown>) {
-  return { requestId: String(row.id || ''), settlementId: String(row.settlement_id || ''), status: String(row.status || ''), amountMinor: Number(row.amount_minor || 0), currencyCode: 'TWD', requestedAt: row.requested_at || null, reviewedAt: row.reviewed_at || null, rejectionReasonCode: row.rejection_reason_code || null };
+  return { status: String(row.status || ''), amountMinor: Number(row.amount_minor || 0), currencyCode: 'TWD', requestedAt: row.requested_at || null, reviewedAt: row.reviewed_at || null, rejectionReasonCode: row.rejection_reason_code || null };
 }
