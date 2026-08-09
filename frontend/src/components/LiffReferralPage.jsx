@@ -22,7 +22,7 @@ export default function LiffReferralPage() {
       const token = liff.getAccessToken(); if (!token) throw new Error('無法取得 LINE 登入憑證。');
       const headers = { Authorization: `Bearer ${token}` };
       const establish = await api('/api/member/establish', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ lineAccountId: context.lineAccountId, liffAccessToken: token, referralFlowToken: getReferralFlowToken() || undefined }) });
-      if (!establish.ok) throw new Error('無法建立會員驗證。');
+      const establishBody = await establish.json(); if (establishBody?.referralFlowInvalid) applyReferralFlowTerminalResult('REFERRAL_FLOW_INVALID'); if (!establish.ok || !establishBody?.success) throw new Error('無法建立會員驗證。');
       const referralResponse = await api(`/api/member/referral?lineAccountId=${encodeURIComponent(context.lineAccountId)}`, { headers });
       const referral = await referralResponse.json(); if (!referralResponse.ok || !referral.success) throw new Error(referral.error || '無法建立推薦資訊。');
       const friend = await liff.getFriendship();
