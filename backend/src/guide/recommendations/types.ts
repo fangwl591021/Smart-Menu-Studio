@@ -1,4 +1,4 @@
-﻿import type { GuideContext } from '../types.ts';
+import type { GuideContext } from '../types.ts';
 import type { ProposalAvailability } from '../proposals/types.ts';
 
 export type RecommendationCategory =
@@ -7,9 +7,10 @@ export type RecommendationCategory =
   | 'conversion'
   | 'maintainability'
   | 'line-oa'
-  | 'structure';
+  | 'structure'
+  | 'journey';
 
-export type RecommendationSource = 'configuration' | 'behavior';
+export type RecommendationSource = 'configuration' | 'behavior' | 'journey';
 export type RecommendationTone = 'improvement' | 'positive';
 
 export type RecommendationPriority = 'high' | 'medium' | 'low';
@@ -20,7 +21,7 @@ export type RecommendationActionType = 'focus' | 'navigate' | 'open_tab' | 'revi
 
 export type RecommendationEvidence = {
   key: string;
-  value: string | number | boolean;
+  value: string | number | boolean | null;
 };
 
 export type Recommendation = {

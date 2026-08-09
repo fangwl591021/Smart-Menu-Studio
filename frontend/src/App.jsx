@@ -5,6 +5,7 @@ import OperationPlanManagement from './components/OperationPlanManagement';
 import LineIntelligencePanel from './components/LineIntelligencePanel';
 import AIUsagePanel from './components/AIUsagePanel';
 import LineIntelligenceHealthPanel from './components/LineIntelligenceHealthPanel';
+import ConversionApiKeyPanel from './components/ConversionApiKeyPanel';
 import { emitGuideEvent } from './guide-events';
 import { 
   LayoutDashboard, 
@@ -5059,6 +5060,9 @@ export default function App() {
             )}
             {currentView === 'account' && (
               <AccountView session={session} onSessionChanged={loadSession} />
+            )}
+            {currentView === 'settings' && !isPlatformAdminMode && (
+              <ConversionApiKeyPanel request={authFetch} userRole={activeRole} />
             )}
             {currentView === 'ai-usage' && (
               <AIUsagePanel request={authFetch} systemAdmin={isPlatformAdminMode} />

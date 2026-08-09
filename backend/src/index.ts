@@ -2607,7 +2607,7 @@ app.post('/api/projects/:projectId/guide/recommendations/:recommendationId/expla
       db: c.env.smart_menu_db,
       workspaceId,
       userId: text(c.get('userId')),
-      featureCode: recommendation.source === 'behavior' ? 'behavior_recommendation_explanation' : 'recommendation_explanation',
+      featureCode: recommendation.source === 'journey' ? 'journey_recommendation_explanation' : recommendation.source === 'behavior' ? 'behavior_recommendation_explanation' : 'recommendation_explanation',
       operationCode: recommendation.ruleCode,
       provider: 'google',
       model: GEMINI_MODEL,
@@ -2684,7 +2684,7 @@ app.post('/api/projects/:projectId/guide/recommendations/:recommendationId/propo
       return c.json({ success: false, error: '找不到此智慧建議。' }, 404);
     }
 
-    if (recommendation.source === 'behavior') return null;
+    if (recommendation.source === 'behavior' || recommendation.source === 'journey') return c.json({ success: false, error: 'PROPOSAL_NOT_AVAILABLE', code: 'PROPOSAL_NOT_AVAILABLE' }, 409);
   const proposal = sanitizeProposal(buildProposal({ context, recommendation }));
     if (!proposal) {
       return c.json({
@@ -2895,6 +2895,7 @@ app.post('/api/projects/:projectId/guide/recommendations/:recommendationId/propo
       recommendationId: c.req.param('recommendationId'),
     });
     if (!current) return c.json({ success: false, error: '找不到可儲存的改善方案。' }, 404);
+    if (current.recommendation.source === 'behavior' || current.recommendation.source === 'journey') return c.json({ success: false, error: 'PROPOSAL_NOT_AVAILABLE', code: 'PROPOSAL_NOT_AVAILABLE' }, 409);
 
     const proposalId = await createProposalDraft(c.env.smart_menu_db, {
       proposal: current.proposal,
@@ -4035,6 +4036,11 @@ app.post('/api/projects/:projectId/intelligence/sync', async (c) => {
   try { requireRole(c, 'admin'); const workspaceId = workspaceIdOf(c); const projectId = c.req.param('projectId'); const binding: any = await c.env.smart_menu_db.prepare("SELECT * FROM workspace_rich_menu_bindings WHERE workspace_id=? AND project_id=? AND status='active' ORDER BY updated_at DESC LIMIT 1").bind(workspaceId, projectId).first(); const account: any = await c.env.smart_menu_db.prepare('SELECT * FROM workspace_line_accounts WHERE workspace_id=? LIMIT 1').bind(workspaceId).first(); if (!binding) return c.json({ success: false, error: 'Link a LINE Rich Menu first.' }, 409); const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10); const priorDate = text(binding.last_synced_at, 10); const from = priorDate && priorDate < yesterday ? priorDate : yesterday; const result = await syncLineRichMenuInsights({ db: c.env.smart_menu_db, workspaceId, projectId, binding, account, from, to: yesterday }); return c.json({ success: true, result }); } catch (error: any) { const code = String(error?.message || ''); return c.json({ success: false, error: code === 'LINE_SYNC_COOLDOWN' ? 'LINE insight sync is limited to once per 15 minutes.' : code === 'LINE_RICH_MENU_UNAVAILABLE' ? 'LINE Rich Menu is unavailable.' : 'Unable to sync LINE insight.' }, code === 'LINE_SYNC_COOLDOWN' ? 429 : 502); }
 });
 
+app.get('/api/system/journey-health', async (c) => {
+  await requireSystemAdmin(c);
+  const rows:any[]=(await c.env.smart_menu_db.prepare("SELECT w.id workspace_id,w.name workspace_name,COALESCE(k.active_key_count,0) active_key_count,e.last_journey_event,v.last_conversion_event,COALESCE(e.webhook_routes,0) webhook_routes,COALESCE(e.webhook_failures,0) webhook_failures,COALESCE(e.mapped_events,0) mapped_events,COALESCE(e.journey_events,0) journey_events FROM workspaces w LEFT JOIN (SELECT workspace_id,COUNT(*) active_key_count FROM workspace_conversion_api_keys WHERE status='active' GROUP BY workspace_id) k ON k.workspace_id=w.id LEFT JOIN (SELECT workspace_id,MAX(occurred_at) last_journey_event,SUM(CASE WHEN event_type='webhook_route' THEN 1 ELSE 0 END) webhook_routes,SUM(CASE WHEN event_type='webhook_failure' THEN 1 ELSE 0 END) webhook_failures,SUM(CASE WHEN project_area_id IS NOT NULL AND project_area_id<>'' THEN 1 ELSE 0 END) mapped_events,COUNT(*) journey_events FROM line_journey_events GROUP BY workspace_id) e ON e.workspace_id=w.id LEFT JOIN (SELECT workspace_id,MAX(occurred_at) last_conversion_event FROM line_conversion_events GROUP BY workspace_id) v ON v.workspace_id=w.id WHERE w.deleted_at IS NULL ORDER BY w.created_at DESC").all()).results||[];
+  return c.json({success:true,workspaces:rows.map((row:any)=>{const total=Number(row.journey_events||0),routes=Number(row.webhook_routes||0),mapping=total?Number(row.mapped_events||0)/total:0,reason=!total?'NO_JOURNEY_DATA':!row.last_journey_event||Date.now()-Date.parse(row.last_journey_event)>3*86400000?'STALE_DATA':mapping<.8?'MAPPING_INCOMPLETE':'READY';return {workspaceId:row.workspace_id,workspaceName:row.workspace_name,journeyReady:reason==='READY',journeyReason:reason,conversionIntegrationAvailable:Number(row.active_key_count||0)>0,activeConversionApiKeys:Number(row.active_key_count||0),lastJourneyEvent:row.last_journey_event||null,lastConversionEvent:row.last_conversion_event||null,webhookFailureRate:routes?Number(row.webhook_failures||0)/routes:null};})});
+});
 app.get('/api/system/line-intelligence/health', async (c) => {
   await requireSystemAdmin(c);
   const rows: any[] = (await c.env.smart_menu_db.prepare("SELECT b.workspace_id,b.project_id,p.name project_name,b.line_rich_menu_id,b.status,b.last_synced_at,b.last_sync_status,COUNT(i.id) cached_rows,SUM(CASE WHEN i.data_status='privacy_suppressed' THEN 1 ELSE 0 END) privacy_rows,SUM(CASE WHEN i.data_status='mapping_unmatched' THEN 1 ELSE 0 END) unmatched_rows FROM workspace_rich_menu_bindings b LEFT JOIN projects p ON p.id=b.project_id AND p.workspace_id=b.workspace_id LEFT JOIN line_rich_menu_insight_daily i ON i.workspace_id=b.workspace_id AND i.project_id=b.project_id GROUP BY b.id ORDER BY b.updated_at DESC").all()).results || [];
@@ -6524,5 +6530,3 @@ app.post('/api/system/workspaces/:workspaceId/line-simulator', async (c) => {
     return c.json({success:false,error:e?.message || 'LINE 模擬器失敗'},500);
   }
 });
-
-

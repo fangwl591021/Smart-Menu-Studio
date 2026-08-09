@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
+import JourneyIntelligencePanel from './JourneyIntelligencePanel';
 
 const number = value => value === null || value === undefined ? 'Not available' : Number(value).toLocaleString('zh-TW');
 const percent = value => value === null || value === undefined ? 'Not available' : `${(Number(value) * 100).toFixed(1)}%`;
@@ -47,5 +48,5 @@ export default function LineIntelligencePanel({ projectId, request, userRole }) 
       <div className="mt-4 text-xs text-gray-500">Last cache sync: {data.dataFreshness?.lastLineSyncAt || 'Not synced'} | Rich Menu: {data.binding?.lineRichMenuId || 'Not linked'}</div>
       {admin && <div className="mt-4 flex flex-wrap gap-2 border-t pt-4"><input value={richMenuId} onChange={event => setRichMenuId(event.target.value)} placeholder="LINE Rich Menu ID" className="min-w-[260px] rounded-md border border-gray-300 px-3 py-2 text-sm" /><button type="button" disabled={!richMenuId || Boolean(busy)} onClick={() => submit('bind')} className="rounded-md border border-blue-300 px-3 py-2 text-sm font-bold text-blue-700">Link menu</button><button type="button" disabled={!data.binding || Boolean(busy)} onClick={() => submit('sync')} className="rounded-md bg-blue-600 px-3 py-2 text-sm font-bold text-white">{busy === 'sync' ? 'Syncing...' : 'Sync LINE insight'}</button></div>}
     </>}
-  </section>;
+  <JourneyIntelligencePanel projectId={projectId} request={request} /></section>;
 }

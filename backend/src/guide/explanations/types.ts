@@ -24,7 +24,7 @@ export type BehaviorExplanationRecommendationInput = {
   title: string;
   message: string;
   period: { from: string; to: string; days: number };
-  evidence: Array<{ key: string; value: string | number | boolean }>;
+  evidence: Array<{ key: string; value: string | number | boolean | null }>;
 };
 
 export type ExplanationLogger = (event: {
