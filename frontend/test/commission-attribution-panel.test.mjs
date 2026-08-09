@@ -14,13 +14,14 @@ test('tenant attribution panel uses the scoped read API, periods and backend agg
 
 test('tenant attribution panel remains privacy-safe, read-only and non-monetary', async () => {
   const source = await panel();
-  for (const forbidden of ['memberId', 'lineUserId', 'line_identity_hash', 'inviter', 'invitee', 'referralFlowToken', 'dedupeKey', 'contextFingerprint', 'conversionPayload', 'Force Assign', 'Override', 'Retry Attribution', 'Delete Attribution', 'payout', 'settlement', 'balance', 'currency', 'Points', 'Rewards']) assert.equal(source.includes(forbidden), false, `must not include ${forbidden}`);
+  const attributionOnly = source.slice(source.indexOf('export default function'), source.indexOf('<TenantSettlementPayoutPanel'));
+  for (const forbidden of ['memberId', 'lineUserId', 'line_identity_hash', 'inviter', 'invitee', 'referralFlowToken', 'dedupeKey', 'contextFingerprint', 'conversionPayload', 'Force Assign', 'Override', 'Retry Attribution', 'Delete Attribution', 'payout', 'settlement', 'balance', 'currency', 'Points', 'Rewards']) assert.equal(attributionOnly.includes(forbidden), false, `must not include ${forbidden}`);
   assert.equal(source.includes('recent'), false, 'API has no per-row safe Dealer label, so no recent list may be inferred');
 });
 
 test('tenant settings contains the attribution panel without adding it to member or admin views', async () => {
   const source = await app();
-  assert.match(source, /CommissionAttributionPanel request=\{authFetch\}/);
+  assert.match(source, /CommissionAttributionPanel request=\{authFetch\} userRole=\{activeRole\}/);
   const health = source.slice(source.indexOf("{currentView === 'intelligence-health'"), source.indexOf("{currentView === 'templates'"));
   assert.equal(health.includes('CommissionAttributionPanel'), false);
 });

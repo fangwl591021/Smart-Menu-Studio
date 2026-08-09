@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import CommissionLedgerPanel from './CommissionLedgerPanel';
+import TenantSettlementPayoutPanel from './TenantSettlementPayoutPanel';
 
 const number = value => Number(value || 0).toLocaleString('zh-TW');
 const sourceLabel = value => value === 'REFERRAL_EVIDENCE' ? '推薦證據' : '已驗證歸因來源';
 
-export default function CommissionAttributionPanel({ request }) {
+export default function CommissionAttributionPanel({ request, userRole }) {
   const [period, setPeriod] = useState('30d');
   const [programId, setProgramId] = useState('');
   const [state, setState] = useState({ loading: true, data: null, error: '' });
@@ -50,5 +51,6 @@ export default function CommissionAttributionPanel({ request }) {
       </>}
     </section>
     <CommissionLedgerPanel request={request} />
+    <TenantSettlementPayoutPanel request={request} userRole={userRole} />
   </>;
 }

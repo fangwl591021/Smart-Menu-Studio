@@ -5070,7 +5070,7 @@ function AppShell() {
               <AccountView session={session} onSessionChanged={loadSession} />
             )}
             {currentView === 'settings' && !isPlatformAdminMode && (
-              <><ConversionApiKeyPanel request={authFetch} userRole={activeRole} /><LiffReferralConfigPanel request={authFetch} userRole={activeRole} /><ReferralGrowthPanel request={authFetch} /><CommissionAttributionPanel request={authFetch} /></>
+              <><ConversionApiKeyPanel request={authFetch} userRole={activeRole} /><LiffReferralConfigPanel request={authFetch} userRole={activeRole} /><ReferralGrowthPanel request={authFetch} /><CommissionAttributionPanel request={authFetch} userRole={activeRole} /></>
             )}
             {currentView === 'ai-usage' && (
               <AIUsagePanel request={authFetch} systemAdmin={isPlatformAdminMode} />
