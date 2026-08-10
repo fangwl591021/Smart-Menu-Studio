@@ -18,7 +18,7 @@ export function parseCsvCandidateRows(csv:string) {
  const warnings=headers.flatMap((header,i)=>PROHIBITED.has(keys[i])?[`PROHIBITED_COLUMN:${header}`]:!IMPORT_FIELDS.some(f=>columnKey(f)===keys[i])?[`UNKNOWN_COLUMN:${header}`]:[]);
  return {warnings,rows:lines.map((line,index)=>{const values=parse(line),candidate:ImportCandidate={}; headers.forEach((_,i)=>{const field=IMPORT_FIELDS.find(f=>columnKey(f)===keys[i]);if(field)candidate[field]=clean(values[i]);});return {rowNumber:index+2,candidate,warnings};})};
 }
-export function validateImportCandidate(candidate:ImportCandidate){const normalizedMobile=normalizedMobile(candidate.mobile||''),normalizedEmail=normalizedEmail(candidate.email||'');return {valid:Object.values(candidate).some(Boolean),normalizedMobile,normalizedEmail};}
+export function validateImportCandidate(candidate:ImportCandidate){const mobileNormalized=normalizedMobile(candidate.mobile||''),emailNormalized=normalizedEmail(candidate.email||'');return {valid:Object.values(candidate).some(Boolean),normalizedMobile:mobileNormalized,normalizedEmail:emailNormalized};}
 export function classifyImportMatch(candidate:{normalizedMobile:string;normalizedEmail:string;contactName?:string;companyName?:string},matches:{mobilePersonId?:string|null;emailPersonId?:string|null}) {
  const mobile=matches.mobilePersonId||null,email=matches.emailPersonId||null;
  if(mobile&&email&&mobile!==email)return {confidence:'CONFLICT',status:'MERGE_REVIEW_REQUIRED',candidatePersonId:null,reason:'PHONE_EMAIL_DIFFERENT_PEOPLE'};
