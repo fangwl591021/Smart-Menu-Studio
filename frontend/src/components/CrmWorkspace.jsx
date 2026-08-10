@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import CrmInsightsTraitsPanel from './CrmInsightsTraitsPanel';
 import CrmPipelinePanel, { CrmBusinessProcessPanel } from './CrmPipelinePanel';
 import CrmTimelinePanel from './CrmTimelinePanel';
+import CrmAnalyticsPanel from './CrmAnalyticsPanel';
 
 const sourceLabels = {
   CSV_IMPORT: 'CSV 匯入',
@@ -48,6 +49,7 @@ export default function CrmWorkspace({ request, userRole = 'viewer' }) {
   const [savingProfile, setSavingProfile] = useState(false);
   const [assigning, setAssigning] = useState(false);
   const [imports, setImports] = useState([]);
+  const [workspaceTab, setWorkspaceTab] = useState('people');
 
   const selectedPerson = useMemo(
     () => people.find((person) => person.personRef === selectedReference) || null,
@@ -159,7 +161,11 @@ export default function CrmWorkspace({ request, userRole = 'viewer' }) {
         <p className="mt-1 text-sm text-gray-500">以 CRM Person 為客戶視圖；推薦人與 CRM 負責人為兩個獨立欄位。</p>
       </div>
 
-      <div className="flex flex-wrap gap-2 rounded-lg border bg-white p-4">
+      <div className="flex gap-2 border-b pb-3">
+        <button type="button" onClick={() => setWorkspaceTab('people')} className={`rounded px-3 py-2 text-sm ${workspaceTab === 'people' ? 'bg-slate-800 text-white' : 'border'}`}>CRM People</button>
+        <button type="button" onClick={() => setWorkspaceTab('analytics')} className={`rounded px-3 py-2 text-sm ${workspaceTab === 'analytics' ? 'bg-slate-800 text-white' : 'border'}`}>CRM Analytics</button>
+      </div>
+      {workspaceTab === 'analytics' ? <CrmAnalyticsPanel request={request} userRole={role} /> : <>      <div className="flex flex-wrap gap-2 rounded-lg border bg-white p-4">
         <input
           aria-label="搜尋客戶"
           value={search}
@@ -285,6 +291,6 @@ export default function CrmWorkspace({ request, userRole = 'viewer' }) {
 
 
       {selectedPerson && <span className="sr-only">{selectedPerson.personRef}</span>}
-    </section>
+      </>}\r\n    </section>
   );
 }
