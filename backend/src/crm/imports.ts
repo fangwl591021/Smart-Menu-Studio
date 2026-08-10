@@ -1,4 +1,4 @@
-import { normalizedEmail, normalizedMobile } from './index';
+import { normalizedEmail, normalizedMobile } from './index.ts';
 
 export const IMPORT_FIELDS=['displayName','contactName','englishName','companyName','department','jobTitle','mobile','companyPhone','email','websiteUrl','lineUrl','address','birthday','gender','region','preferredLanguage','serviceDescription','note'] as const;
 const PROHIBITED=new Set(['referrer','inviter','dealer','points','commission','tier','payout','lineuid','linehash','lineidentityhash','linememberid','memberid','identityhash']);
