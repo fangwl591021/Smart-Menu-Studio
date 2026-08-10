@@ -1,4 +1,4 @@
-import { recordAcquisition } from './acquisition';
+import { recordAcquisition } from './acquisition.ts';
 const id=(p:string)=>`${p}_${crypto.randomUUID()}`;const ref=(p:string)=>`${p}_${crypto.randomUUID().replace(/-/g,'')}`;
 const fields=['displayName','englishName','companyName','department','jobTitle','mobile','companyPhone','email','websiteUrl','lineUrl','address','serviceDescription','avatarAssetReference','shareAltText'] as const;
 const columns:Record<string,string>={displayName:'display_name',englishName:'english_name',companyName:'company_name',department:'department',jobTitle:'job_title',mobile:'mobile',companyPhone:'company_phone',email:'email',websiteUrl:'website_url',lineUrl:'line_url',address:'address',serviceDescription:'service_description',avatarAssetReference:'avatar_asset_reference',shareAltText:'share_alt_text'};
