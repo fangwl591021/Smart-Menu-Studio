@@ -1,4 +1,4 @@
-import { createRewardHandle, rewardHandleReference, verifyRewardHandle } from './reward-handle';
+import { createRewardHandle, rewardHandleReference, verifyRewardHandle } from './reward-handle.ts';
 
 type Scoped = { workspaceId: string; lineAccountId: string };
 const newId = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
