@@ -1,5 +1,5 @@
 import { normalizedEmail, normalizedMobile } from './index.ts';
-import { recordAcquisition } from './acquisition';
+import { recordAcquisition } from './acquisition.ts';
 
 export const IMPORT_FIELDS=['displayName','contactName','englishName','companyName','department','jobTitle','mobile','companyPhone','email','websiteUrl','lineUrl','address','birthday','gender','region','preferredLanguage','serviceDescription','note'] as const;
 const PROHIBITED=new Set(['referrer','inviter','dealer','points','commission','tier','payout','lineuid','linehash','lineidentityhash','linememberid','memberid','identityhash']);
