@@ -9,7 +9,7 @@ const workspace = await readFile(fileURLToPath(new URL('../src/components/CrmWor
 test('CRM Analytics has 7d/30d dashboard metrics and safe current distributions', () => {
   assert.match(source, /\/api\/crm\/analytics-summary\?period=\$\{period\}/);
   for (const value of ['7d','30d','totalPeople','newPeopleInPeriod','peopleWithLineIdentity','peopleWithoutLineIdentity','peopleWithReferrer','peopleWithoutReferrer','peopleByStage','peopleByAcquisitionSource','peopleByTag','peopleByAssignedOwner','openFollowUpCount','overdueFollowUpCount']) assert.match(source, new RegExp(value));
-  assert.match(source, /Latest acquisition source/);
+  assert.match(source, /最新取得來源/);
   assert.doesNotMatch(source, /users\.id|line_identity_hash|source_ref|internalNote/);
 });
 
@@ -23,12 +23,12 @@ test('Segment Builder is AND-only, bounded, uses only backend V1 fields and safe
 
 test('preview, saved segments and opaque cursor remain read-only safe UX', () => {
   for (const endpoint of ['/api/crm/segments/preview','/api/crm/segments','/people']) assert.match(source, new RegExp(endpoint.replace(/[/?]/g, '\\$&')));
-  assert.match(source, /people\?limit=25/); assert.match(source, /nextCursor/); assert.match(source, /Load more/);
-  assert.match(source, /Editing creates a new immutable version/); assert.match(source, /Archive segment/); assert.match(source, /Live membership is calculated from current CRM data/);
+  assert.match(source, /people\?limit=25/); assert.match(source, /nextCursor/); assert.match(source, /載入更多/);
+  assert.match(source, /編輯會建立新的不可變版本/); assert.match(source, /封存客戶區隔/); assert.match(source, /客戶區隔會依目前 CRM 資料即時計算/);
   assert.doesNotMatch(source, /localStorage|sessionStorage|indexedDB|cursor=.*window|decode.*cursor/i);
 });
 
 test('CRM workspace provides a concise analytics entry without replacing People or CRM 360', () => {
-  assert.match(workspace, /CrmAnalyticsPanel/); assert.match(workspace, /CRM Analytics/); assert.match(workspace, /CRM People/); assert.match(workspace, /crm-360/);
+  assert.match(workspace, /CrmAnalyticsPanel/); assert.match(workspace, /CRM 分析/); assert.match(workspace, /CRM 客戶/); assert.match(workspace, /crm-360/);
   assert.doesNotMatch(source, /campaign|broadcast|openai|lead score|LINE send/i);
 });
