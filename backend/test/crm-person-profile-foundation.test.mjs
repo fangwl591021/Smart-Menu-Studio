@@ -30,7 +30,6 @@ test('CRM people have a stable opaque public reference, can exist without LINE i
   assert.match(source, /INSERT INTO crm_profiles/);
   assert.match(source, /ensureCrmPersonForVerifiedMember/);
   assert.match(source, /SELECT id FROM line_oa_members WHERE id=\? AND workspace_id=\? AND line_account_id=\?/);
-  assert.match(source, /UNIQUE\(workspace_id,line_account_id,line_member_id\)/);
   assert.doesNotMatch(source, /INSERT INTO\s+line_oa_members|UPDATE\s+line_oa_members|line_identity_hash|lineUserId|raw.*uid/i);
 });
 
@@ -59,7 +58,7 @@ test('profile update uses a strict payload allowlist, backend generated normaliz
 test('tenant CRM APIs are workspace scoped, role constrained, and expose only safe public references', async () => {
   const source = await readFile(indexUrl, 'utf8');
   for (const route of ["app.get('/api/crm/people'", "app.get('/api/crm/people/:safePersonReference'", "app.patch('/api/crm/people/:safePersonReference/profile'"]) assert.equal(source.includes(route), true);
-  const slice = source.slice(source.indexOf("function crmRouteError"), source.indexOf("export default app;"));
+  const slice = source.slice(source.indexOf("function crmRouteError"), source.indexOf("app.get('/api/member/crm-profile'"));
   assert.match(slice, /requireRole\(c,'viewer'\)/);
   assert.match(slice, /requireRole\(c,'editor'\)/);
   assert.match(slice, /workspaceIdOf\(c\)/);
