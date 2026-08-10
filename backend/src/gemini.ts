@@ -1,5 +1,16 @@
 export const GEMINI_MODEL = 'gemini-3.6-flash';
 
+export const AI_PROVIDER_NOT_CONFIGURED = 'AI_PROVIDER_NOT_CONFIGURED';
+export const AI_PROVIDER_NOT_CONFIGURED_MESSAGE = 'AI 服務目前尚未完成平台設定，請聯絡系統管理員。';
+
+export function geminiProviderNotConfiguredResponse() {
+  return {
+    success: false as const,
+    code: AI_PROVIDER_NOT_CONFIGURED,
+    error: AI_PROVIDER_NOT_CONFIGURED_MESSAGE,
+  };
+}
+
 export type GeminiRequestOptions = {
   apiKey: string;
   body: Record<string, unknown>;

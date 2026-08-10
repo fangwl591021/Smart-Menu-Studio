@@ -2,7 +2,6 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
 type Bindings = {
-  GEMINI_API_KEY: string;
   LINE_CHANNEL_ACCESS_TOKEN: string;
   TENANT_MODE?: string;
   DEV_WORKSPACE_ID?: string;
@@ -727,16 +726,6 @@ function requireRole(c: any, minimum: 'viewer' | 'editor' | 'admin' | 'owner') {
   }
 }
 
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-  }
-  return btoa(binary);
-}
-
 function safeExt(filename: string) {
   const ext = filename.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
   return ['png', 'jpg', 'jpeg', 'webp'].includes(ext) ? ext : 'png';
@@ -1318,73 +1307,6 @@ app.get('/health', async (c) => {
     return c.json({ success: true, status: 'ok', aiProvider: 'Gemini', d1: 'connected', r2: 'bound' });
   } catch (e: any) {
     return c.json({ success: false, status: 'error', error: e?.message || 'Health check failed' }, 500);
-  }
-});
-
-app.post('/api/detect-layout', async (c) => {
-  try {
-    const body = await c.req.parseBody();
-    const image = body.image;
-    if (!image || typeof image === 'string' || !(image instanceof File)) {
-      return c.json({ success: false, error: '請提供有效的圖片檔案。' }, 400);
-    }
-    if (!c.env.GEMINI_API_KEY) {
-      return c.json({ success: false, error: 'GEMINI_API_KEY 尚未設定。' }, 500);
-    }
-
-    const base64Image = arrayBufferToBase64(await image.arrayBuffer());
-    const mimeType = image.type || 'image/png';
-    const prompt = `你是一個 LINE 官方帳號 Rich Menu 專業座標分析器。分析圖片中的可點擊功能區塊。整張圖片固定換算為 2500x1686，左上角為 0,0。每個區塊回傳 id,label,x,y,width,height。座標使用整數，區塊不得超界或重疊，label 使用繁體中文，可辨識規則或不規則版型。只輸出符合 JSON Schema 的資料。`;
-
-    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': c.env.GEMINI_API_KEY },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: base64Image } }] }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: 'OBJECT',
-            properties: {
-              areas: {
-                type: 'ARRAY',
-                items: {
-                  type: 'OBJECT',
-                  properties: {
-                    id: { type: 'INTEGER' }, label: { type: 'STRING' },
-                    x: { type: 'INTEGER' }, y: { type: 'INTEGER' },
-                    width: { type: 'INTEGER' }, height: { type: 'INTEGER' },
-                  },
-                  required: ['id', 'label', 'x', 'y', 'width', 'height'],
-                },
-              },
-            },
-            required: ['areas'],
-          },
-        },
-      }),
-    });
-
-    const result: any = await response.json();
-    if (!response.ok) return c.json({ success: false, error: result?.error?.message || 'Gemini API 呼叫失敗' }, 500);
-
-    const outputText = result?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!outputText) throw new Error('Gemini 沒有回傳辨識結果');
-    const parsed = JSON.parse(outputText);
-    if (!Array.isArray(parsed.areas)) throw new Error('Gemini 回傳資料缺少 areas');
-
-    const areas = parsed.areas.map((area: any, index: number) => {
-      const x = Math.max(0, Math.round(num(area.x)));
-      const y = Math.max(0, Math.round(num(area.y)));
-      const width = Math.max(1, Math.round(num(area.width, 1)));
-      const height = Math.max(1, Math.round(num(area.height, 1)));
-      return { id: num(area.id, index + 1), label: text(area.label || `區塊 ${index + 1}`), x, y, width, height, style: areaStyle(x, y, width, height) };
-    });
-
-    return c.json({ success: true, provider: 'gemini', model: 'gemini-3.6-flash', areas });
-  } catch (e: any) {
-    console.error('detect-layout:', e);
-    return c.json({ success: false, error: e?.message || 'Gemini 圖片辨識失敗' }, 500);
   }
 });
 

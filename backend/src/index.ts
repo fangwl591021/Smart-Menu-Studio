@@ -101,7 +101,7 @@ import {
 } from './guide/proposals/composite-execution';
 import type { OperationPlanStep } from './guide/proposals/composite-plan';
 import { syncLineRichMenuInsights, recordLineActionEvent } from './line-intelligence/service';
-import { GEMINI_MODEL, requestGeminiContent } from './gemini';
+import { GEMINI_MODEL, geminiProviderNotConfiguredResponse, requestGeminiContent } from './gemini';
 import { authenticateConversionApiKey, conversionKeyHash, conversionMetadata, createConversionApiKey } from './journey/conversion-keys';
 import { writeGatewayJourneyEvent } from './journey/engine';
 import { funnel, lastObservedTouch, rebuildJourneyDaily } from './journey/core';
@@ -1598,7 +1598,7 @@ app.post('/api/detect-layout', async (c) => {
       return c.json({ success: false, error: '請提供有效的圖片檔案。' }, 400);
     }
     if (!c.env.GEMINI_API_KEY) {
-      return c.json({ success: false, error: 'GEMINI_API_KEY 尚未設定。' }, 500);
+      return c.json(geminiProviderNotConfiguredResponse(), 503);
     }
 
     const base64Image = arrayBufferToBase64(await image.arrayBuffer());
