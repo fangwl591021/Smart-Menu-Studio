@@ -64,7 +64,7 @@ test('tenant CRM APIs are workspace scoped, role constrained, and expose only sa
   assert.match(slice, /workspaceIdOf\(c\)/);
   assert.match(slice, /crmLineAccountScope/);
   assert.match(slice, /publicCrmPerson/);
-  assert.doesNotMatch(slice, /line_identity_hash|lineMemberId|identity_link_id|referrer|commission|pointAccountId/i);
+  assert.doesNotMatch(slice, /line_identity_hash|lineMemberId|identity_link_id|referrerId|referrerMemberId|referrerPersonId|referralAttributionId|member_referral_attribution_id|source_ref|commission|pointAccountId/i);
 });
 
 test('member CRM profile uses only verified LIFF context, resolves the caller own person, and never accepts a person selector', async () => {
