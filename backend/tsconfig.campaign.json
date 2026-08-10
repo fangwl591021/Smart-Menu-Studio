@@ -11,6 +11,8 @@
 
     "src/campaign/audiences.ts",
     "src/campaign/audience-routes.ts",
+    "src/campaign/campaigns.ts",
+    "src/campaign/campaign-routes.ts",
     "src/crm/segments.ts",
     "src/crm/segment-routes.ts",
     "src/crm/assignee-handle.ts",

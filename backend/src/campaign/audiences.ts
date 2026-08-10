@@ -1,6 +1,6 @@
 import { compileSegmentRule } from '../crm/segments';
 
-const MAX_AUDIENCE_MEMBERS = 10000;
+export const MAX_AUDIENCE_MEMBERS = 10000;
 const clean = (value: unknown, maximum = 160) => typeof value === 'string' ? value.trim().slice(0, maximum) : '';
 const internalId = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 const publicReference = () => `campa_${crypto.randomUUID().replace(/-/g, '')}`;
@@ -14,6 +14,13 @@ const EXCLUSION_SQL = `CASE
   WHEN pr.marketing_consent<>1 THEN 'MARKETING_CONSENT_MISSING'
   WHEN NOT ${VERIFIED_LINE_SQL} THEN 'NO_VERIFIED_LINE_IDENTITY'
   ELSE NULL END`;
+export const CAMPAIGN_EXCLUSION_REASONS = [
+  'PERSON_ARCHIVED',
+  'DO_NOT_CONTACT',
+  'NOT_CONTACTABLE',
+  'MARKETING_CONSENT_MISSING',
+  'NO_VERIFIED_LINE_IDENTITY',
+] as const;
 
 export type CampaignAudienceSource = {
   segmentId: string;
@@ -102,7 +109,12 @@ export async function loadCampaignAudienceSource(
   }
 }
 
-async function snapshotCounts(db: D1Database, workspaceId: string, executionRule: unknown) {
+export async function evaluateCampaignAudience(
+  db: D1Database,
+  workspaceId: string,
+  executionRule: unknown,
+  previewLimit = 25,
+) {
   const compiled = compileSegmentRule(executionRule, workspaceId);
   const row = await db.prepare(`SELECT COUNT(*) matched_count,
     COALESCE(SUM(CASE WHEN ${ELIGIBLE_SQL} THEN 1 ELSE 0 END),0) eligible_count
@@ -117,9 +129,46 @@ async function snapshotCounts(db: D1Database, workspaceId: string, executionRule
   if (!Number.isSafeInteger(eligibleCount) || eligibleCount < 0 || eligibleCount > matchedCount) {
     throw new Error('CAMPAIGN_AUDIENCE_COUNT_INVALID');
   }
-  return { compiled, matchedCount, eligibleCount, excludedCount: matchedCount - eligibleCount };
+  const breakdownRows = await db.prepare(`SELECT exclusion_reason,COUNT(*) reason_count FROM (
+    SELECT ${EXCLUSION_SQL} exclusion_reason
+    FROM crm_people p JOIN crm_profiles pr ON pr.crm_person_id=p.id
+    WHERE p.workspace_id=?${compiled.where}
+  ) WHERE exclusion_reason IS NOT NULL GROUP BY exclusion_reason ORDER BY exclusion_reason ASC`)
+    .bind(...compiled.args).all<Record<string, unknown>>();
+  const exclusionBreakdown = (breakdownRows.results || [])
+    .filter(item => CAMPAIGN_EXCLUSION_REASONS.includes(String(item.exclusion_reason) as typeof CAMPAIGN_EXCLUSION_REASONS[number]))
+    .map(item => ({ reason: String(item.exclusion_reason), count: Number(item.reason_count || 0) }));
+  const limit = Math.min(Math.max(Math.trunc(previewLimit), 0), 25);
+  let previewPeople: Array<Record<string, unknown>> = [];
+  let truncated = false;
+  if (limit > 0) {
+    const preview = await db.prepare(`SELECT display_name,company_name,person_status,eligibility_status,exclusion_reason FROM (
+      SELECT pr.display_name,pr.company_name,p.status person_status,p.updated_at,p.public_ref,
+        CASE WHEN ${ELIGIBLE_SQL} THEN 'ELIGIBLE' ELSE 'EXCLUDED' END eligibility_status,
+        ${EXCLUSION_SQL} exclusion_reason
+      FROM crm_people p JOIN crm_profiles pr ON pr.crm_person_id=p.id
+      WHERE p.workspace_id=?${compiled.where}
+    ) ORDER BY updated_at DESC,public_ref ASC LIMIT ?`).bind(...compiled.args, limit + 1).all<Record<string, unknown>>();
+    const rows = preview.results || [];
+    truncated = rows.length > limit;
+    previewPeople = rows.slice(0, limit).map(person => ({
+      displayName: clean(person.display_name, 120),
+      companyName: clean(person.company_name, 180),
+      status: clean(person.person_status, 20),
+      eligibilityStatus: clean(person.eligibility_status, 20),
+      exclusionReason: clean(person.exclusion_reason, 80) || null,
+    }));
+  }
+  return {
+    compiled,
+    matchedCount,
+    eligibleCount,
+    excludedCount: matchedCount - eligibleCount,
+    exclusionBreakdown,
+    previewPeople,
+    truncated,
+  };
 }
-
 function snapshotMemberInsert(
   db: D1Database,
   workspaceId: string,
@@ -145,6 +194,19 @@ export async function createCampaignAudience(db: D1Database, input: {
   executionRule: unknown;
   userId?: string | null;
 }) {
+  const materialization = await buildCampaignAudienceSnapshot(db, input);
+  await db.batch(materialization.statements);
+  return campaignAudienceByReference(db, input.workspaceId, materialization.safeAudienceReference);
+}
+
+export async function buildCampaignAudienceSnapshot(db: D1Database, input: {
+  workspaceId: string;
+  name: unknown;
+  description?: unknown;
+  source: CampaignAudienceSource;
+  executionRule: unknown;
+  userId?: string | null;
+}) {
   const name = clean(input.name, 120);
   if (!name) throw new Error('CAMPAIGN_AUDIENCE_NAME_REQUIRED');
   const conflict = await db.prepare('SELECT id FROM campaign_audiences WHERE workspace_id=? AND lower(name)=lower(?) LIMIT 1')
@@ -154,8 +216,8 @@ export async function createCampaignAudience(db: D1Database, input: {
   const audienceId = internalId('campa');
   const audienceRef = publicReference();
   const snapshotId = internalId('camps');
-  const counts = await snapshotCounts(db, input.workspaceId, input.executionRule);
-  await db.batch([
+  const counts = await evaluateCampaignAudience(db, input.workspaceId, input.executionRule, 0);
+  const statements = [
     db.prepare(`INSERT INTO campaign_audiences(
       id,public_ref,workspace_id,name,description,status,source_segment_id,current_snapshot_no,created_by_user_id
     ) VALUES(?,?,?,?,?,'ACTIVE',?,0,?)`).bind(
@@ -173,10 +235,19 @@ export async function createCampaignAudience(db: D1Database, input: {
     db.prepare(`UPDATE campaign_audiences SET current_snapshot_no=1,updated_at=CURRENT_TIMESTAMP
       WHERE id=? AND workspace_id=? AND public_ref=? AND status='ACTIVE' AND current_snapshot_no=0`)
       .bind(audienceId, input.workspaceId, audienceRef),
-  ]);
-  return campaignAudienceByReference(db, input.workspaceId, audienceRef);
+  ];
+  return {
+    statements,
+    audienceId,
+    safeAudienceReference: audienceRef,
+    snapshotId,
+    snapshotNo: 1,
+    matchedCount: counts.matchedCount,
+    eligibleCount: counts.eligibleCount,
+    excludedCount: counts.excludedCount,
+    exclusionBreakdown: counts.exclusionBreakdown,
+  };
 }
-
 export async function campaignAudienceRefreshContext(db: D1Database, workspaceId: string, safeAudienceReference: string) {
   const audience = await db.prepare(`SELECT a.id,a.current_snapshot_no,s.public_ref source_segment_ref
     FROM campaign_audiences a JOIN crm_segments s ON s.id=a.source_segment_id AND s.workspace_id=a.workspace_id
@@ -201,7 +272,7 @@ export async function refreshCampaignAudience(db: D1Database, input: {
 }) {
   const snapshotNo = input.currentSnapshotNo + 1;
   const snapshotId = internalId('camps');
-  const counts = await snapshotCounts(db, input.workspaceId, input.executionRule);
+  const counts = await evaluateCampaignAudience(db, input.workspaceId, input.executionRule, 0);
   await db.batch([
     db.prepare(`INSERT INTO campaign_audience_snapshots(
       id,workspace_id,audience_id,snapshot_no,source_segment_id,source_segment_version_no,
