@@ -6617,14 +6617,14 @@ app.get('/api/crm/people',async c=>{try{
   const workspaceId=workspaceIdOf(c),lineAccountId=text(c.req.query('lineAccountId'));
   if(lineAccountId&&!await crmLineAccountScope(c.env.smart_menu_db,workspaceId,lineAccountId)) return c.json({success:false,error:'NOT_FOUND'},404);
   const people=await listCrmPeople(c.env.smart_menu_db,{workspaceId,lineAccountId:lineAccountId||undefined,search:text(c.req.query('search'),100),status:text(c.req.query('status')).toUpperCase()||undefined});
-  return c.json({success:true,people:people.map(row=>publicCrmPerson(row,{includePii:crmTenantCanSeePii(c),includeInternalNote:false}))});
+  const enriched=await Promise.all(people.map(async row=>{const [acquisition,referral,assignment]=await Promise.all([acquisitionSummary(c.env.smart_menu_db,workspaceId,row.id),referralSummary(c.env.smart_menu_db,workspaceId,row.id),assignmentSummary(c.env.smart_menu_db,workspaceId,row.id)]);return {...publicCrmPerson(row,{includePii:crmTenantCanSeePii(c),includeInternalNote:false}),firstAcquisitionSource:acquisition.first?.sourceType||null,latestAcquisitionSource:acquisition.latest?.sourceType||null,acquisitionAt:acquisition.latest?.occurredAt||null,hasReferrer:referral.hasReferrer,referrerLabel:referral.referrerLabel,assignedOwnerLabel:assignment?.label||null};}));return c.json({success:true,people:enriched});
 }catch(e:any){const x=crmRouteError(e,'CRM_PERSON_LIST_FAILED');return c.json({success:false,error:x.error},x.status)}});
 
 app.get('/api/crm/people/:safePersonReference',async c=>{try{
   requireRole(c,'viewer');
   const row=await crmPersonByReference(c.env.smart_menu_db,{workspaceId:workspaceIdOf(c),publicRef:text(c.req.param('safePersonReference'),80)});
   if(!row)return c.json({success:false,error:'NOT_FOUND'},404);
-  return c.json({success:true,person:publicCrmPerson(row,{includePii:crmTenantCanSeePii(c),includeInternalNote:crmTenantCanSeePii(c)})});
+  const workspaceId=workspaceIdOf(c),[acquisition,referredBy,assignedOwner]=await Promise.all([acquisitionSummary(c.env.smart_menu_db,workspaceId,row.id),referralSummary(c.env.smart_menu_db,workspaceId,row.id),assignmentSummary(c.env.smart_menu_db,workspaceId,row.id)]);return c.json({success:true,person:{...publicCrmPerson(row,{includePii:crmTenantCanSeePii(c),includeInternalNote:crmTenantCanSeePii(c)}),acquisition,relationships:{referredBy,assignedOwner}}});
 }catch(e:any){const x=crmRouteError(e,'CRM_PERSON_READ_FAILED');return c.json({success:false,error:x.error},x.status)}});
 
 app.patch('/api/crm/people/:safePersonReference/profile',async c=>{try{
