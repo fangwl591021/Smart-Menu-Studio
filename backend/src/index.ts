@@ -122,7 +122,7 @@ import { canTransitionPaymentAttemptStatus, internalTestPaymentProvider, isPayme
 import { createDealerSettlementHandle, dealerFinalizedSettlementRows, dealerSettlementHandleReference, publicDealerSettlementRow, verifyDealerSettlementHandle } from './commission/dealer-settlement-read';
 import { createDealerPayoutRequestHandle, dealerPayoutRequestHandleReference, verifyDealerPayoutRequestHandle } from './commission/dealer-payout-request-handle';
 import { canTenantTransitionDealerStatus, dealerApplyDecision, isDealerStatus, publicDealerRow } from './dealers/foundation';
-import { createPointRuleVersion, getMemberPoints, getTenantPointsSummary } from './points';
+import { createPointRuleVersion, getMemberPoints, getTenantPointsSummary } from './points';\nimport { crmPersonByReference, ensureCrmPersonForVerifiedMember, listCrmPeople, publicCrmPerson, updateCrmProfile } from './crm';
 import { createReward, createRewardVersion, isRewardStatus, listMemberRedemptions, listMemberRewards, listTenantRewards, redeemReward, tenantRedemptionSummary, transitionRewardStatus } from './points/rewards';
 import { createContributionRuleVersion, createTierRuleVersion, isContributionEventType, isTierCode, memberContributionRead, recordContributionForTrustedSource, tenantContributionSummary } from './contribution';
 import { Hono } from 'hono';
@@ -6592,7 +6592,60 @@ app.post('/api/point-rewards/:rewardId/status',async c=>{try{requireRole(c,'admi
 app.get('/api/point-redemptions',async c=>{try{requireRole(c,'viewer');const workspaceId=workspaceIdOf(c),lineAccountId=text(c.req.query('lineAccountId')),period=pointsPeriod(c.req.query('period'));if(!lineAccountId)return c.json({success:false,error:'LINE_ACCOUNT_REQUIRED'},400);if(!await scopedPointAccount(c.env.smart_menu_db,workspaceId,lineAccountId))return c.json({success:false,error:'NOT_FOUND'},404);return c.json({success:true,period,...await tenantRedemptionSummary(c.env.smart_menu_db,{workspaceId,lineAccountId,period})});}catch(e:any){const x=pointsRouteError(e,'POINT_REDEMPTION_READ_FAILED');return c.json({success:false,error:x.error},x.status)}});
 app.get('/api/member/rewards',async c=>{try{const lineAccountId=text(c.req.query('lineAccountId')),verified=await verifiedReferralMember(c,{lineAccountId,liffAccessToken:text(c.req.header('Authorization')).replace(/^Bearer\s+/i,'')});return c.json({success:true,rewards:await listMemberRewards(c.env.smart_menu_db,{workspaceId:verified.account.workspace_id,lineAccountId:verified.account.id,memberId:verified.memberId,secret:text(c.env.MEMBER_IDENTITY_HMAC_SECRET)})});}catch{return c.json({success:false,error:'MEMBER_CONTEXT_REQUIRED'},401)}});
 app.post('/api/member/redemptions',async c=>{try{const body:any=await c.req.json().catch(()=>({})),verified=await verifiedReferralMember(c,body),rewardHandle=text(body.rewardHandle,4096);if(!rewardHandle)return c.json({success:false,error:'REWARD_HANDLE_REQUIRED'},400);const redemption=await redeemReward(c.env.smart_menu_db,{workspaceId:verified.account.workspace_id,lineAccountId:verified.account.id,memberId:verified.memberId,secret:text(c.env.MEMBER_IDENTITY_HMAC_SECRET),rewardHandle});return c.json({success:true,redemption},redemption.code==='REDEEMED'?201:200);}catch(e:any){const code=String(e?.message||'');if(['INSUFFICIENT_POINTS','REWARD_NOT_AVAILABLE','REWARD_HANDLE_INVALID','REWARD_HANDLE_EXPIRED'].includes(code))return c.json({success:false,error:code},409);return c.json({success:false,error:'MEMBER_CONTEXT_REQUIRED'},401)}});
-app.get('/api/member/redemptions',async c=>{try{const lineAccountId=text(c.req.query('lineAccountId')),verified=await verifiedReferralMember(c,{lineAccountId,liffAccessToken:text(c.req.header('Authorization')).replace(/^Bearer\s+/i,'')});return c.json({success:true,redemptions:await listMemberRedemptions(c.env.smart_menu_db,{workspaceId:verified.account.workspace_id,lineAccountId:verified.account.id,memberId:verified.memberId})});}catch{return c.json({success:false,error:'MEMBER_CONTEXT_REQUIRED'},401)}});
+app.get('/api/member/redemptions',async c=>{try{const lineAccountId=text(c.req.query('lineAccountId')),verified=await verifiedReferralMember(c,{lineAccountId,liffAccessToken:text(c.req.header('Authorization')).replace(/^Bearer\s+/i,'')});return c.json({success:true,redemptions:await listMemberRedemptions(c.env.smart_menu_db,{workspaceId:verified.account.workspace_id,lineAccountId
+function crmRouteError(error:any, fallback:string) {
+  const code=String(error?.message||'');
+  if (code==='FORBIDDEN_ROLE') return { error:'FORBIDDEN', status:403 };
+  if (code==='CRM_PERSON_NOT_FOUND') return { error:'NOT_FOUND', status:404 };
+  if (['CRM_PROFILE_PATCH_EMPTY','CRM_PROFILE_FIELD_FORBIDDEN','CRM_PERSON_STATUS_INVALID','CRM_INVALID_GENDER','CRM_DO_NOT_CONTACT_CLEAR_REQUIRES_MEMBER'].includes(code) || code.startsWith('CRM_INVALID_')) return { error:code, status:400 };
+  return { error:fallback, status:500 };
+}
+async function crmLineAccountScope(db:D1Database, workspaceId:string, lineAccountId:string) {
+  return db.prepare('SELECT id FROM workspace_line_accounts WHERE id=? AND workspace_id=? LIMIT 1').bind(lineAccountId,workspaceId).first<any>();
+}
+function crmTenantCanSeePii(c:any) { return text(c.get('userRole')||'viewer').toLowerCase()!=='viewer'; }
+
+app.get('/api/crm/people',async c=>{try{
+  requireRole(c,'viewer');
+  const workspaceId=workspaceIdOf(c),lineAccountId=text(c.req.query('lineAccountId'));
+  if(lineAccountId&&!await crmLineAccountScope(c.env.smart_menu_db,workspaceId,lineAccountId)) return c.json({success:false,error:'NOT_FOUND'},404);
+  const people=await listCrmPeople(c.env.smart_menu_db,{workspaceId,lineAccountId:lineAccountId||undefined,search:text(c.req.query('search'),100),status:text(c.req.query('status')).toUpperCase()||undefined});
+  return c.json({success:true,people:people.map(row=>publicCrmPerson(row,{includePii:crmTenantCanSeePii(c),includeInternalNote:false}))});
+}catch(e:any){const x=crmRouteError(e,'CRM_PERSON_LIST_FAILED');return c.json({success:false,error:x.error},x.status)}});
+
+app.get('/api/crm/people/:safePersonReference',async c=>{try{
+  requireRole(c,'viewer');
+  const row=await crmPersonByReference(c.env.smart_menu_db,{workspaceId:workspaceIdOf(c),publicRef:text(c.req.param('safePersonReference'),80)});
+  if(!row)return c.json({success:false,error:'NOT_FOUND'},404);
+  return c.json({success:true,person:publicCrmPerson(row,{includePii:crmTenantCanSeePii(c),includeInternalNote:crmTenantCanSeePii(c)})});
+}catch(e:any){const x=crmRouteError(e,'CRM_PERSON_READ_FAILED');return c.json({success:false,error:x.error},x.status)}});
+
+app.patch('/api/crm/people/:safePersonReference/profile',async c=>{try{
+  requireRole(c,'editor');
+  const workspaceId=workspaceIdOf(c),row=await crmPersonByReference(c.env.smart_menu_db,{workspaceId,publicRef:text(c.req.param('safePersonReference'),80)});
+  if(!row)return c.json({success:false,error:'NOT_FOUND'},404);
+  const body:any=await c.req.json().catch(()=>({})),patch=body&&typeof body.profile==='object'&&!Array.isArray(body.profile)?body.profile:{};
+  const profile=await updateCrmProfile(c.env.smart_menu_db,{workspaceId,crmPersonId:text(row.id),patch,actor:{sourceType:'CRM_MANUAL',actorType:'TENANT_USER',actorUserId:text(c.get('userId'))||null}});
+  return c.json({success:true,person:{...publicCrmPerson(row,{includePii:true,includeInternalNote:true}),profile}});
+}catch(e:any){const x=crmRouteError(e,'CRM_PROFILE_UPDATE_FAILED');return c.json({success:false,error:x.error},x.status)}});
+
+app.get('/api/member/crm-profile',async c=>{try{
+  const verified=await verifiedReferralMember(c,{lineAccountId:text(c.req.query('lineAccountId')),liffAccessToken:text(c.req.header('Authorization')).replace(/^Bearer\s+/i,'')});
+  const person=await ensureCrmPersonForVerifiedMember(c.env.smart_menu_db,{workspaceId:verified.account.workspace_id,lineAccountId:verified.account.id,lineMemberId:verified.memberId});
+  const row=await crmPersonByReference(c.env.smart_menu_db,{workspaceId:verified.account.workspace_id,publicRef:person.publicRef});
+  if(!row)throw new Error('CRM_PERSON_NOT_FOUND');
+  return c.json({success:true,person:publicCrmPerson(row,{includePii:true,includeInternalNote:false})});
+}catch{return c.json({success:false,error:'MEMBER_CONTEXT_REQUIRED'},401)}});
+
+app.patch('/api/member/crm-profile',async c=>{try{
+  const body:any=await c.req.json().catch(()=>({})),verified=await verifiedReferralMember(c,body);
+  const person=await ensureCrmPersonForVerifiedMember(c.env.smart_menu_db,{workspaceId:verified.account.workspace_id,lineAccountId:verified.account.id,lineMemberId:verified.memberId});
+  const patch=body&&typeof body.profile==='object'&&!Array.isArray(body.profile)?body.profile:{};
+  const profile=await updateCrmProfile(c.env.smart_menu_db,{workspaceId:verified.account.workspace_id,crmPersonId:person.id,patch,actor:{sourceType:'MEMBER_SELF_INPUT',actorType:'MEMBER',memberSelf:true}});
+  return c.json({success:true,person:{personRef:person.publicRef,profile}});
+}catch(e:any){const code=String(e?.message||'');if(code.startsWith('CRM_'))return c.json({success:false,error:code},400);return c.json({success:false,error:'MEMBER_CONTEXT_REQUIRED'},401)}});
+
+:verified.account.id,memberId:verified.memberId})});}catch{return c.json({success:false,error:'MEMBER_CONTEXT_REQUIRED'},401)}});
 
 export default app;
 app.post('/api/system/workspaces/:workspaceId/line-simulator', async (c) => {
