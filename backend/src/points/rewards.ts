@@ -1,4 +1,5 @@
 import { createRewardHandle, rewardHandleReference, verifyRewardHandle } from './reward-handle.ts';
+import { recordContributionForTrustedSource } from '../contribution/index.ts';
 
 type Scoped = { workspaceId: string; lineAccountId: string };
 const newId = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
@@ -159,6 +160,7 @@ export async function redeemReward(
         ) VALUES (?,?,?,?,'DEBIT',?,'REWARD_REDEMPTION','REDEMPTION',?,CURRENT_TIMESTAMP)
       `).bind(ledgerEntryId,input.workspaceId,input.lineAccountId,String(account.id),pointsCost,redemptionId),
     ]);
+    recordContributionForTrustedSource(db,{workspaceId:input.workspaceId,lineAccountId:input.lineAccountId,eventType:'COMPLETED_REWARD_REDEMPTION',sourceRef:redemptionId}).catch(()=>{});
     return { code: 'REDEEMED' as const, pointsCost, rewardName: String(reward.name) };
   } catch (error: any) {
     const message = String(error?.message || error || '');
