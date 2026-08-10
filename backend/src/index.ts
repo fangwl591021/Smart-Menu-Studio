@@ -128,6 +128,7 @@ import { createCsvImport, importCapability, importRows, listCrmImports, resolveC
 import { collectShare, createBusinessCard, createOrVersion, createShare, ownCard, ownCollection, ownPerson, publicCard, publicShare, revokeShare, setCardStatus } from './crm/cards';
 import { registerCrmInsightRoutes } from './crm/insight-routes';
 import { registerCrmPipelineRoutes } from './crm/pipeline-routes';
+import { registerCrmTimelineRoutes } from './crm/timeline-routes';
 import { acquisitionSummary, assignCrmOwner, assignmentSummary, referralSummary } from './crm/acquisition';
 import { assigneeReference, createAssigneeHandle, verifyAssigneeHandle } from './crm/assignee-handle';
 
@@ -6682,6 +6683,7 @@ app.get('/api/crm/assignees',async c=>{try{requireRole(c,'viewer');const workspa
 export default app;
 registerCrmInsightRoutes(app,{requireRole,workspaceIdOf,crmPersonByReference,text,crmRouteError,verifiedReferralMember,ensureCrmPersonForVerifiedMember});
 registerCrmPipelineRoutes(app,{requireRole,workspaceIdOf,crmPersonByReference,text,assignmentSummary,crmAssignableUsers});
+registerCrmTimelineRoutes(app,{requireRole,workspaceIdOf,crmPersonByReference,text});
 app.post('/api/system/workspaces/:workspaceId/line-simulator', async (c) => {
   try {
     await requireSystemAdmin(c);
