@@ -11,6 +11,7 @@ import LiffReferralConfigPanel from './components/LiffReferralConfigPanel';
 import LiffReferralPage from './components/LiffReferralPage';
 import ReferralGrowthPanel from './components/ReferralGrowthPanel';
 import CommissionAttributionPanel from './components/CommissionAttributionPanel';
+import RewardRedemptionPanel from './components/RewardRedemptionPanel';
 import TrackedUriTool from './components/TrackedUriTool';
 import { emitGuideEvent } from './guide-events';
 import { 
@@ -5070,7 +5071,7 @@ function AppShell() {
               <AccountView session={session} onSessionChanged={loadSession} />
             )}
             {currentView === 'settings' && !isPlatformAdminMode && (
-              <><ConversionApiKeyPanel request={authFetch} userRole={activeRole} /><LiffReferralConfigPanel request={authFetch} userRole={activeRole} /><ReferralGrowthPanel request={authFetch} /><CommissionAttributionPanel request={authFetch} userRole={activeRole} /></>
+              <><ConversionApiKeyPanel request={authFetch} userRole={activeRole} /><LiffReferralConfigPanel request={authFetch} userRole={activeRole} /><ReferralGrowthPanel request={authFetch} /><CommissionAttributionPanel request={authFetch} userRole={activeRole} /><RewardRedemptionPanel request={authFetch} userRole={activeRole} /></>
             )}
             {currentView === 'ai-usage' && (
               <AIUsagePanel request={authFetch} systemAdmin={isPlatformAdminMode} />
