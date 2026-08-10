@@ -127,6 +127,9 @@ import { crmPersonByReference, ensureCrmPersonForVerifiedMember, listCrmPeople, 
 import { createCsvImport, importCapability, importRows, listCrmImports, resolveCrmImportRow } from './crm/imports';
 import { collectShare, createBusinessCard, createOrVersion, createShare, ownCard, ownCollection, ownPerson, publicCard, publicShare, revokeShare, setCardStatus } from './crm/cards';
 import { registerCrmInsightRoutes } from './crm/insight-routes';
+import { registerCrmPipelineRoutes } from './crm/pipeline-routes';
+import { acquisitionSummary, assignCrmOwner, assignmentSummary, referralSummary } from './crm/acquisition';
+import { assigneeReference, createAssigneeHandle, verifyAssigneeHandle } from './crm/assignee-handle';
 
 
 import { createReward, createRewardVersion, isRewardStatus, listMemberRedemptions, listMemberRewards, listTenantRewards, redeemReward, tenantRedemptionSummary, transitionRewardStatus } from './points/rewards';
@@ -6678,6 +6681,7 @@ async function crmAssignableUsers(db:any,workspaceId:string){return ((await db.p
 app.get('/api/crm/assignees',async c=>{try{requireRole(c,'viewer');const workspaceId=workspaceIdOf(c),secret=text(c.env.CRM_ASSIGNEE_HANDLE_SECRET),users:any[]=await crmAssignableUsers(c.env.smart_menu_db,workspaceId);return c.json({success:true,assignees:await Promise.all(users.map(async u=>({assignedUserReference:await createAssigneeHandle(secret,workspaceId,u.id),displayLabel:text(u.display_name,120)||'Workspace user',roleLabel:text(u.role,40)||null})))});}catch(e:any){return c.json({success:false,error:e?.message==='CRM_ASSIGNEE_HANDLE_SECRET_MISSING'?'CRM_ASSIGNEE_HANDLE_UNAVAILABLE':'CRM_ASSIGNEE_LIST_FAILED'},500)}});
 export default app;
 registerCrmInsightRoutes(app,{requireRole,workspaceIdOf,crmPersonByReference,text,crmRouteError,verifiedReferralMember,ensureCrmPersonForVerifiedMember});
+registerCrmPipelineRoutes(app,{requireRole,workspaceIdOf,crmPersonByReference,text,assignmentSummary,crmAssignableUsers});
 app.post('/api/system/workspaces/:workspaceId/line-simulator', async (c) => {
   try {
     await requireSystemAdmin(c);
