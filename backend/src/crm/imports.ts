@@ -1,29 +1,57 @@
 import { normalizedEmail, normalizedMobile } from './index';
 
 export const IMPORT_FIELDS=['displayName','contactName','englishName','companyName','department','jobTitle','mobile','companyPhone','email','websiteUrl','lineUrl','address','birthday','gender','region','preferredLanguage','serviceDescription','note'] as const;
-const prohibited=new Set(['referrer','inviter','dealer','points','commission','tier','payout','lineuid','linehash','lineidentityhash','linememberid']);
-const clean=(v:unknown,max=2000)=>typeof v==='string'?v.trim().slice(0,max):'';
-const key=(v:string)=>v.replace(/[ _-]/g,'').toLowerCase();
-export type ImportCandidate=Record<string,string>;
+const PROHIBITED=new Set(['referrer','inviter','dealer','points','commission','tier','payout','lineuid','linehash','lineidentityhash','linememberid','memberid','identityhash']);
+const PROFILE_FIELD:Record<string,string>={displayName:'display_name',contactName:'contact_name',englishName:'english_name',companyName:'company_name',department:'department',jobTitle:'job_title',mobile:'mobile',companyPhone:'company_phone',email:'email',websiteUrl:'website_url',lineUrl:'line_url',address:'address',birthday:'birthday',gender:'gender',region:'region',preferredLanguage:'preferred_language',serviceDescription:'service_description',note:'internal_note'};
+const SOURCE_PRIORITY:Record<string,number>={SYSTEM_ONLY:5,MEMBER_SELF_INPUT:4,CRM_MANUAL:3,CSV_IMPORT:2,API_IMPORT:2,OCR:1,AI_DERIVED:0};
+const clean=(value:unknown,max=4000)=>typeof value==='string'?value.trim().slice(0,max):'';
+const columnKey=(value:string)=>value.replace(/[ _-]/g,'').toLowerCase();
+const ref=(prefix:string)=>`${prefix}_${crypto.randomUUID().replace(/-/g,'')}`;
+const id=(prefix:string)=>`${prefix}_${crypto.randomUUID()}`;
 
+export type ImportCandidate=Record<string,string>;
 export function parseCsvCandidateRows(csv:string) {
-  const lines=csv.replace(/^\uFEFF/,'').split(/\r?\n/).filter(line=>line.trim()!=='');
-  if(lines.length<2) throw new Error('CSV_ROWS_REQUIRED');
-  const cells=(line:string)=>{const out:string[]=[];let value='',quoted=false;for(let i=0;i<line.length;i++){const ch=line[i];if(ch==='"'){if(quoted&&line[i+1]==='"'){value+='"';i++;}else quoted=!quoted;}else if(ch===','&&!quoted){out.push(value);value='';}else value+=ch;}if(quoted)throw new Error('CSV_INVALID_QUOTE');out.push(value);return out;};
-  const headers=cells(lines.shift()!).map(clean), normalized=headers.map(key);
-  const warnings=headers.filter((header,i)=>!IMPORT_FIELDS.some(field=>key(field)===normalized[i])&&!prohibited.has(normalized[i])).map(header=>`UNKNOWN_COLUMN:${header}`);
-  return {warnings,rows:lines.map((line,rowNumber)=>{const values=cells(line),candidate:ImportCandidate={};headers.forEach((header,i)=>{const field=IMPORT_FIELDS.find(value=>key(value)===normalized[i]);if(field)candidate[field]=clean(values[i]);});return {rowNumber:rowNumber+2,candidate,prohibitedColumns:headers.filter((_,i)=>prohibited.has(normalized[i]))};})};
+ const lines=csv.replace(/^\uFEFF/,'').split(/\r?\n/).filter(x=>x.trim());
+ if(lines.length<2)throw new Error('CSV_ROWS_REQUIRED');
+ const parse=(line:string)=>{const out:string[]=[];let value='',quoted=false;for(let i=0;i<line.length;i++){const ch=line[i];if(ch==='"'){if(quoted&&line[i+1]==='"'){value+='"';i++;}else quoted=!quoted;}else if(ch===','&&!quoted){out.push(value);value='';}else value+=ch;}if(quoted)throw new Error('CSV_INVALID_QUOTE');out.push(value);return out;};
+ const headers=parse(lines.shift()!).map(x=>clean(x,120)), keys=headers.map(columnKey);
+ const warnings=headers.flatMap((header,i)=>PROHIBITED.has(keys[i])?[`PROHIBITED_COLUMN:${header}`]:!IMPORT_FIELDS.some(f=>columnKey(f)===keys[i])?[`UNKNOWN_COLUMN:${header}`]:[]);
+ return {warnings,rows:lines.map((line,index)=>{const values=parse(line),candidate:ImportCandidate={}; headers.forEach((_,i)=>{const field=IMPORT_FIELDS.find(f=>columnKey(f)===keys[i]);if(field)candidate[field]=clean(values[i]);});return {rowNumber:index+2,candidate,warnings};})};
 }
-export function validateImportCandidate(candidate:ImportCandidate) {
-  const mobile=normalizedMobile(candidate.mobile||''),email=normalizedEmail(candidate.email||'');
-  const hasData=Object.values(candidate).some(Boolean);
-  return {valid:hasData,normalizedMobile:mobile,normalizedEmail:email};
-}
-export function classifyImportMatch(candidate:{normalizedMobile:string;normalizedEmail:string;contactName?:string;companyName?:string}, matches:{mobilePersonId?:string|null;emailPersonId?:string|null}) {
-  const mobile=matches.mobilePersonId||null,email=matches.emailPersonId||null;
-  if(mobile&&email&&mobile!==email)return {confidence:'CONFLICT',status:'MERGE_REVIEW_REQUIRED',candidatePersonId:null,reason:'PHONE_EMAIL_DIFFERENT_PEOPLE'};
-  if(mobile||email)return {confidence:'TRUSTED_EXACT',status:'READY_LINK',candidatePersonId:mobile||email,reason:mobile&&email?'EXACT_PHONE_AND_EMAIL':'EXACT_CONTACT'};
-  if(clean(candidate.contactName)&&clean(candidate.companyName))return {confidence:'POSSIBLE_MATCH',status:'MATCH_CANDIDATE',candidatePersonId:null,reason:'NAME_AND_COMPANY'};
-  return {confidence:'NO_MATCH',status:'READY_CREATE',candidatePersonId:null,reason:'NO_CREDIBLE_MATCH'};
+export function validateImportCandidate(candidate:ImportCandidate){const normalizedMobile=normalizedMobile(candidate.mobile||''),normalizedEmail=normalizedEmail(candidate.email||'');return {valid:Object.values(candidate).some(Boolean),normalizedMobile,normalizedEmail};}
+export function classifyImportMatch(candidate:{normalizedMobile:string;normalizedEmail:string;contactName?:string;companyName?:string},matches:{mobilePersonId?:string|null;emailPersonId?:string|null}) {
+ const mobile=matches.mobilePersonId||null,email=matches.emailPersonId||null;
+ if(mobile&&email&&mobile!==email)return {confidence:'CONFLICT',status:'MERGE_REVIEW_REQUIRED',candidatePersonId:null,reason:'PHONE_EMAIL_DIFFERENT_PEOPLE'};
+ if(mobile||email)return {confidence:'TRUSTED_EXACT',status:'READY_LINK',candidatePersonId:mobile||email,reason:'EXACT_CONTACT'};
+ if(clean(candidate.contactName)&&clean(candidate.companyName))return {confidence:'POSSIBLE_MATCH',status:'MATCH_CANDIDATE',candidatePersonId:null,reason:'NAME_AND_COMPANY'};
+ return {confidence:'NO_MATCH',status:'READY_CREATE',candidatePersonId:null,reason:'NO_CREDIBLE_MATCH'};
 }
 export const importCapability=(type:string)=>type==='CSV'?{available:true,code:'CSV_READY'}:type==='XLSX'?{available:false,code:'XLSX_PARSER_PENDING'}:type==='BUSINESS_CARD_OCR'?{available:false,code:'OCR_PROVIDER_ADAPTER_PENDING'}:{available:false,code:'API_IMPORT_FOUNDATION_ONLY'};
+
+async function exact(db:D1Database,workspaceId:string,column:string,value:string){if(!value)return null;return db.prepare(`SELECT p.id,p.public_ref FROM crm_people p JOIN crm_profiles pr ON pr.crm_person_id=p.id WHERE p.workspace_id=? AND pr.${column}=? LIMIT 1`).bind(workspaceId,value).first<any>();}
+export async function createCsvImport(db:D1Database,input:{workspaceId:string;userId?:string|null;csv:string;filename?:string;contentType?:string}) {
+ const parsed=parseCsvCandidateRows(input.csv), jobId=id('crmij'), publicRef=ref('crmij');
+ const prepared=[] as any[]; let valid=0,invalid=0,candidates=0;
+ for(const row of parsed.rows){const check=validateImportCandidate(row.candidate);let match={confidence:'NO_MATCH',status:'INVALID',candidatePersonId:null as string|null,reason:'EMPTY_ROW'};let candidateRef=null;
+  if(check.valid){valid++;const mobile=await exact(db,input.workspaceId,'normalized_mobile',check.normalizedMobile),email=await exact(db,input.workspaceId,'normalized_email',check.normalizedEmail);match=classifyImportMatch({...check,contactName:row.candidate.contactName,companyName:row.candidate.companyName},{mobilePersonId:mobile?.id,emailPersonId:email?.id});candidateRef=(mobile||email)?.public_ref||null;if(match.status!=='READY_CREATE')candidates++;}
+  else invalid++;
+  prepared.push({row,check,match,candidateRef,id:id('crmir'),publicRef:ref('crmir')});
+ }
+ const statements=[db.prepare(`INSERT INTO crm_import_jobs(id,public_ref,workspace_id,import_type,status,source_filename,source_content_type,total_rows,valid_rows,invalid_rows,match_candidate_rows,created_by_user_id) VALUES(?,?,?,'CSV','REVIEW_READY',?,?,?,?,?,?,?)`).bind(jobId,publicRef,input.workspaceId,clean(input.filename,255),clean(input.contentType,120),prepared.length,valid,invalid,candidates,input.userId||null)];
+ for(const item of prepared)statements.push(db.prepare(`INSERT INTO crm_import_rows(id,public_ref,workspace_id,import_job_id,row_number,status,raw_data_json,parsed_data_json,normalized_mobile,normalized_email,candidate_person_id,match_confidence,match_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(item.id,item.publicRef,input.workspaceId,jobId,item.row.rowNumber,item.match.status,JSON.stringify(item.row.candidate),JSON.stringify({candidate:item.row.candidate,warnings:item.row.warnings}),item.check.normalizedMobile,item.check.normalizedEmail,item.match.candidatePersonId,item.match.confidence,item.match.reason));
+ await db.batch(statements); return {importReference:publicRef,status:'REVIEW_READY',totalRows:prepared.length,validRows:valid,invalidRows:invalid,matchCandidateRows:candidates,warnings:parsed.warnings};
+}
+export async function listCrmImports(db:D1Database,workspaceId:string){const rows:any[]=(await db.prepare(`SELECT public_ref,status,import_type,source_filename,total_rows,valid_rows,invalid_rows,match_candidate_rows,imported_rows,rejected_rows,created_at,completed_at FROM crm_import_jobs WHERE workspace_id=? ORDER BY created_at DESC LIMIT 100`).bind(workspaceId).all()).results||[];return rows.map(r=>({importReference:r.public_ref,status:r.status,importType:r.import_type,sourceFilename:r.source_filename,totalRows:r.total_rows,validRows:r.valid_rows,invalidRows:r.invalid_rows,matchCandidateRows:r.match_candidate_rows,importedRows:r.imported_rows,rejectedRows:r.rejected_rows,createdAt:r.created_at,completedAt:r.completed_at}));}
+export async function importRows(db:D1Database,workspaceId:string,importReference:string){const rows:any[]=(await db.prepare(`SELECT r.*,j.public_ref import_ref,p.public_ref candidate_ref,resolved.public_ref resolved_ref FROM crm_import_rows r JOIN crm_import_jobs j ON j.id=r.import_job_id LEFT JOIN crm_people p ON p.id=r.candidate_person_id LEFT JOIN crm_people resolved ON resolved.id=r.resolved_person_id WHERE r.workspace_id=? AND j.public_ref=? ORDER BY r.row_number`).bind(workspaceId,importReference).all()).results||[];return rows.map(r=>({rowReference:r.public_ref,rowNumber:r.row_number,status:r.status,matchConfidence:r.match_confidence,matchReason:r.match_reason,candidatePersonReference:r.candidate_ref||null,resolvedPersonReference:r.resolved_ref||null,resolution:r.resolution||null,candidate:JSON.parse(r.parsed_data_json||'{}').candidate||{},warnings:JSON.parse(r.parsed_data_json||'{}').warnings||[]}));}
+export async function resolveCrmImportRow(db:D1Database,input:{workspaceId:string;importReference:string;rowReference:string;resolution:'CREATE_PERSON'|'LINK_EXISTING'|'REJECT';targetPersonReference?:string;userId?:string|null}){
+ const row:any=await db.prepare(`SELECT r.*,j.id job_id FROM crm_import_rows r JOIN crm_import_jobs j ON j.id=r.import_job_id WHERE r.workspace_id=? AND j.public_ref=? AND r.public_ref=? LIMIT 1`).bind(input.workspaceId,input.importReference,input.rowReference).first(); if(!row)throw new Error('CRM_IMPORT_ROW_NOT_FOUND'); if(row.status==='RESOLVED'||row.status==='REJECTED')return {idempotent:true,status:row.status};
+ if(input.resolution==='REJECT'){await db.batch([db.prepare(`UPDATE crm_import_rows SET status='REJECTED',resolution='REJECT',reviewed_by_user_id=?,reviewed_at=CURRENT_TIMESTAMP WHERE id=? AND workspace_id=?`).bind(input.userId||null,row.id,input.workspaceId),db.prepare(`UPDATE crm_import_jobs SET rejected_rows=rejected_rows+1 WHERE id=?`).bind(row.job_id)]);return {status:'REJECTED'};}
+ const data:ImportCandidate=JSON.parse(row.parsed_data_json||'{}').candidate||{}; if(row.match_confidence==='CONFLICT')throw new Error('MERGE_REVIEW_REQUIRED');
+ let personId:string,personRef:string;const statements:any[]=[];
+ if(input.resolution==='CREATE_PERSON'){if(row.status!=='READY_CREATE')throw new Error('CRM_IMPORT_REVIEW_REQUIRED');personId=id('crmp');personRef=ref('crmp');statements.push(db.prepare(`INSERT INTO crm_people(id,public_ref,workspace_id,status) VALUES(?,?,?,'ACTIVE')`).bind(personId,personRef,input.workspaceId),db.prepare(`INSERT INTO crm_profiles(crm_person_id) VALUES(?)`).bind(personId));}
+ else {const person:any=await db.prepare('SELECT id,public_ref FROM crm_people WHERE workspace_id=? AND public_ref=? LIMIT 1').bind(input.workspaceId,clean(input.targetPersonReference,100)).first();if(!person)throw new Error('CRM_PERSON_NOT_FOUND');personId=person.id;personRef=person.public_ref;}
+ const profile:any=await db.prepare('SELECT * FROM crm_profiles WHERE crm_person_id=?').bind(personId).first();const assignments:string[]=[],args:any[]=[];
+ for(const [field,column] of Object.entries(PROFILE_FIELD)){const value=clean(data[field]);if(!value)continue;const prior=profile?.[column]||'';if(input.resolution==='LINK_EXISTING'&&prior&&prior!==value){const event:any=await db.prepare(`SELECT source_type FROM crm_profile_field_events WHERE crm_person_id=? AND field_name=? ORDER BY created_at DESC,id DESC LIMIT 1`).bind(personId,field).first();if((SOURCE_PRIORITY[event?.source_type||'OCR']??1)>=SOURCE_PRIORITY.CSV_IMPORT)throw new Error('FIELD_AUTHORITY_CONFLICT');}assignments.push(`${column}=?`);args.push(value);if(field==='mobile'){assignments.push('normalized_mobile=?');args.push(normalizedMobile(value));}if(field==='email'){assignments.push('normalized_email=?');args.push(normalizedEmail(value));}statements.push(db.prepare(`INSERT INTO crm_profile_field_events(id,workspace_id,crm_person_id,field_name,source_type,actor_type,actor_user_id,previous_value,new_value) VALUES(?,?,?,?, 'CSV_IMPORT','TENANT_USER',?,?,?)`).bind(id('crmfe'),input.workspaceId,personId,field,input.userId||null,prior?'[changed]':'','[changed]'));}
+ if(assignments.length)statements.push(db.prepare(`UPDATE crm_profiles SET ${assignments.join(',')},updated_at=CURRENT_TIMESTAMP WHERE crm_person_id=?`).bind(...args,personId),db.prepare('UPDATE crm_people SET updated_at=CURRENT_TIMESTAMP,last_activity_at=CURRENT_TIMESTAMP WHERE id=?').bind(personId));
+ statements.push(db.prepare(`UPDATE crm_import_rows SET status='RESOLVED',resolution=?,resolved_person_id=?,reviewed_by_user_id=?,reviewed_at=CURRENT_TIMESTAMP WHERE id=? AND workspace_id=?`).bind(input.resolution,personId,input.userId||null,row.id,input.workspaceId),db.prepare(`UPDATE crm_import_jobs SET imported_rows=imported_rows+1 WHERE id=?`).bind(row.job_id));await db.batch(statements);return {status:'RESOLVED',personReference:personRef};
+}
