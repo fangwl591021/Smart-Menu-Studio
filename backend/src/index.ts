@@ -126,6 +126,7 @@ import { createPointRuleVersion, getMemberPoints, getTenantPointsSummary } from 
 import { crmPersonByReference, ensureCrmPersonForVerifiedMember, listCrmPeople, publicCrmPerson, updateCrmProfile } from './crm';
 import { createCsvImport, importCapability, importRows, listCrmImports, resolveCrmImportRow } from './crm/imports';
 import { collectShare, createBusinessCard, createOrVersion, createShare, ownCard, ownCollection, ownPerson, publicCard, publicShare, revokeShare, setCardStatus } from './crm/cards';
+import { registerCrmInsightRoutes } from './crm/insight-routes';
 
 
 import { createReward, createRewardVersion, isRewardStatus, listMemberRedemptions, listMemberRewards, listTenantRewards, redeemReward, tenantRedemptionSummary, transitionRewardStatus } from './points/rewards';
@@ -6676,6 +6677,7 @@ app.get('/api/crm/people/:safePersonReference/cards',async c=>{try{requireRole(c
 async function crmAssignableUsers(db:any,workspaceId:string){return ((await db.prepare(`SELECT id,display_name,role,status FROM users WHERE workspace_id=? AND (status IS NULL OR status IN ('active','ACTIVE')) ORDER BY display_name ASC,id ASC`).bind(workspaceId).all()).results||[])}
 app.get('/api/crm/assignees',async c=>{try{requireRole(c,'viewer');const workspaceId=workspaceIdOf(c),secret=text(c.env.CRM_ASSIGNEE_HANDLE_SECRET),users:any[]=await crmAssignableUsers(c.env.smart_menu_db,workspaceId);return c.json({success:true,assignees:await Promise.all(users.map(async u=>({assignedUserReference:await createAssigneeHandle(secret,workspaceId,u.id),displayLabel:text(u.display_name,120)||'Workspace user',roleLabel:text(u.role,40)||null})))});}catch(e:any){return c.json({success:false,error:e?.message==='CRM_ASSIGNEE_HANDLE_SECRET_MISSING'?'CRM_ASSIGNEE_HANDLE_UNAVAILABLE':'CRM_ASSIGNEE_LIST_FAILED'},500)}});
 export default app;
+registerCrmInsightRoutes(app,{requireRole,workspaceIdOf,crmPersonByReference,text,crmRouteError,verifiedReferralMember,ensureCrmPersonForVerifiedMember});
 app.post('/api/system/workspaces/:workspaceId/line-simulator', async (c) => {
   try {
     await requireSystemAdmin(c);
