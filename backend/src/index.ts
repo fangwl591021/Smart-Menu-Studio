@@ -125,7 +125,7 @@ import { canTenantTransitionDealerStatus, dealerApplyDecision, isDealerStatus, p
 import { createPointRuleVersion, getMemberPoints, getTenantPointsSummary } from './points';
 import { crmPersonByReference, ensureCrmPersonForVerifiedMember, listCrmPeople, publicCrmPerson, updateCrmProfile } from './crm';
 import { createCsvImport, importCapability, importRows, listCrmImports, resolveCrmImportRow } from './crm/imports';
-import { createOrVersion, createShare, ownCard, ownPerson, publicCard, publicShare, setCardStatus } from './crm/cards';
+import { collectShare, createBusinessCard, createOrVersion, createShare, ownCard, ownCollection, ownPerson, publicCard, publicShare, revokeShare, setCardStatus } from './crm/cards';
 
 
 import { createReward, createRewardVersion, isRewardStatus, listMemberRedemptions, listMemberRewards, listTenantRewards, redeemReward, tenantRedemptionSummary, transitionRewardStatus } from './points/rewards';
@@ -6667,6 +6667,10 @@ app.post('/api/member/personal-card/version',async c=>{try{const x=await ownCrmC
 app.post('/api/member/personal-card/status',async c=>{try{const x=await ownCrmCardMember(c),body:any=await c.req.json();return c.json({success:true,card:publicCard(await setCardStatus(c.env.smart_menu_db,x.verified.account.workspace_id,x.person.id,text(body.status,20)))});}catch{return c.json({success:false,error:'PERSONAL_CARD_STATUS_FAILED'},400)}});
 app.post('/api/member/personal-card/share',async c=>{try{const x=await ownCrmCardMember(c),body:any=await c.req.json().catch(()=>({}));return c.json({success:true,share:await createShare(c.env.smart_menu_db,x.verified.account.workspace_id,x.person.id,text(body.expiresAt,40)||undefined)});}catch{return c.json({success:false,error:'PERSONAL_CARD_SHARE_FAILED'},400)}});
 app.get('/api/public/cards/:shareToken',async c=>{try{return c.json({success:true,card:await publicShare(c.env.smart_menu_db,c.req.param('shareToken'))});}catch{return c.json({success:false,error:'CARD_SHARE_UNAVAILABLE'},404)}});
+app.post('/api/member/personal-card/share/revoke',async c=>{try{const x=await ownCrmCardMember(c),b:any=await c.req.json();return c.json({success:true,result:await revokeShare(c.env.smart_menu_db,x.verified.account.workspace_id,x.person.id,text(b.revokeHandle,100))});}catch{return c.json({success:false,error:'CARD_SHARE_REVOKE_FAILED'},400)}});
+app.get('/api/member/card-collection',async c=>{try{const x=await ownCrmCardMember(c);return c.json({success:true,collections:await ownCollection(c.env.smart_menu_db,x.verified.account.workspace_id,x.person.id)});}catch{return c.json({success:false,error:'MEMBER_CONTEXT_REQUIRED'},401)}});
+app.post('/api/member/card-collection',async c=>{try{const x=await ownCrmCardMember(c),b:any=await c.req.json();return c.json({success:true,result:await collectShare(c.env.smart_menu_db,x.verified.account.workspace_id,x.person.id,text(b.shareToken,200),text(b.privateNote,4000))});}catch(e:any){return c.json({success:false,error:String(e?.message||'CARD_COLLECTION_FAILED')},400)}});
+app.post('/api/crm/people/:personReference/business-cards',async c=>{try{requireRole(c,'editor');const w=workspaceIdOf(c),p:any=await crmPersonByReference(c.env.smart_menu_db,{workspaceId:w,publicRef:c.req.param('personReference')});if(!p)return c.json({success:false,error:'NOT_FOUND'},404);const b:any=await c.req.json();return c.json({success:true,result:await createBusinessCard(c.env.smart_menu_db,{workspaceId:w,personId:p.id,data:b.card||b,sourceType:'MANUAL'})},201);}catch{return c.json({success:false,error:'CRM_BUSINESS_CARD_CREATE_FAILED'},400)}});
 export default app;
 app.post('/api/system/workspaces/:workspaceId/line-simulator', async (c) => {
   try {
