@@ -124,6 +124,8 @@ import { createDealerPayoutRequestHandle, dealerPayoutRequestHandleReference, ve
 import { canTenantTransitionDealerStatus, dealerApplyDecision, isDealerStatus, publicDealerRow } from './dealers/foundation';
 import { createPointRuleVersion, getMemberPoints, getTenantPointsSummary } from './points';
 import { crmPersonByReference, ensureCrmPersonForVerifiedMember, listCrmPeople, publicCrmPerson, updateCrmProfile } from './crm';
+import { createCsvImport, importCapability, importRows, listCrmImports, resolveCrmImportRow } from './crm/imports';
+
 import { createReward, createRewardVersion, isRewardStatus, listMemberRedemptions, listMemberRewards, listTenantRewards, redeemReward, tenantRedemptionSummary, transitionRewardStatus } from './points/rewards';
 import { createContributionRuleVersion, createTierRuleVersion, isContributionEventType, isTierCode, memberContributionRead, recordContributionForTrustedSource, tenantContributionSummary } from './contribution';
 import { Hono } from 'hono';
@@ -6648,6 +6650,13 @@ app.patch('/api/member/crm-profile',async c=>{try{
   return c.json({success:true,person:{personRef:person.publicRef,profile}});
 }catch(e:any){const code=String(e?.message||'');if(code.startsWith('CRM_'))return c.json({success:false,error:code},400);return c.json({success:false,error:'MEMBER_CONTEXT_REQUIRED'},401)}});
 
+
+
+app.post('/api/crm/imports',async c=>{try{requireRole(c,'admin');const body:any=await c.req.json().catch(()=>({})),type=text(body.importType,40),capability=importCapability(type);if(!capability.available)return c.json({success:false,error:capability.code},409);const csv=text(body.csv,2_000_000);if(!csv)return c.json({success:false,error:'CSV_REQUIRED'},400);return c.json({success:true,import:await createCsvImport(c.env.smart_menu_db,{workspaceId:workspaceIdOf(c),userId:text(c.get('userId'))||null,csv,filename:text(body.filename,255),contentType:text(body.contentType,120)})},201);}catch(e:any){const code=String(e?.message||'');return c.json({success:false,error:code.startsWith('CSV_')?code:code==='FORBIDDEN_ROLE'?'FORBIDDEN':'CRM_IMPORT_CREATE_FAILED'},code==='FORBIDDEN_ROLE'?403:400)}});
+app.get('/api/crm/imports',async c=>{try{requireRole(c,'admin');return c.json({success:true,imports:await listCrmImports(c.env.smart_menu_db,workspaceIdOf(c))});}catch(e:any){return c.json({success:false,error:e?.message==='FORBIDDEN_ROLE'?'FORBIDDEN':'CRM_IMPORT_LIST_FAILED'},e?.message==='FORBIDDEN_ROLE'?403:500)}});
+app.get('/api/crm/imports/:importReference/rows',async c=>{try{requireRole(c,'admin');return c.json({success:true,rows:await importRows(c.env.smart_menu_db,workspaceIdOf(c),c.req.param('importReference'))});}catch(e:any){return c.json({success:false,error:e?.message==='FORBIDDEN_ROLE'?'FORBIDDEN':'CRM_IMPORT_ROWS_FAILED'},e?.message==='FORBIDDEN_ROLE'?403:500)}});
+app.get('/api/crm/imports/:importReference',async c=>{try{requireRole(c,'admin');const imports=await listCrmImports(c.env.smart_menu_db,workspaceIdOf(c)),item=imports.find((x:any)=>x.importReference===c.req.param('importReference'));return item?c.json({success:true,import:item}):c.json({success:false,error:'NOT_FOUND'},404);}catch(e:any){return c.json({success:false,error:e?.message==='FORBIDDEN_ROLE'?'FORBIDDEN':'CRM_IMPORT_READ_FAILED'},e?.message==='FORBIDDEN_ROLE'?403:500)}});
+app.post('/api/crm/imports/:importReference/rows/:rowReference/resolve',async c=>{try{requireRole(c,'admin');const body:any=await c.req.json().catch(()=>({})),resolution=text(body.resolution,40);if(!['CREATE_PERSON','LINK_EXISTING','REJECT'].includes(resolution))return c.json({success:false,error:'CRM_IMPORT_RESOLUTION_INVALID'},400);return c.json({success:true,result:await resolveCrmImportRow(c.env.smart_menu_db,{workspaceId:workspaceIdOf(c),importReference:c.req.param('importReference'),rowReference:c.req.param('rowReference'),resolution:resolution as any,targetPersonReference:text(body.targetPersonReference,100),userId:text(c.get('userId'))||null})});}catch(e:any){const code=String(e?.message||'');const known=['CRM_IMPORT_ROW_NOT_FOUND','CRM_IMPORT_REVIEW_REQUIRED','CRM_PERSON_NOT_FOUND','MERGE_REVIEW_REQUIRED','FIELD_AUTHORITY_CONFLICT'];return c.json({success:false,error:known.includes(code)?code:'CRM_IMPORT_RESOLVE_FAILED'},known.includes(code)?409:500)}});
 
 export default app;
 app.post('/api/system/workspaces/:workspaceId/line-simulator', async (c) => {
