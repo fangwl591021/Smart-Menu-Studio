@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { CRM_EDITABLE_FIELDS, MEMBER_SELF_EDITABLE_FIELDS, normalizedEmail, normalizedMobile } from '../src/crm/index.ts';
+import { CRM_EDITABLE_FIELDS, MEMBER_SELF_EDITABLE_FIELDS, createCrmPerson, ensureCrmPersonForVerifiedMember, normalizedEmail, normalizedMobile, updateCrmProfile } from '../src/crm/index.ts';
 
 const migrationUrl = new URL('../migrations/0035_unified_crm_person_profile_foundation.sql', import.meta.url);
 const serviceUrl = new URL('../src/crm/index.ts', import.meta.url);
@@ -81,4 +81,69 @@ test('CRM routes do not mutate referral, dealer, points, rewards, contribution, 
   const source = await readFile(indexUrl, 'utf8');
   const slice = source.slice(source.indexOf("function crmRouteError"), source.indexOf("export default app;"));
   assert.doesNotMatch(slice, /member_referral_attributions|dealer_|member_point_|point_rewards|contribution|commission_|settlement|payout|payment/i);
+});
+
+function crmServiceDb(options = {}) {
+  const statements = [], batches = []; let profileReads = 0;
+  const db = {
+    statements, batches,
+    prepare(sql) {
+      const statement = {
+        sql, args: [],
+        bind(...args) { this.args = args; return this; },
+        async first() {
+          if (sql.includes('FROM line_oa_members')) return options.member === false ? null : { id: 'member_1' };
+          if (sql.includes('FROM crm_person_identity_links')) return options.existing || null;
+          if (sql.includes('FROM crm_people WHERE')) return { id: 'person_1' };
+          if (sql.includes('FROM crm_profiles')) {
+            profileReads += 1;
+            return profileReads === 1
+              ? { crm_person_id:'person_1', mobile:'', email:'', do_not_contact:options.doNotContact ? 1 : 0, contactable:1, marketing_consent:0 }
+              : { crm_person_id:'person_1', mobile:'+886912345678', normalized_mobile:'+886912345678', email:'member@example.com', normalized_email:'member@example.com', do_not_contact:0, contactable:1, marketing_consent:1, updated_at:'now' };
+          }
+          return null;
+        },
+        async all() { return { results: [] }; },
+      };
+      statements.push(statement);
+      return statement;
+    },
+    async batch(items) { batches.push(items); return []; },
+  };
+  return db;
+}
+
+test('service creates a workspace-scoped CRM person with exactly one empty profile and no LINE identity', async () => {
+  const db = crmServiceDb();
+  const person = await createCrmPerson(db, { workspaceId:'workspace_1' });
+  assert.match(person.publicRef, /^crmp_[a-f0-9]{32}$/);
+  assert.equal(db.batches.length, 1);
+  assert.equal(db.batches[0].some(item => item.sql.includes('INSERT INTO crm_people')), true);
+  assert.equal(db.batches[0].some(item => item.sql.includes('INSERT INTO crm_profiles')), true);
+  assert.equal(db.batches[0].some(item => item.sql.includes('crm_person_identity_links')), false);
+});
+
+test('verified LINE retry resolves an existing CRM person without a second create or arbitrary identity source', async () => {
+  const db = crmServiceDb({ existing:{ id:'person_existing', public_ref:'crmp_existing', workspace_id:'workspace_1', status:'ACTIVE' } });
+  const person = await ensureCrmPersonForVerifiedMember(db, { workspaceId:'workspace_1', lineAccountId:'account_1', lineMemberId:'member_1' });
+  assert.deepEqual(person, { id:'person_existing', publicRef:'crmp_existing', workspaceId:'workspace_1', status:'ACTIVE', created:false });
+  assert.equal(db.batches.length, 0);
+  assert.equal(db.statements.some(item => item.sql.includes('line_identity_hash')), false);
+});
+
+test('profile update batches normalized contact values with masked MEMBER_SELF_INPUT provenance and preserves opt-out policy', async () => {
+  const db = crmServiceDb();
+  await updateCrmProfile(db, { workspaceId:'workspace_1', crmPersonId:'person_1', patch:{ mobile:' +886 (912) 345-678 ', email:' Member@Example.COM ', marketingConsent:true }, actor:{ sourceType:'MEMBER_SELF_INPUT', actorType:'MEMBER', memberSelf:true } });
+  assert.equal(db.batches.length, 1);
+  const batch = db.batches[0];
+  const profileUpdate = batch.find(item => item.sql.startsWith('UPDATE crm_profiles'));
+  assert.match(profileUpdate.sql, /normalized_mobile=\?/);
+  assert.match(profileUpdate.sql, /normalized_email=\?/);
+  assert.equal(profileUpdate.args.includes('+886912345678'), true);
+  assert.equal(profileUpdate.args.includes('member@example.com'), true);
+  const events = batch.filter(item => item.sql.includes('crm_profile_field_events'));
+  assert.equal(events.length, 3);
+  assert.equal(events.every(item => item.args.includes('MEMBER_SELF_INPUT')), true);
+  assert.equal(events.some(item => item.args.includes('Member@Example.COM')), false);
+  await assert.rejects(() => updateCrmProfile(crmServiceDb({ doNotContact:true }), { workspaceId:'workspace_1', crmPersonId:'person_1', patch:{ doNotContact:false }, actor:{ sourceType:'CRM_MANUAL', actorType:'TENANT_USER' } }), /CRM_DO_NOT_CONTACT_CLEAR_REQUIRES_MEMBER/);
 });
