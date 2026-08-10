@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import CrmInsightsTraitsPanel from './CrmInsightsTraitsPanel';
+import CrmPipelinePanel, { CrmBusinessProcessPanel } from './CrmPipelinePanel';
 
 const sourceLabels = {
   CSV_IMPORT: 'CSV 匯入',
@@ -257,6 +258,8 @@ export default function CrmWorkspace({ request, userRole = 'viewer' }) {
             <p className="mt-2 text-sm">推薦人（系統歸屬）：{detail.relationships?.referredBy?.referrerLabel || '—'}</p>
           </section>
 
+          <CrmBusinessProcessPanel request={request} personReference={detail.personRef} userRole={role} />
+
           <section className="rounded border p-4">
             <h3 className="font-semibold">卡片</h3>
             <h4 className="mt-3 text-sm font-medium">個人卡片</h4>
@@ -276,8 +279,10 @@ export default function CrmWorkspace({ request, userRole = 'viewer' }) {
         </section>
       )}
 
+      <CrmPipelinePanel request={request} userRole={role} />
+
       <section className="rounded-xl border border-dashed bg-gray-50 p-5 text-sm text-gray-500">
-        未來功能：業務流程、Timeline。
+        未來功能：Timeline。
       </section>
 
       {selectedPerson && <span className="sr-only">{selectedPerson.personRef}</span>}
