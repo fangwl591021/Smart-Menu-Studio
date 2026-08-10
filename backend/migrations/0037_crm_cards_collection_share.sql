@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS crm_business_cards (
  FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,FOREIGN KEY(crm_person_id) REFERENCES crm_people(id) ON DELETE SET NULL,FOREIGN KEY(import_row_id) REFERENCES crm_import_rows(id) ON DELETE SET NULL
 );
 CREATE TABLE IF NOT EXISTS crm_card_collections (
- id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL,collector_person_id TEXT NOT NULL,collected_person_id TEXT NOT NULL,business_card_id TEXT,personal_card_id TEXT,collection_source TEXT NOT NULL,private_note TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'ACTIVE',collected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ id TEXT PRIMARY KEY,public_ref TEXT NOT NULL UNIQUE,workspace_id TEXT NOT NULL,collector_person_id TEXT NOT NULL,collected_person_id TEXT NOT NULL,business_card_id TEXT,personal_card_id TEXT,collection_source TEXT NOT NULL,private_note TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'ACTIVE',collected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
  FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,FOREIGN KEY(collector_person_id) REFERENCES crm_people(id) ON DELETE CASCADE,FOREIGN KEY(collected_person_id) REFERENCES crm_people(id) ON DELETE CASCADE,FOREIGN KEY(business_card_id) REFERENCES crm_business_cards(id) ON DELETE SET NULL,FOREIGN KEY(personal_card_id) REFERENCES crm_personal_cards(id) ON DELETE SET NULL,
  UNIQUE(workspace_id,collector_person_id,collected_person_id,personal_card_id)
 );
