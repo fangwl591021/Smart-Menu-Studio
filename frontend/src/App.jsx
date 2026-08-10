@@ -13,6 +13,7 @@ import ReferralGrowthPanel from './components/ReferralGrowthPanel';
 import CommissionAttributionPanel from './components/CommissionAttributionPanel';
 import RewardRedemptionPanel from './components/RewardRedemptionPanel';
 import ContributionTierPanel from './components/ContributionTierPanel';
+import CrmWorkspace from './components/CrmWorkspace';
 import TrackedUriTool from './components/TrackedUriTool';
 import { emitGuideEvent } from './guide-events';
 import { 
@@ -43,6 +44,7 @@ const NAVIGATION = [
   { id: 'dashboard', label: '總覽', icon: LayoutDashboard },
   { id: 'projects', label: '圖文選單專案', icon: FolderKanban },
   { id: 'templates', label: '模板中心', icon: LayoutTemplate },
+  { id: 'crm', label: 'CRM 客戶管理', icon: Users },
   { id: 'ai-usage', label: 'AI \u7528\u91cf', icon: Sparkles },
   { id: 'intelligence-health', label: 'LINE Health', icon: MousePointerClick },
   { id: 'accounts', label: '客戶帳號', icon: Users },
@@ -4896,7 +4898,7 @@ function AppShell() {
         if (item.id === 'accounts') return false;
         if (item.id === 'members') return activeRole === 'owner' || activeRole === 'admin';
         if (item.id === 'settings') return activeRole === 'owner' || activeRole === 'admin';
-        return ['dashboard', 'projects', 'templates', 'ai-usage'].includes(item.id);
+        return ['dashboard', 'projects', 'templates', 'crm', 'ai-usage'].includes(item.id);
       });
 
   const navigateHome = () => {
@@ -5070,6 +5072,9 @@ function AppShell() {
             )}
             {currentView === 'account' && (
               <AccountView session={session} onSessionChanged={loadSession} />
+            )}
+            {currentView === 'crm' && !isPlatformAdminMode && (
+              <CrmWorkspace request={authFetch} userRole={activeRole} />
             )}
             {currentView === 'settings' && !isPlatformAdminMode && (
               <><ConversionApiKeyPanel request={authFetch} userRole={activeRole} /><LiffReferralConfigPanel request={authFetch} userRole={activeRole} /><ReferralGrowthPanel request={authFetch} /><CommissionAttributionPanel request={authFetch} userRole={activeRole} /><RewardRedemptionPanel request={authFetch} userRole={activeRole} /><ContributionTierPanel request={authFetch} userRole={activeRole} /></>
