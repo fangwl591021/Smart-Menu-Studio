@@ -7,7 +7,7 @@ const source = await readFile(fileURLToPath(new URL('../src/components/CrmPipeli
 const workspace = await readFile(fileURLToPath(new URL('../src/components/CrmWorkspace.jsx', import.meta.url)), 'utf8');
 
 test('Pipeline overview has loading, safe empty state, cards, management, and no invented stages', () => {
-  for (const value of ['/api/crm/pipeline-summary', '/api/crm/pipeline-stages', '載入 Pipeline 中…', '目前尚未建立 CRM 階段。', '客戶數：', '建立 CRM 階段', '封存階段', '進行中', '已成交', '未成交']) assert.match(source, new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  for (const value of ['/api/crm/pipeline-summary', '/api/crm/pipeline-stages', '正在載入業務流程…', '目前尚未建立 CRM 階段。', '客戶數：', '建立 CRM 階段', '封存階段', '進行中', '已成交', '未成交']) assert.match(source, new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.doesNotMatch(source, /\[['"]NEW['"].*CONTACTED.*QUALIFIED.*OPPORTUNITY/i);
 });
 
