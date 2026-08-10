@@ -5,7 +5,7 @@ import fs from 'node:fs';
 
 test('personal card public projection is snapshot-only and excludes CRM and economy authority',()=>{
  const value=publicCard({status:'ACTIVE',version_no:2,display_name:'Ada',company_name:'Acme',mobile:'0912',email:'a@b.test',crm_person_id:'private',internal_note:'private',points:99,commission:3});
- assert.equal(value?.versionNo,2);assert.equal(value?.card.displayName,'Ada');assert.equal('crmPersonId' in value!,false);assert.equal(JSON.stringify(value).includes('private'),false);assert.equal(JSON.stringify(value).includes('commission'),false);
+ assert.equal(value?.versionNo,2);assert.equal(value?.card.displayName,'Ada');assert.equal('crmPersonId' in (value||{}),false);assert.equal(JSON.stringify(value).includes('private'),false);assert.equal(JSON.stringify(value).includes('commission'),false);
 });
 test('0037 defines immutable pinned versions, hash-only shares, private collection and append-only OPENED evidence',()=>{
  const sql=fs.readFileSync(new URL('../migrations/0037_crm_cards_collection_share.sql',import.meta.url),'utf8');
