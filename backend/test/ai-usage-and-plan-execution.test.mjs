@@ -233,8 +233,8 @@ test('AI Usage frontend is wired for tenant and System Admin without exposing re
   assert.match(app, /<AIUsagePanel request=\{authFetch\} systemAdmin=\{isPlatformAdminMode\}/);
   assert.match(app, /currentView === 'templates' && isPlatformAdminMode/);
   const tenantNavigation = app.slice(app.indexOf('const visibleNavigation'), app.indexOf('const navigateHome'));
-  assert.match(tenantNavigation, /return \\['dashboard', 'projects', 'templates', 'crm', 'ai-usage'\\]\\.includes\\(item\\.id\\);/);
-  assert.doesNotMatch(tenantNavigation, /return \\[[^\\]]*'accounts'/);
+  assert.ok(tenantNavigation.includes("return ['dashboard', 'projects', 'templates', 'crm', 'ai-usage'].includes(item.id);"));
+  assert.equal(tenantNavigation.includes("return ['dashboard', 'projects', 'templates', 'crm', 'ai-usage', 'accounts'"), false);
   for (const marker of ['byWorkspace', 'byUser', 'byFeature', 'byModel', 'billableCostMicros']) assert.match(panel, new RegExp(marker));
 });
 test('final preflight contains every execution-time safety gate', () => {
