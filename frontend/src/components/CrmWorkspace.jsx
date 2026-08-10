@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 const sourceLabels = {
   CSV_IMPORT: 'CSV 匯入',
@@ -51,7 +51,7 @@ export default function CrmWorkspace({ request, userRole = 'viewer' }) {
     [people, selectedReference],
   );
 
-  const loadPeople = async () => {
+  const loadPeople = useCallback(async () => {
     setLoading(true);
     try {
       const result = await api(
@@ -143,7 +143,7 @@ export default function CrmWorkspace({ request, userRole = 'viewer' }) {
     }
   };
 
-  useEffect(() => { loadPeople(); }, []);
+  useEffect(() => { void loadPeople(); }, [loadPeople]);
   useEffect(() => {
     if (role !== 'admin' && role !== 'owner') return;
     api(request, '/api/crm/imports').then((result) => setImports(result.imports || [])).catch(() => setImports([]));
