@@ -28,5 +28,5 @@ test('CRM workspace activates business process without disturbing existing 360 o
   assert.match(workspace, /CRM 負責人/);
   assert.match(workspace, /CrmInsightsTraitsPanel/);
   assert.match(workspace, /匯入紀錄/);
-  assert.match(workspace, /未來功能：Timeline/);
+  assert.match(workspace, /CrmTimelinePanel/);
 });

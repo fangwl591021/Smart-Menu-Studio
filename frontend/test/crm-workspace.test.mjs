@@ -24,8 +24,10 @@ test('CRM workspace keeps CRM owner separate from the referral system relationsh
 });
 
 test('CRM workspace exposes read-only CRM 360 safe sections and capability truth', () => {
-  for (const value of ['取得來源', '推薦關係（唯讀）', '個人卡片', '歷史商務名片', 'CSV：可使用', 'XLSX：待提供', 'OCR：待提供', '未來功能：Timeline']) {
+  for (const value of ['取得來源', '推薦關係（唯讀）', '個人卡片', '歷史商務名片', 'CSV：可使用', 'XLSX：待提供', 'OCR：待提供']) {
     assert.match(source, new RegExp(value));
   }
+  assert.match(source, /CrmTimelinePanel/);
+  assert.doesNotMatch(source, /未來功能：Timeline/);
   assert.match(source, /api\(request,/);
 });

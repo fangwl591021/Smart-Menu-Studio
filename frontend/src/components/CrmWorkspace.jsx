@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import CrmInsightsTraitsPanel from './CrmInsightsTraitsPanel';
 import CrmPipelinePanel, { CrmBusinessProcessPanel } from './CrmPipelinePanel';
+import CrmTimelinePanel from './CrmTimelinePanel';
 
 const sourceLabels = {
   CSV_IMPORT: 'CSV 匯入',
@@ -268,6 +269,7 @@ export default function CrmWorkspace({ request, userRole = 'viewer' }) {
             {(cards?.businessCards || []).length ? cards.businessCards.map((card, index) => <p key={index} className="mt-1 text-sm">{card.displayName || '—'}／{card.companyName || '—'}／{card.department || '—'}／{card.jobTitle || '—'}／{sourceLabels[card.sourceType] || card.sourceType || '—'}／{card.capturedAt || '—'}{card.archived ? '／已封存' : ''}</p>) : <p className="mt-1 text-sm text-gray-500">尚無歷史商務名片。</p>}
           </section>
           <CrmInsightsTraitsPanel request={request} personReference={detail.personRef} userRole={role} />
+          <CrmTimelinePanel request={request} personReference={detail.personRef} />
         </article>
       )}
 
@@ -281,9 +283,6 @@ export default function CrmWorkspace({ request, userRole = 'viewer' }) {
 
       <CrmPipelinePanel request={request} userRole={role} />
 
-      <section className="rounded-xl border border-dashed bg-gray-50 p-5 text-sm text-gray-500">
-        未來功能：Timeline。
-      </section>
 
       {selectedPerson && <span className="sr-only">{selectedPerson.personRef}</span>}
     </section>
