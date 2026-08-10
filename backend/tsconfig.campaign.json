@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": [
+      "@cloudflare/workers-types"
+    ]
+  },
+  "files": [
+
+    "src/campaign/audiences.ts",
+    "src/campaign/audience-routes.ts",
+    "src/crm/segments.ts",
+    "src/crm/segment-routes.ts",
+    "src/crm/assignee-handle.ts",
+    "src/crm/index.ts"
+  ]
+}

@@ -130,6 +130,7 @@ import { registerCrmInsightRoutes } from './crm/insight-routes';
 import { registerCrmPipelineRoutes } from './crm/pipeline-routes';
 import { registerCrmTimelineRoutes } from './crm/timeline-routes';
 import { registerCrmSegmentRoutes } from './crm/segment-routes';
+import { registerCampaignAudienceRoutes } from './campaign/audience-routes';
 import { acquisitionSummary, assignCrmOwner, assignmentSummary, referralSummary } from './crm/acquisition';
 import { assigneeReference, createAssigneeHandle, verifyAssigneeHandle } from './crm/assignee-handle';
 
@@ -6686,6 +6687,7 @@ registerCrmInsightRoutes(app,{requireRole,workspaceIdOf,crmPersonByReference,tex
 registerCrmPipelineRoutes(app,{requireRole,workspaceIdOf,crmPersonByReference,text,assignmentSummary,crmAssignableUsers});
 registerCrmTimelineRoutes(app,{requireRole,workspaceIdOf,crmPersonByReference,text});
 registerCrmSegmentRoutes(app,{requireRole,workspaceIdOf,text});
+registerCampaignAudienceRoutes(app,{requireRole,workspaceIdOf,text});
 app.post('/api/system/workspaces/:workspaceId/line-simulator', async (c) => {
   try {
     await requireSystemAdmin(c);
