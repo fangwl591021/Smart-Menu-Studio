@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "oxlint",
     "preview": "npm run build && wrangler dev",
-    "deploy": "npm run build && wrangler deploy"
+    "deploy": "npm run build && wrangler deploy",
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.29.0",
