@@ -122,7 +122,8 @@ import { canTransitionPaymentAttemptStatus, internalTestPaymentProvider, isPayme
 import { createDealerSettlementHandle, dealerFinalizedSettlementRows, dealerSettlementHandleReference, publicDealerSettlementRow, verifyDealerSettlementHandle } from './commission/dealer-settlement-read';
 import { createDealerPayoutRequestHandle, dealerPayoutRequestHandleReference, verifyDealerPayoutRequestHandle } from './commission/dealer-payout-request-handle';
 import { canTenantTransitionDealerStatus, dealerApplyDecision, isDealerStatus, publicDealerRow } from './dealers/foundation';
-import { createPointRuleVersion, getMemberPoints, getTenantPointsSummary } from './points';\nimport { crmPersonByReference, ensureCrmPersonForVerifiedMember, listCrmPeople, publicCrmPerson, updateCrmProfile } from './crm';
+import { createPointRuleVersion, getMemberPoints, getTenantPointsSummary } from './points';
+import { crmPersonByReference, ensureCrmPersonForVerifiedMember, listCrmPeople, publicCrmPerson, updateCrmProfile } from './crm';
 import { createReward, createRewardVersion, isRewardStatus, listMemberRedemptions, listMemberRewards, listTenantRewards, redeemReward, tenantRedemptionSummary, transitionRewardStatus } from './points/rewards';
 import { createContributionRuleVersion, createTierRuleVersion, isContributionEventType, isTierCode, memberContributionRead, recordContributionForTrustedSource, tenantContributionSummary } from './contribution';
 import { Hono } from 'hono';
