@@ -3,6 +3,7 @@ import CrmInsightsTraitsPanel from './CrmInsightsTraitsPanel';
 import CrmPipelinePanel, { CrmBusinessProcessPanel } from './CrmPipelinePanel';
 import CrmTimelinePanel from './CrmTimelinePanel';
 import CrmAnalyticsPanel from './CrmAnalyticsPanel';
+import { labelAcquisitionSource, labelRole, labelStatus } from '../utils/presentationLabels';
 
 const sourceLabels = {
   CSV_IMPORT: 'CSV 匯入',
@@ -158,12 +159,12 @@ export default function CrmWorkspace({ request, userRole = 'viewer' }) {
     <section data-testid="crm-workspace" className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">CRM 客戶管理</h1>
-        <p className="mt-1 text-sm text-gray-500">以 CRM Person 為客戶視圖；推薦人與 CRM 負責人為兩個獨立欄位。</p>
+        <p className="mt-1 text-sm text-gray-500">以 CRM 客戶為客戶視圖；推薦人與 CRM 負責人為兩個獨立欄位。</p>
       </div>
 
       <div className="flex gap-2 border-b pb-3">
-        <button type="button" onClick={() => setWorkspaceTab('people')} className={`rounded px-3 py-2 text-sm ${workspaceTab === 'people' ? 'bg-slate-800 text-white' : 'border'}`}>CRM People</button>
-        <button type="button" onClick={() => setWorkspaceTab('analytics')} className={`rounded px-3 py-2 text-sm ${workspaceTab === 'analytics' ? 'bg-slate-800 text-white' : 'border'}`}>CRM Analytics</button>
+        <button type="button" onClick={() => setWorkspaceTab('people')} className={`rounded px-3 py-2 text-sm ${workspaceTab === 'people' ? 'bg-slate-800 text-white' : 'border'}`}>CRM 客戶</button>
+        <button type="button" onClick={() => setWorkspaceTab('analytics')} className={`rounded px-3 py-2 text-sm ${workspaceTab === 'analytics' ? 'bg-slate-800 text-white' : 'border'}`}>CRM 分析</button>
       </div>
       {workspaceTab === 'analytics' ? <CrmAnalyticsPanel request={request} userRole={role} /> : <>      <div className="flex flex-wrap gap-2 rounded-lg border bg-white p-4">
         <input
@@ -196,7 +197,7 @@ export default function CrmWorkspace({ request, userRole = 'viewer' }) {
             >
               <div className="font-medium text-gray-900">{displayName(person)}</div>
               <div className="mt-1 text-sm text-gray-600">
-                {person.profile?.companyName || '—'}　來源：{sourceLabels[person.firstAcquisitionSource] || person.firstAcquisitionSource || '—'}
+                {person.profile?.companyName || '—'}　來源：{sourceLabels[person.firstAcquisitionSource] || labelAcquisitionSource(person.firstAcquisitionSource)}
               </div>
               <div className="mt-1 text-xs text-gray-500">
                 推薦人（系統歸屬）：{person.referrerLabel || '—'}　／　CRM 負責人：{person.assignedOwnerLabel || '—'}
@@ -210,11 +211,11 @@ export default function CrmWorkspace({ request, userRole = 'viewer' }) {
         <article data-testid="crm-360" className="space-y-5 rounded-xl border bg-white p-5">
           <div>
             <h2 className="text-xl font-bold">CRM 360</h2>
-            <p className="mt-1 text-sm text-gray-600">{displayName(detail)}／{detail.profile?.companyName || '—'}／{detail.status || '—'}</p>
+            <p className="mt-1 text-sm text-gray-600">{displayName(detail)}／{detail.profile?.companyName || '—'}／{detail.status ? labelStatus(detail.status) : '—'}</p>
           </div>
 
           <section className="rounded border p-4">
-            <h3 className="font-semibold">CRM Profile</h3>
+            <h3 className="font-semibold">CRM 個人資料</h3>
             {canEdit ? (
               <div className="mt-3 grid gap-3 md:grid-cols-2">
                 {[
@@ -233,9 +234,9 @@ export default function CrmWorkspace({ request, userRole = 'viewer' }) {
                 <label className="text-sm md:col-span-2">內部備註
                   <textarea value={profile.internalNote || ''} onChange={(event) => setProfile((current) => ({ ...current, internalNote: event.target.value }))} className="mt-1 block min-h-20 w-full rounded border px-3 py-2" />
                 </label>
-                <div className="md:col-span-2"><button type="button" disabled={savingProfile} onClick={saveProfile} className="rounded bg-slate-800 px-4 py-2 text-sm text-white disabled:opacity-50">{savingProfile ? '儲存中…' : '儲存 Profile'}</button></div>
+                <div className="md:col-span-2"><button type="button" disabled={savingProfile} onClick={saveProfile} className="rounded bg-slate-800 px-4 py-2 text-sm text-white disabled:opacity-50">{savingProfile ? '儲存中…' : '儲存個人資料'}</button></div>
               </div>
-            ) : <p className="mt-2 text-sm text-gray-500">您有 CRM 安全閱讀權限；Profile 編輯需 Editor 以上角色。</p>}
+            ) : <p className="mt-2 text-sm text-gray-500">您有 CRM 安全閱讀權限；個人資料編輯需編輯者以上角色。</p>}
           </section>
 
           <section className="rounded border p-4">
@@ -246,7 +247,7 @@ export default function CrmWorkspace({ request, userRole = 'viewer' }) {
               <div className="mt-3 flex flex-wrap gap-2">
                 <select aria-label="CRM 負責人" value={selectedAssigneeReference} onChange={(event) => setSelectedAssigneeReference(event.target.value)} className="rounded border px-3 py-2 text-sm">
                   <option value="">選擇同工作區使用者</option>
-                  {assignees.map((assignee) => <option key={assignee.assignedUserReference} value={assignee.assignedUserReference}>{assignee.displayLabel}{assignee.roleLabel ? '（' + assignee.roleLabel + '）' : ''}</option>)}
+                  {assignees.map((assignee) => <option key={assignee.assignedUserReference} value={assignee.assignedUserReference}>{assignee.displayLabel}{assignee.roleLabel ? '（' + labelRole(assignee.roleLabel) + '）' : ''}</option>)}
                 </select>
                 <button type="button" disabled={!selectedAssigneeReference || assigning} onClick={assignOwner} className="rounded bg-slate-800 px-4 py-2 text-sm text-white disabled:opacity-50">{assigning ? '指派中…' : '更新負責人'}</button>
               </div>
@@ -257,7 +258,7 @@ export default function CrmWorkspace({ request, userRole = 'viewer' }) {
 
           <section className="rounded border p-4">
             <h3 className="font-semibold">取得來源</h3>
-            {(detail.acquisition?.recent || []).length ? detail.acquisition.recent.map((entry, index) => <p key={index} className="mt-2 text-sm">{sourceLabels[entry.sourceType] || entry.sourceType}　{entry.occurredAt || '—'}</p>) : <p className="mt-2 text-sm text-gray-500">尚無取得來源紀錄。</p>}
+            {(detail.acquisition?.recent || []).length ? detail.acquisition.recent.map((entry, index) => <p key={index} className="mt-2 text-sm">{sourceLabels[entry.sourceType] || labelAcquisitionSource(entry.sourceType)}　{entry.occurredAt || '—'}</p>) : <p className="mt-2 text-sm text-gray-500">尚無取得來源紀錄。</p>}
           </section>
 
           <section className="rounded border p-4">
@@ -272,7 +273,7 @@ export default function CrmWorkspace({ request, userRole = 'viewer' }) {
             <h4 className="mt-3 text-sm font-medium">個人卡片</h4>
             {(cards?.personalCards || []).length ? cards.personalCards.map((card, index) => <p key={index} className="mt-1 text-sm">{card.displayName || '—'}／{card.companyName || '—'}／{card.jobTitle || '—'}／版本 {card.versionNo || '—'}</p>) : <p className="mt-1 text-sm text-gray-500">尚無個人卡片。</p>}
             <h4 className="mt-3 text-sm font-medium">歷史商務名片</h4>
-            {(cards?.businessCards || []).length ? cards.businessCards.map((card, index) => <p key={index} className="mt-1 text-sm">{card.displayName || '—'}／{card.companyName || '—'}／{card.department || '—'}／{card.jobTitle || '—'}／{sourceLabels[card.sourceType] || card.sourceType || '—'}／{card.capturedAt || '—'}{card.archived ? '／已封存' : ''}</p>) : <p className="mt-1 text-sm text-gray-500">尚無歷史商務名片。</p>}
+            {(cards?.businessCards || []).length ? cards.businessCards.map((card, index) => <p key={index} className="mt-1 text-sm">{card.displayName || '—'}／{card.companyName || '—'}／{card.department || '—'}／{card.jobTitle || '—'}／{sourceLabels[card.sourceType] || labelAcquisitionSource(card.sourceType)}／{card.capturedAt || '—'}{card.archived ? '／已封存' : ''}</p>) : <p className="mt-1 text-sm text-gray-500">尚無歷史商務名片。</p>}
           </section>
           <CrmInsightsTraitsPanel request={request} personReference={detail.personRef} userRole={role} />
           <CrmTimelinePanel request={request} personReference={detail.personRef} />
@@ -283,7 +284,7 @@ export default function CrmWorkspace({ request, userRole = 'viewer' }) {
         <section className="rounded-xl border bg-white p-5">
           <h2 className="text-lg font-bold">匯入紀錄</h2>
           <p className="mt-1 text-sm text-gray-600">CSV：可使用　／　XLSX：待提供　／　OCR：待提供</p>
-          {imports.length ? imports.map((item) => <p key={item.importReference} className="mt-2 text-sm">{item.sourceFilename || '—'}／{item.status || '—'}／{item.totalRows || 0}</p>) : <p className="mt-3 text-sm text-gray-500">目前沒有匯入紀錄。</p>}
+          {imports.length ? imports.map((item) => <p key={item.importReference} className="mt-2 text-sm">{item.sourceFilename || '—'}／{item.status ? labelStatus(item.status) : '—'}／{item.totalRows || 0}</p>) : <p className="mt-3 text-sm text-gray-500">目前沒有匯入紀錄。</p>}
         </section>
       )}
 
