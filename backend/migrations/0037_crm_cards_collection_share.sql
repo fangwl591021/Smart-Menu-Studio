@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS crm_card_collections (
  UNIQUE(workspace_id,collector_person_id,collected_person_id,personal_card_id)
 );
 CREATE TABLE IF NOT EXISTS crm_card_shares (
- id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL,personal_card_id TEXT NOT NULL,card_version_id TEXT NOT NULL,owner_person_id TEXT NOT NULL,token_hash TEXT NOT NULL UNIQUE,status TEXT NOT NULL CHECK(status IN ('ACTIVE','REVOKED','EXPIRED')),expires_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,revoked_at TEXT,last_accessed_at TEXT,
+ id TEXT PRIMARY KEY,public_ref TEXT NOT NULL UNIQUE,workspace_id TEXT NOT NULL,personal_card_id TEXT NOT NULL,card_version_id TEXT NOT NULL,owner_person_id TEXT NOT NULL,token_hash TEXT NOT NULL UNIQUE,status TEXT NOT NULL CHECK(status IN ('ACTIVE','REVOKED','EXPIRED')),expires_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,revoked_at TEXT,last_accessed_at TEXT,
  FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,FOREIGN KEY(personal_card_id) REFERENCES crm_personal_cards(id) ON DELETE CASCADE,FOREIGN KEY(card_version_id) REFERENCES crm_personal_card_versions(id) ON DELETE RESTRICT,FOREIGN KEY(owner_person_id) REFERENCES crm_people(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS crm_card_share_events (
