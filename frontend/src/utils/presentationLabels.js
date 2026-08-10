@@ -3,7 +3,7 @@ const byKey = (map, value, fallback = '未提供') => map[String(value || '').to
 const status = {
   ACTIVE: '啟用中', INACTIVE: '停用中', ARCHIVED: '已封存', PENDING: '待處理',
   OPEN: '進行中', COMPLETED: '已完成', CANCELLED: '已取消', FAILED: '失敗',
-  DRAFT: '草稿', REVIEWED: '已審閱', REJECTED: '已拒絕', SUPERSEDED: '已取代',
+  DRAFT: '草稿', PREPARED: '已準備', REVIEWED: '已審閱', REJECTED: '已拒絕', SUPERSEDED: '已取代',
 };
 const role = { OWNER: '擁有者', ADMIN: '管理員', EDITOR: '編輯者', VIEWER: '檢視者' };
 const source = {
