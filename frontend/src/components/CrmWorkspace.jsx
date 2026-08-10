@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import CrmInsightsTraitsPanel from './CrmInsightsTraitsPanel';
 
 const sourceLabels = {
   CSV_IMPORT: 'CSV 匯入',
@@ -263,6 +264,7 @@ export default function CrmWorkspace({ request, userRole = 'viewer' }) {
             <h4 className="mt-3 text-sm font-medium">歷史商務名片</h4>
             {(cards?.businessCards || []).length ? cards.businessCards.map((card, index) => <p key={index} className="mt-1 text-sm">{card.displayName || '—'}／{card.companyName || '—'}／{card.department || '—'}／{card.jobTitle || '—'}／{sourceLabels[card.sourceType] || card.sourceType || '—'}／{card.capturedAt || '—'}{card.archived ? '／已封存' : ''}</p>) : <p className="mt-1 text-sm text-gray-500">尚無歷史商務名片。</p>}
           </section>
+          <CrmInsightsTraitsPanel request={request} personReference={detail.personRef} userRole={role} />
         </article>
       )}
 
@@ -275,7 +277,7 @@ export default function CrmWorkspace({ request, userRole = 'viewer' }) {
       )}
 
       <section className="rounded-xl border border-dashed bg-gray-50 p-5 text-sm text-gray-500">
-        未來功能：洞察、業務流程、Timeline。
+        未來功能：業務流程、Timeline。
       </section>
 
       {selectedPerson && <span className="sr-only">{selectedPerson.personRef}</span>}
