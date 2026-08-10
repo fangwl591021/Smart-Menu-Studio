@@ -10,5 +10,5 @@ test('6D acquisition relationship migration remains append-only and assignment h
  for(const x of ['crm_acquisition_events','CRM_ACQUISITION_EVENT_APPEND_ONLY','crm_person_relationships','idx_crm_person_assignment_active'])assert.ok(m.includes(x));
 });
 test('6D projections do not serialize private acquisition or relationship identifiers',()=>{
- const s=fs.readFileSync(new URL('crm/acquisition.ts',root),'utf8');assert.equal(s.includes('sourceRef:'),false);assert.equal(s.includes('attributionId'),false);
+ const r=fs.readFileSync(new URL('index.ts',root),'utf8');assert.equal(r.includes('sourceRef'),false);assert.equal(r.includes('attributionId'),false);
 });
