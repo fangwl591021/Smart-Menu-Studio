@@ -66,7 +66,7 @@ export default function CrmWorkspace({ request, userRole = 'viewer' }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [request, search, status]);
 
   const refreshDetail = async (personReference) => {
     const [personResult, cardsResult] = await Promise.all([
