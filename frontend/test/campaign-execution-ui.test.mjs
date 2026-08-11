@@ -18,6 +18,8 @@ const acceptance = [
   ['campaign detail renders execution panel', editor, /<CampaignExecutionPanel[\s\S]*campaign=\{campaign\}[\s\S]*request=\{request\}[\s\S]*userRole=\{userRole\}/],
   ['execution panel has stable landmark', panel, /data-testid="campaign-execution-panel"/],
   ['section title is localized', panel, />發送執行</],
+  ['execution history heading matches production contract', panel, />發送歷史</],
+  ['execution status heading matches production contract', panel, /發送狀態：/],
   ['prepared snapshot frozen statement is exact', panel, /本次發送將使用已準備並凍結的受眾名單，不會重新查詢目前 CRM 分群。/],
   ['snapshot summary statement is exact', panel, /本次發送使用已凍結的受眾快照。/],
   ['draft receives precondition guidance', panel, /campaign\?\.status === 'DRAFT'[\s\S]*活動完成受眾準備後，才可執行發送。/],

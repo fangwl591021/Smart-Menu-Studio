@@ -166,12 +166,12 @@ export default function CampaignExecutionPanel({ campaign, request, userRole = '
         <div className="rounded border p-3 text-sm"><span className="text-gray-500">準備時間</span><strong className="mt-1 block">{formatCampaignExecutionTime(campaign?.preparedAt)}</strong></div>
       </div>
 
-      <div className="mt-6"><h3 className="font-semibold text-gray-900">發送歷程</h3>{loading ? <p className="mt-3 text-sm text-gray-500">載入發送歷程中…</p> : <CampaignExecutionHistory executions={executions} selectedReference={selectedExecution?.safeExecutionReference} onSelect={setSelectedExecution} />}</div>
+      <div className="mt-6"><h3 className="font-semibold text-gray-900">發送歷史</h3>{loading ? <p className="mt-3 text-sm text-gray-500">載入發送歷程中…</p> : <CampaignExecutionHistory executions={executions} selectedReference={selectedExecution?.safeExecutionReference} onSelect={setSelectedExecution} />}</div>
 
       {selectedExecution && (
         <div className="mt-6 rounded-lg border p-4" data-testid="campaign-execution-detail">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div><h3 className="font-semibold text-gray-900">執行狀態：{executionStatusLabels[selectedExecution.status] || '未知狀態'}</h3>{selectedExecution.status === 'RUNNING' && <p className="mt-1 text-xs text-gray-500">每 7 秒更新一次後端統計。</p>}</div>
+            <div><h3 className="font-semibold text-gray-900">發送狀態：{executionStatusLabels[selectedExecution.status] || '未知狀態'}</h3>{selectedExecution.status === 'RUNNING' && <p className="mt-1 text-xs text-gray-500">每 7 秒更新一次後端統計。</p>}</div>
             <div className="flex flex-wrap gap-2">
               {selectedExecution.canResume === true && canManage && <button type="button" onClick={() => setDialog('resume')} disabled={mutating} className="rounded bg-blue-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">繼續未完成發送</button>}
               {canCancel && <button type="button" onClick={() => setDialog('cancel')} disabled={mutating} className="rounded border border-red-300 px-4 py-2 text-sm text-red-700 disabled:opacity-50">停止後續發送</button>}
