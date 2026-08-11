@@ -143,6 +143,7 @@ export function registerCampaignRoutes(app: any, deps: any) {
         safeCampaignReference,
         actionReference: body.actionReference,
         userId: deps.text(c.get('userId')) || null,
+        signingSecret: String(c.env.MEMBER_IDENTITY_HMAC_SECRET || ''),
       });
       return c.json({ success: true, prepared });
     } catch (error) {

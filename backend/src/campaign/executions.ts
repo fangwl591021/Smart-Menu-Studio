@@ -1,5 +1,5 @@
 import { preflightLineCampaignSend, sendLineTextPush, type LinePushResult } from './line-push.ts';
-import { renderCampaignTextContent } from './content.ts';
+import { loadFrozenTrackedLinks, recipientTrackedContent, type FrozenTrackedLink } from './clicks.ts';
 
 export const CAMPAIGN_EXECUTION_MAX_RECIPIENTS = 100;
 export const CAMPAIGN_DELIVERY_MAX_ATTEMPTS = 3;
@@ -30,6 +30,7 @@ type ExecutionRow = Record<string, unknown> & {
   completed_at?: string | null;
   cancelled_at?: string | null;
   campaign_status?: string;
+  tracking_base_url?: string | null;
 };
 
 type ResumeAuthorityDelivery = {
@@ -47,7 +48,9 @@ type CampaignExecutionContext = {
   audienceVersionNo: number;
   snapshotId: string;
   contentVersionNo: number;
-  text: string;
+  contentType: unknown;
+  payloadJson: unknown;
+  trackedLinks: FrozenTrackedLink[];
   totalRecipientCount: number;
   eligibleRecipientCount: number;
   lineAccountId: string;
@@ -149,7 +152,7 @@ async function replayExecutionByAction(db: D1Database, input: {
   });
   return executionRowByAction(db, input.workspaceId, clean(campaign.id), actionHash);
 }
-async function preparedContext(db: D1Database, workspaceId: string, safeCampaignReference: string): Promise<CampaignExecutionContext> {
+async function preparedContext(db: D1Database, workspaceId: string, safeCampaignReference: string, signingSecret: string): Promise<CampaignExecutionContext> {
   const campaign = await db.prepare(`SELECT id,public_ref,status,current_audience_id,current_audience_snapshot_no,
       prepared_content_version_no,matched_count,eligible_count
     FROM campaigns WHERE workspace_id=? AND public_ref=? LIMIT 1`)
@@ -187,6 +190,11 @@ async function preparedContext(db: D1Database, workspaceId: string, safeCampaign
   }
   if (eligible > CAMPAIGN_EXECUTION_MAX_RECIPIENTS) throw new Error('CAMPAIGN_EXECUTION_TOO_LARGE');
 
+  const trackedLinks = await loadFrozenTrackedLinks(db, {
+    workspaceId, campaignId, contentVersionNo, contentType: content.content_type,
+    payloadJson: content.payload_json, signingSecret,
+  });
+
   return {
     campaignId,
     campaignReference: clean(campaign.public_ref, 100),
@@ -194,10 +202,9 @@ async function preparedContext(db: D1Database, workspaceId: string, safeCampaign
     audienceVersionNo,
     snapshotId: clean(snapshot.id),
     contentVersionNo,
-    text: await renderCampaignTextContent({
-      contentType: content.content_type,
-      payloadJson: content.payload_json,
-    }),
+    contentType: content.content_type,
+    payloadJson: content.payload_json,
+    trackedLinks,
     totalRecipientCount: matched,
     eligibleRecipientCount: eligible,
     lineAccountId: clean(account.id),
@@ -294,6 +301,8 @@ async function createExecution(db: D1Database, input: {
   recipients: RecipientCandidate[];
   actionReference: unknown;
   userId?: string | null;
+  signingSecret: string;
+  trackingBaseUrl: string;
 }) {
   const actionHash = await campaignExecutionActionHash({
     workspaceId: input.workspaceId,
@@ -314,16 +323,21 @@ async function createExecution(db: D1Database, input: {
   const statements: D1PreparedStatement[] = [
     db.prepare(`INSERT INTO campaign_executions(
       id,public_ref,workspace_id,campaign_id,audience_id,audience_version_no,content_version_no,line_account_id,
-      action_reference_hash,status,total_recipient_count,eligible_recipient_count,queued_count,created_by_user_id
+      action_reference_hash,status,total_recipient_count,eligible_recipient_count,queued_count,created_by_user_id,tracking_base_url
     ) VALUES(?,?,?,?,?,?,?,?,?,'PENDING',?,?,?,?,?)`).bind(
       executionId, executionReference, input.workspaceId, input.context.campaignId, input.context.audienceId,
       input.context.audienceVersionNo, input.context.contentVersionNo, input.context.lineAccountId, actionHash,
-      input.context.totalRecipientCount, input.recipients.length, input.recipients.length, input.userId || null,
+      input.context.totalRecipientCount, input.recipients.length, input.recipients.length, input.userId || null, input.trackingBaseUrl,
     ),
   ];
   for (const recipient of input.recipients) {
     const deliveryId = internalId('campdel');
     const retryKey = crypto.randomUUID();
+    const rendered = await recipientTrackedContent({
+      db, workspaceId: input.workspaceId, campaignId: input.context.campaignId, executionId, deliveryId,
+      contentType: input.context.contentType, payloadJson: input.context.payloadJson, links: input.context.trackedLinks,
+      signingSecret: input.signingSecret, trackingBaseUrl: input.trackingBaseUrl, createContexts: true,
+    });
     const requestHash = await campaignProviderRequestHash({
       workspaceId: input.workspaceId,
       executionId,
@@ -331,7 +345,7 @@ async function createExecution(db: D1Database, input: {
       lineMemberId: recipient.lineMemberId,
       providerRecipientId: recipient.providerRecipientId,
       contentVersionNo: input.context.contentVersionNo,
-      text: input.context.text,
+      text: rendered.text,
     });
     statements.push(db.prepare(`INSERT INTO campaign_deliveries(
       id,public_ref,execution_id,workspace_id,campaign_id,audience_id,audience_version_no,crm_person_id,
@@ -341,6 +355,7 @@ async function createExecution(db: D1Database, input: {
       input.context.audienceId, input.context.audienceVersionNo, recipient.crmPersonId,
       recipient.lineMemberId, retryKey, requestHash,
     ));
+    statements.push(...rendered.statements);
   }
   try {
     await db.batch(statements);
@@ -502,6 +517,7 @@ async function runExecution(db: D1Database, input: {
   execution: ExecutionRow;
   context: CampaignExecutionContext;
   work: DeliveryWorkRow[];
+  signingSecret: string;
   fetcher?: typeof fetch;
 }) {
   await db.prepare(`UPDATE campaign_executions SET status='RUNNING',started_at=COALESCE(started_at,CURRENT_TIMESTAMP),completed_at=NULL
@@ -517,6 +533,12 @@ async function runExecution(db: D1Database, input: {
       await recordUnsendable(db, input.workspaceId, row.id);
       continue;
     }
+    const rendered = await recipientTrackedContent({
+      db, workspaceId: input.workspaceId, campaignId: input.context.campaignId,
+      executionId: row.execution_id, deliveryId: row.id, contentType: input.context.contentType,
+      payloadJson: input.context.payloadJson, links: input.context.trackedLinks, signingSecret: input.signingSecret,
+      trackingBaseUrl: clean(input.execution.tracking_base_url, 500), createContexts: false,
+    });
     const currentRequestHash = await campaignProviderRequestHash({
       workspaceId: input.workspaceId,
       executionId: row.execution_id,
@@ -524,7 +546,7 @@ async function runExecution(db: D1Database, input: {
       lineMemberId: clean(row.line_member_id) || null,
       providerRecipientId: recipient,
       contentVersionNo: input.context.contentVersionNo,
-      text: input.context.text,
+      text: rendered.text,
     });
     if (currentRequestHash !== row.provider_request_hash) {
       await recordUnsendable(db, input.workspaceId, row.id);
@@ -547,7 +569,7 @@ async function runExecution(db: D1Database, input: {
     const result = await sendLineTextPush({
       channelAccessToken: input.context.channelAccessToken,
       providerRecipientId: recipient,
-      text: input.context.text,
+      text: rendered.text,
       retryKey: row.provider_retry_key,
       fetcher: input.fetcher,
     });
@@ -562,11 +584,13 @@ export async function executePreparedCampaign(db: D1Database, input: {
   safeCampaignReference: string;
   actionReference: unknown;
   userId?: string | null;
+  signingSecret: string;
+  trackingBaseUrl: string;
   fetcher?: typeof fetch;
 }) {
   const replay = await replayExecutionByAction(db, input);
   if (replay) return projectExecution(db, input.workspaceId, replay, true);
-  const context = await preparedContext(db, input.workspaceId, input.safeCampaignReference);
+  const context = await preparedContext(db, input.workspaceId, input.safeCampaignReference, input.signingSecret);
   const preflight = await preflightLineCampaignSend({
     channelAccessToken: context.channelAccessToken,
     recipientCount: context.eligibleRecipientCount,
@@ -577,13 +601,13 @@ export async function executePreparedCampaign(db: D1Database, input: {
   const created = await createExecution(db, { ...input, context, recipients });
   if (created.idempotent) return projectExecution(db, input.workspaceId, created.row, true);
   const work = await resumeWorkRows(db, { workspaceId: input.workspaceId, execution: created.row, lineAccountId: context.lineAccountId });
-  const completed = await runExecution(db, { workspaceId: input.workspaceId, execution: created.row, context, work, fetcher: input.fetcher });
+  const completed = await runExecution(db, { workspaceId: input.workspaceId, execution: created.row, context, work, signingSecret: input.signingSecret, fetcher: input.fetcher });
   if (!completed) throw new Error('CAMPAIGN_EXECUTION_READ_FAILED');
   return projectExecution(db, input.workspaceId, completed, false);
 }
 
-async function contextForExecution(db: D1Database, workspaceId: string, campaignReference: string, execution: ExecutionRow) {
-  const context = await preparedContext(db, workspaceId, campaignReference);
+async function contextForExecution(db: D1Database, workspaceId: string, campaignReference: string, execution: ExecutionRow, signingSecret: string) {
+  const context = await preparedContext(db, workspaceId, campaignReference, signingSecret);
   if (context.campaignId !== execution.campaign_id || context.audienceId !== execution.audience_id
     || context.audienceVersionNo !== Number(execution.audience_version_no)
     || context.contentVersionNo !== Number(execution.content_version_no)
@@ -597,6 +621,7 @@ export async function resumeCampaignExecution(db: D1Database, input: {
   workspaceId: string;
   safeCampaignReference: string;
   safeExecutionReference: string;
+  signingSecret: string;
   fetcher?: typeof fetch;
 }) {
   const execution = await executionRowByReference(db, input.workspaceId, input.safeCampaignReference, input.safeExecutionReference);
@@ -605,7 +630,7 @@ export async function resumeCampaignExecution(db: D1Database, input: {
   if (!executionStatusMayResume(String(execution.status), String(execution.campaign_status))) {
     throw new Error('CAMPAIGN_EXECUTION_NOT_RESUMABLE');
   }
-  const context = await contextForExecution(db, input.workspaceId, input.safeCampaignReference, execution);
+  const context = await contextForExecution(db, input.workspaceId, input.safeCampaignReference, execution, input.signingSecret);
   const work = await resumeWorkRows(db, { workspaceId: input.workspaceId, execution, lineAccountId: context.lineAccountId });
   if (!work.length) throw new Error('CAMPAIGN_EXECUTION_NOT_RESUMABLE');
   const preflight = await preflightLineCampaignSend({
@@ -614,7 +639,7 @@ export async function resumeCampaignExecution(db: D1Database, input: {
     fetcher: input.fetcher,
   });
   if (!preflight.ready) throw new Error(preflight.safeErrorCode || 'LINE_CREDENTIAL_PREFLIGHT_FAILED');
-  const result = await runExecution(db, { workspaceId: input.workspaceId, execution, context, work, fetcher: input.fetcher });
+  const result = await runExecution(db, { workspaceId: input.workspaceId, execution, context, work, signingSecret: input.signingSecret, fetcher: input.fetcher });
   if (!result) throw new Error('CAMPAIGN_EXECUTION_READ_FAILED');
   return projectExecution(db, input.workspaceId, result);
 }

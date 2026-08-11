@@ -98,7 +98,7 @@ test('17 execution remains bound to the prepared frozen content version', async 
   const source = await read('../src/campaign/executions.ts');
   assert.match(source, /prepared_content_version_no/);
   assert.match(source, /campaign_content_versions[\s\S]*version_no=\?/);
-  assert.match(source, /renderCampaignTextContent/);
+  assert.match(source, /recipientTrackedContent/);
 });
 
 test('18 renderer never scans or rewrites arbitrary URLs', async () => {
@@ -141,14 +141,15 @@ test('23 final rendered LINE text length is enforced after expansion', async () 
   await assert.rejects(renderCampaignTextContent({ contentType: 'TEXT', payloadJson, resolveTrackedLink: () => `https://track.example/${'z'.repeat(100)}` }), /CAMPAIGN_RENDERED_TEXT_TOO_LONG/);
 });
 
-test('24 no click tracking table or 0045 migration exists', async () => {
+test('24 7C-A migrations remain free of click tracking tables', async () => {
   const files = await read('../../.gitignore').then(() => Promise.all([read('../migrations/0043_campaign_content_prepare_contract.sql'), read('../migrations/0044_campaign_execution_delivery.sql')]));
   assert.doesNotMatch(files.join('\n'), /CREATE TABLE IF NOT EXISTS campaign_(?:tracked_links|click_events)/i);
 });
 
-test('25 no redirect or click route is introduced', async () => {
+test('25 7C introduces only the explicit campaign click route registration', async () => {
   const source = await read('../src/index.ts');
-  assert.doesNotMatch(source, /campaign.*(?:click|redirect)|(?:click|redirect).*campaign/i);
+  assert.match(source, /registerCampaignClickRoutes/);
+  assert.doesNotMatch(source, /campaign.*(?:open|pixel)|(?:open|pixel).*campaign/i);
 });
 
 test('26 known-Person click semantics are locked to engagement without acquisition writes', async () => {

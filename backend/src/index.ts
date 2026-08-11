@@ -144,6 +144,7 @@ import { registerCrmSegmentRoutes } from './crm/segment-routes';
 import { registerCampaignAudienceRoutes } from './campaign/audience-routes';
 import { registerCampaignExecutionRoutes } from './campaign/execution-routes';
 import { registerCampaignRoutes } from './campaign/campaign-routes';
+import { registerCampaignClickRoutes } from './campaign/click-routes';
 import { acquisitionSummary, assignCrmOwner, assignmentSummary, referralSummary } from './crm/acquisition';
 import { assigneeReference, createAssigneeHandle, verifyAssigneeHandle } from './crm/assignee-handle';
 
@@ -6760,6 +6761,7 @@ registerCrmSegmentRoutes(app,{requireRole,workspaceIdOf,text});
 registerCampaignAudienceRoutes(app,{requireRole,workspaceIdOf,text});
 registerCampaignExecutionRoutes(app,{requireRole,workspaceIdOf,text});
 registerCampaignRoutes(app,{requireRole,workspaceIdOf,text});
+registerCampaignClickRoutes(app,{requireRole,workspaceIdOf,text});
 app.post('/api/system/workspaces/:workspaceId/line-simulator', async (c) => {
   try {
     await requireSystemAdmin(c);

@@ -35,6 +35,8 @@ export function registerCampaignExecutionRoutes(app: any, deps: any) {
         safeCampaignReference: deps.text(c.req.param('safeCampaignReference'), 100),
         actionReference: body.actionReference,
         userId: deps.text(c.get('userId')) || null,
+        signingSecret: String(c.env.MEMBER_IDENTITY_HMAC_SECRET || ''),
+        trackingBaseUrl: new URL(c.req.url).origin,
       });
       return c.json({ success: true, execution }, execution.idempotent ? 200 : 201);
     } catch (error) {
@@ -85,7 +87,9 @@ export function registerCampaignExecutionRoutes(app: any, deps: any) {
   app.post('/api/campaigns/:safeCampaignReference/executions/:safeExecutionReference/resume', async (c: any) => {
     try {
       deps.requireRole(c, 'admin');
-      const execution = await resumeCampaignExecution(c.env.smart_menu_db, references(c, deps));
+      const execution = await resumeCampaignExecution(c.env.smart_menu_db, {
+        ...references(c, deps), signingSecret: String(c.env.MEMBER_IDENTITY_HMAC_SECRET || ''),
+      });
       return c.json({ success: true, execution });
     } catch (error) {
       return fail(c, error, 'CAMPAIGN_EXECUTION_RESUME_FAILED');

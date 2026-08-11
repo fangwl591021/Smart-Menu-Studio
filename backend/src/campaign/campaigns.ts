@@ -8,8 +8,10 @@ import {
   publicCampaignTextContent,
   validateCampaignContent,
 } from './content.ts';
+import { trackedLinkRegistrationStatements } from './clicks.ts';
 
 export { CAMPAIGN_TEXT_MAX_LENGTH, validateCampaignContent } from './content.ts';
+
 const clean = (value: unknown, maximum = 160) => typeof value === 'string' ? value.trim().slice(0, maximum) : '';
 const internalId = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 const publicReference = () => `camp_${crypto.randomUUID().replace(/-/g, '')}`;
@@ -329,6 +331,7 @@ export async function prepareCampaign(db: D1Database, input: {
   executionRule: unknown;
   actionReference: unknown;
   userId?: string | null;
+  signingSecret: string;
 }) {
   const campaign = await campaignRowByReference(db, input.workspaceId, input.safeCampaignReference);
   const actionHash = await campaignPrepareActionHash({
@@ -341,6 +344,14 @@ export async function prepareCampaign(db: D1Database, input: {
   if (campaign.status !== 'DRAFT') throw new Error(campaign.status === 'PREPARED' ? 'CAMPAIGN_REPREPARE_UNSUPPORTED' : 'CAMPAIGN_NOT_DRAFT');
   const contentVersion = Number(campaign.current_content_version_no || 0);
   if (contentVersion < 1) throw new Error('CAMPAIGN_CONTENT_NOT_FOUND');
+  const content = await db.prepare(`SELECT content_type,payload_json FROM campaign_content_versions
+    WHERE workspace_id=? AND campaign_id=? AND version_no=? LIMIT 1`)
+    .bind(input.workspaceId, campaign.id, contentVersion).first<Record<string, unknown>>();
+  if (!content) throw new Error('CAMPAIGN_CONTENT_NOT_FOUND');
+  const trackedLinkStatements = await trackedLinkRegistrationStatements(db, {
+    workspaceId: input.workspaceId, campaignId: campaign.id, contentVersionNo: contentVersion,
+    contentType: content.content_type, payloadJson: content.payload_json, signingSecret: input.signingSecret,
+  });
   const materialization = await buildCampaignAudienceSnapshot(db, {
     workspaceId: input.workspaceId,
     name: `campaign:${campaign.public_ref}:prepared`,
@@ -354,6 +365,7 @@ export async function prepareCampaign(db: D1Database, input: {
   const actionId = internalId('camppa');
   const statements = [
     ...materialization.statements,
+    ...trackedLinkStatements,
     db.prepare(`UPDATE campaigns SET status='PREPARED',current_audience_id=?,current_audience_snapshot_no=?,
       prepared_content_version_no=?,prepared_segment_id=?,prepared_segment_version_no=?,matched_count=?,eligible_count=?,
       excluded_count=?,exclusion_breakdown_json=?,prepared_at=?,updated_at=?
