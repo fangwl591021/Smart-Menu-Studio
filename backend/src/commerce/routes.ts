@@ -1,9 +1,12 @@
 import { cancelOrder, createOrder, createProduct, handleNewebPayCallback, initiatePayment, listOrderPayments, listOrders, listProducts, readOrder, readProduct, setProductStatus, updateProduct } from './commerce';
+import { listConversions, readConversion } from './conversions';
 
 const known = /^COMMERCE_[A-Z0-9_]+$/;
 function failure(c:any,error:unknown,fallback:string){const raw=error instanceof Error?error.message:'';const code=raw==='FORBIDDEN_ROLE'?'FORBIDDEN':known.test(raw)?raw:fallback;const status=code==='FORBIDDEN'?403:code.endsWith('_NOT_FOUND')?404:code.includes('PAID')||code.includes('ARCHIVED')||code.includes('CANCELLED')?409:400;return c.json({success:false,error:code},status);}
 
 export function registerCommerceRoutes(app:any,deps:any){
+  app.get('/api/commerce/conversions',async(c:any)=>{try{deps.requireRole(c,'viewer');const result=await listConversions(c.env.smart_menu_db,deps.workspaceIdOf(c),{limit:c.req.query('limit'),cursor:c.req.query('cursor')});return c.json({success:true,...result});}catch(e){return failure(c,e,'COMMERCE_CONVERSION_LIST_FAILED')}});
+  app.get('/api/commerce/conversions/:safeConversionReference',async(c:any)=>{try{deps.requireRole(c,'viewer');return c.json({success:true,conversion:await readConversion(c.env.smart_menu_db,deps.workspaceIdOf(c),deps.text(c.req.param('safeConversionReference'),100))});}catch(e){return failure(c,e,'COMMERCE_CONVERSION_READ_FAILED')}});
   app.get('/api/commerce/products',async(c:any)=>{try{deps.requireRole(c,'viewer');return c.json({success:true,products:await listProducts(c.env.smart_menu_db,deps.workspaceIdOf(c))});}catch(e){return failure(c,e,'COMMERCE_PRODUCT_LIST_FAILED')}});
   app.post('/api/commerce/products',async(c:any)=>{try{deps.requireRole(c,'admin');const product=await createProduct(c.env.smart_menu_db,{workspaceId:deps.workspaceIdOf(c),userId:deps.text(c.get('userId'))||null,body:await c.req.json().catch(()=>({}))});return c.json({success:true,product},201);}catch(e){return failure(c,e,'COMMERCE_PRODUCT_CREATE_FAILED')}});
   app.get('/api/commerce/products/:safeProductReference',async(c:any)=>{try{deps.requireRole(c,'viewer');return c.json({success:true,product:await readProduct(c.env.smart_menu_db,deps.workspaceIdOf(c),deps.text(c.req.param('safeProductReference'),100))});}catch(e){return failure(c,e,'COMMERCE_PRODUCT_READ_FAILED')}});
