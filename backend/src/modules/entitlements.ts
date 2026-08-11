@@ -54,7 +54,7 @@ const MODULE_KEYS = new Set<string>(WORKSPACE_MODULE_CATALOG.map(module => modul
 
 export const WORKSPACE_MODULE_DEPENDENCIES: Readonly<Partial<Record<WorkspaceModuleKey, readonly WorkspaceModuleKey[]>>> = {
   CAMPAIGN: ['CRM'],
-  TRAVEL: ['CRM', 'COMMERCE'],
+  TRAVEL: ['COMMERCE'],
 };
 
 export function isWorkspaceModuleKey(value: unknown): value is WorkspaceModuleKey {

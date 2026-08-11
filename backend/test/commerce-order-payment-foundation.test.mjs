@@ -5,6 +5,7 @@ import { createCheckout, decryptTradeInfo, newebpayConfig, parseCallbackPayload,
 
 const migration = await readFile(new URL('../migrations/0046_commerce_order_payment.sql', import.meta.url), 'utf8');
 const domain = await readFile(new URL('../src/commerce/commerce.ts', import.meta.url), 'utf8');
+const paymentObligations = await readFile(new URL('../src/commerce/payment-obligations.ts', import.meta.url), 'utf8');
 const routes = await readFile(new URL('../src/commerce/routes.ts', import.meta.url), 'utf8');
 const provider = await readFile(new URL('../src/commerce/providers/newebpay.ts', import.meta.url), 'utf8');
 const index = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8');
@@ -64,7 +65,7 @@ const contracts = [
   ['callback amount checked', domain, /amountValue===Number\(intent\.amount_minor\)/],
   ['callback merchant checked', domain, /MerchantID.*intent\.merchant_id/],
   ['duplicate callback idempotent', domain, /idempotent:true/],
-  ['callback only writes paid state', domain, /UPDATE commerce_orders SET status='PAID'/],
+  ['callback only writes paid state through obligation authority', `${domain}\n${paymentObligations}`, /UPDATE commerce_orders SET status='PAID'/],
   ['browser return absent as mutation route', routes, /^(?![\s\S]*payments\/newebpay\/return)/],
   ['callback body bounded', routes, /65536/],
   ['callback is exact auth exemption', index, /c\.req\.path === '\/api\/commerce\/payments\/newebpay\/notify'/],

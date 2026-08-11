@@ -59,6 +59,7 @@ function publicOrder(row: any, items: any[] = [], latestPayment: any = null) {
 function publicPayment(row: any) {
   return {
     provider: String(row.provider),
+    paymentLeg: String(row.payment_leg || 'FULL'),
     status: String(row.status),
     amountMinor: row.amount_minor === null ? null : Number(row.amount_minor),
     currencyCode: row.currency_code || null,
@@ -81,13 +82,13 @@ async function ownOrderRow(db: any, context: MemberCommerceContext, safeOrderRef
 
 export async function listMemberProducts(db: any, context: MemberCommerceContext) {
   return (await rows(db.prepare(`SELECT public_ref,name,description,price_amount_minor,currency_code
-    FROM commerce_products WHERE workspace_id=? AND status='ACTIVE' ORDER BY updated_at DESC,id DESC`)
+    FROM commerce_products WHERE workspace_id=? AND status='ACTIVE' AND product_kind='STANDARD' ORDER BY updated_at DESC,id DESC`)
     .bind(context.workspaceId))).map(publicProduct);
 }
 
 export async function readMemberProduct(db: any, context: MemberCommerceContext, safeProductReference: string) {
   const product = await first(db.prepare(`SELECT public_ref,name,description,price_amount_minor,currency_code
-    FROM commerce_products WHERE workspace_id=? AND public_ref=? AND status='ACTIVE' LIMIT 1`)
+    FROM commerce_products WHERE workspace_id=? AND public_ref=? AND status='ACTIVE' AND product_kind='STANDARD' LIMIT 1`)
     .bind(context.workspaceId, safeProductReference));
   if (!product) throw new Error('COMMERCE_PRODUCT_NOT_FOUND');
   return publicProduct(product);
@@ -118,7 +119,7 @@ export async function readMemberOrder(db: any, context: MemberCommerceContext, s
   const [items, latestPayment] = await Promise.all([
     rows(db.prepare(`SELECT sku_snapshot,name_snapshot,unit_amount_minor,quantity,line_amount_minor,currency_code
       FROM commerce_order_items WHERE workspace_id=? AND order_id=? ORDER BY created_at,id`).bind(context.workspaceId, order.id)),
-    first(db.prepare(`SELECT provider,status,amount_minor,currency_code,safe_failure_code,created_at,paid_at
+    first(db.prepare(`SELECT provider,payment_leg,status,amount_minor,currency_code,safe_failure_code,created_at,paid_at
       FROM commerce_payment_transactions WHERE workspace_id=? AND order_id=? ORDER BY created_at DESC,id DESC LIMIT 1`).bind(context.workspaceId, order.id)),
   ]);
   return publicOrder(order, items, latestPayment);
@@ -126,14 +127,14 @@ export async function readMemberOrder(db: any, context: MemberCommerceContext, s
 
 export async function listMemberOrderPayments(db: any, context: MemberCommerceContext, safeOrderReference: string) {
   const order: any = await ownOrderRow(db, context, safeOrderReference);
-  return (await rows(db.prepare(`SELECT provider,status,amount_minor,currency_code,safe_failure_code,created_at,paid_at
+  return (await rows(db.prepare(`SELECT provider,payment_leg,status,amount_minor,currency_code,safe_failure_code,created_at,paid_at
     FROM commerce_payment_transactions WHERE workspace_id=? AND order_id=? ORDER BY created_at DESC,id DESC`)
     .bind(context.workspaceId, order.id))).map(publicPayment);
 }
 
 export async function memberPaymentStatus(db: any, context: MemberCommerceContext, safeOrderReference: string) {
   const order: any = await ownOrderRow(db, context, safeOrderReference);
-  const latest = await first(db.prepare(`SELECT provider,status,amount_minor,currency_code,safe_failure_code,created_at,paid_at
+  const latest = await first(db.prepare(`SELECT provider,payment_leg,status,amount_minor,currency_code,safe_failure_code,created_at,paid_at
     FROM commerce_payment_transactions WHERE workspace_id=? AND order_id=? ORDER BY created_at DESC,id DESC LIMIT 1`)
     .bind(context.workspaceId, order.id));
   return {

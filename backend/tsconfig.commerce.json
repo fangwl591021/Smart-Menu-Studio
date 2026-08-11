@@ -7,6 +7,8 @@
   },
   "files": [
     "src/commerce/providers/newebpay.ts",
+    "src/commerce/payment-obligations.ts",
+    "src/commerce/travel-offer.ts",
     "src/commerce/commerce.ts",
     "src/commerce/member-commerce.ts",
     "src/commerce/member-routes.ts",

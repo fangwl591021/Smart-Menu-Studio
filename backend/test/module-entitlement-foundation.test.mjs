@@ -187,9 +187,9 @@ test('CAMPAIGN runtime access fails closed if CRM is later disabled', async () =
   await assert.rejects(() => requireWorkspaceModule({ db, workspaceId: 'a', moduleKey: 'CAMPAIGN' }), /MODULE_DEPENDENCY_NOT_ENABLED/);
 });
 
-test('TRAVEL enable requires both CRM and COMMERCE without auto-enable', async () => {
+test('TRAVEL enable requires COMMERCE without auto-enable', async () => {
   const db = new FakeDb([
-    { workspaceId: 'a', moduleKey: 'CRM', status: 'ENABLED' },
+    { workspaceId: 'a', moduleKey: 'CRM', status: 'DISABLED' },
     { workspaceId: 'a', moduleKey: 'COMMERCE', status: 'DISABLED' },
     { workspaceId: 'a', moduleKey: 'TRAVEL', status: 'DISABLED' },
   ]);
@@ -198,6 +198,18 @@ test('TRAVEL enable requires both CRM and COMMERCE without auto-enable', async (
     /MODULE_DEPENDENCY_NOT_ENABLED/,
   );
   assert.equal(db.entitlements.get('a:COMMERCE').status, 'DISABLED');
+  assert.equal(db.entitlements.get('a:CRM').status, 'DISABLED');
+});
+
+test('CRM disabled does not block TRAVEL and is not auto-enabled', async () => {
+  const db = new FakeDb([
+    { workspaceId: 'a', moduleKey: 'CRM', status: 'DISABLED' },
+    { workspaceId: 'a', moduleKey: 'COMMERCE', status: 'ENABLED' },
+    { workspaceId: 'a', moduleKey: 'TRAVEL', status: 'DISABLED' },
+  ]);
+  const result = await setWorkspaceModuleStatus({ db, workspaceId: 'a', moduleKey: 'TRAVEL', enabled: true, actorUserId: 'system' });
+  assert.equal(result.enabled, true);
+  assert.equal(db.entitlements.get('a:CRM').status, 'DISABLED');
 });
 
 const routeMappings = [
@@ -286,6 +298,6 @@ test('public projections expose no billing data', () => assert.doesNotMatch(rout
 test('disable semantics preserve historical data', () => assert.match(policy, /never deletes, archives, rewrites, or backfills business data/));
 test('Campaign disable policy blocks new execute and resume', () => assert.match(policy, /New Campaign execute and resume requests are blocked/));
 test('verified payment callback completion is documented', () => assert.match(policy, /NewebPay notify endpoint remains outside the entitlement guard/));
-test('TRAVEL depends on future CRM and COMMERCE without auto-enable', () => assert.match(policy, /future `TRAVEL` requires `CRM` and `COMMERCE`/));
+test('TRAVEL requires COMMERCE while CRM is recommended only', () => assert.match(policy, /future `TRAVEL` requires `COMMERCE`; CRM is recommended/));
 test('TravelKeeper is not imported', () => assert.doesNotMatch(`${indexSource}\n${entitlementSource}`, /from ['"].*travelkeeper/i));
 test('Travel business tables are not created', () => assert.doesNotMatch(migration, /CREATE TABLE.*travel_/i));

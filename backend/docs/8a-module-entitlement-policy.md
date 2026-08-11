@@ -11,7 +11,7 @@
 
 - Only the existing platform System Admin authority (`users.is_system_admin`) may change entitlements.
 - Tenant owners, admins, editors, viewers, members, and public callers cannot change entitlements.
-- Dependencies are documented but never silently auto-enabled: `CAMPAIGN` depends on CRM data authority; future `TRAVEL` requires `CRM` and `COMMERCE`; `AI` is optional and does not imply that a provider credential exists.
+- Dependencies are documented but never silently auto-enabled: `CAMPAIGN` depends on CRM data authority; future `TRAVEL` requires `COMMERCE`; CRM is recommended for reusable customer identity but is not a dependency; `AI` is optional and does not imply that a provider credential exists.
 - V1 validates dependencies before enable and at request time. Missing dependencies return a safe conflict and are never auto-enabled; a future System Admin UI must surface these requirements.
 
 ## Integrity exceptions
