@@ -144,6 +144,7 @@ import { registerCrmSegmentRoutes } from './crm/segment-routes';
 import { registerCampaignAudienceRoutes } from './campaign/audience-routes';
 import { registerCampaignExecutionRoutes } from './campaign/execution-routes';
 import { registerCampaignRoutes } from './campaign/campaign-routes';
+import { registerCommerceRoutes } from './commerce/routes';
 import { acquisitionSummary, assignCrmOwner, assignmentSummary, referralSummary } from './crm/acquisition';
 import { assigneeReference, createAssigneeHandle, verifyAssigneeHandle } from './crm/assignee-handle';
 
@@ -160,6 +161,11 @@ type Bindings = {
   DEV_WORKSPACE_ID?: string;
   AUTH_DEV_TOKEN?: string;
   MEMBER_IDENTITY_HMAC_SECRET?: string;
+  NEWEBPAY_MERCHANT_ID?: string;
+  NEWEBPAY_HASH_KEY?: string;
+  NEWEBPAY_HASH_IV?: string;
+  NEWEBPAY_MODE?: string;
+  NEWEBPAY_RETURN_URL?: string;
   smart_menu_assets: R2Bucket;
   smart_menu_db: D1Database;
 };
@@ -937,7 +943,7 @@ app.post('/auth/login', async (c) => {
 });
 
 app.use('/api/*', async (c, next) => {
-  if (c.req.path === '/api/intelligence/conversions' || c.req.path.startsWith('/api/member/')) return next();
+  if (c.req.path === '/api/intelligence/conversions' || c.req.path === '/api/commerce/payments/newebpay/notify' || c.req.path.startsWith('/api/member/')) return next();
   try {
     const tenant = await resolveTenantContext(c);
     c.set('workspaceId', tenant.workspaceId);
@@ -6760,6 +6766,7 @@ registerCrmSegmentRoutes(app,{requireRole,workspaceIdOf,text});
 registerCampaignAudienceRoutes(app,{requireRole,workspaceIdOf,text});
 registerCampaignExecutionRoutes(app,{requireRole,workspaceIdOf,text});
 registerCampaignRoutes(app,{requireRole,workspaceIdOf,text});
+registerCommerceRoutes(app,{requireRole,workspaceIdOf,text});
 app.post('/api/system/workspaces/:workspaceId/line-simulator', async (c) => {
   try {
     await requireSystemAdmin(c);

@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": ["@cloudflare/workers-types"]
+  },
+  "files": [
+    "src/commerce/providers/newebpay.ts",
+    "src/commerce/commerce.ts",
+    "src/commerce/routes.ts"
+  ]
+}

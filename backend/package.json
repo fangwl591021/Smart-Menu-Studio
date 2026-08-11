@@ -6,7 +6,9 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy --minify",
     "cf-typegen": "wrangler types --env-interface CloudflareBindings",
-    "typecheck:campaign": "tsc -p tsconfig.campaign.json"
+    "typecheck:campaign": "tsc -p tsconfig.campaign.json",
+    "typecheck:commerce": "tsc -p tsconfig.commerce.json",
+    "typecheck": "npm run typecheck:campaign && npm run typecheck:commerce"
   },
   "dependencies": {
     "hash-wasm": "4.12.0",
