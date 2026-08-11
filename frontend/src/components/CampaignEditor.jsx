@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import CampaignAudiencePanel from './CampaignAudiencePanel';
+import CampaignExecutionPanel from './CampaignExecutionPanel';
 import { labelStatus } from '../utils/presentationLabels';
 
 const requestJson = async (request, path, options) => {
@@ -238,6 +239,14 @@ export default function CampaignEditor({
           onSegmentChange={setSelectedSegmentReference}
           canManage={canManage}
           onPrepared={refreshCampaign}
+        />
+      )}
+
+      {!creating && campaign && (
+        <CampaignExecutionPanel
+          campaign={campaign}
+          request={request}
+          userRole={userRole}
         />
       )}
 
