@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import CampaignAudiencePanel from './CampaignAudiencePanel';
 import CampaignExecutionPanel from './CampaignExecutionPanel';
+import CampaignClickEngagementPanel from './CampaignClickEngagementPanel';
 import { labelStatus } from '../utils/presentationLabels';
 
 const requestJson = async (request, path, options) => {
@@ -247,6 +248,13 @@ export default function CampaignEditor({
           campaign={campaign}
           request={request}
           userRole={userRole}
+        />
+      )}
+
+      {!creating && campaign && (
+        <CampaignClickEngagementPanel
+          campaign={campaign}
+          request={request}
         />
       )}
 
