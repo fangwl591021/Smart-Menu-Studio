@@ -18,6 +18,13 @@ import CampaignWorkspace from './components/CampaignWorkspace';
 import TrackedUriTool from './components/TrackedUriTool';
 import CommerceAdminWorkspace from './components/CommerceAdminWorkspace';
 import LiffCommercePage from './components/LiffCommercePage';
+import SystemWorkspaceModules from './components/SystemWorkspaceModules';
+import { useWorkspaceModuleAuthority } from './components/WorkspaceModuleProvider';
+import {
+  firstAvailableTenantView,
+  isTenantNavigationItemVisible,
+  moduleKeyForView,
+} from './module-entitlements';
 import { emitGuideEvent } from './guide-events';
 import { 
   LayoutDashboard, 
@@ -55,6 +62,7 @@ const NAVIGATION = [
   { id: 'ai-usage', label: 'AI \u7528\u91cf', icon: Sparkles },
   { id: 'intelligence-health', label: 'LINE Health', icon: MousePointerClick },
   { id: 'accounts', label: '客戶帳號', icon: Users },
+  { id: 'modules', label: '模組管理', icon: Settings },
   { id: 'tenant-inventory', label: '租戶資料盤點', icon: Search },
   { id: 'tenant-integrity', label: '租戶健康檢查', icon: CheckCircle2 },
   { id: 'members', label: '團隊成員', icon: Users },
@@ -100,7 +108,7 @@ const FRONTEND_BUILD = 'tenant-transfer-engine-v2.6.0';
 
 const getAuthToken = () => localStorage.getItem(AUTH_TOKEN_KEY) || '';
 
-const authFetch = (path, options = {}) => {
+const authFetch = async (path, options = {}) => {
   const token = getAuthToken();
   const headers = new Headers(options.headers || {});
 
@@ -108,10 +116,18 @@ const authFetch = (path, options = {}) => {
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  return fetch(apiUrl(path), {
+  const response = await fetch(apiUrl(path), {
     ...options,
     headers,
   });
+  if (response.status === 403) {
+    response.clone().json().then(data => {
+      if (data?.error === 'MODULE_NOT_ENABLED') {
+        window.dispatchEvent(new CustomEvent('smart-menu:module-not-enabled'));
+      }
+    }).catch(() => {});
+  }
+  return response;
 };
 
 const apiMemoryCache = new Map();
@@ -610,7 +626,7 @@ const safePublishErrorMessage = message => {
   return 'LINE 圖文選單發布失敗，請稍後再試。';
 };
 
-const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, userRole }) => {
+const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, userRole, aiEnabled }) => {
   const [project, setProject] = useState(null);
   const [switchTargets, setSwitchTargets] = useState([]);
   const [activeArea, setActiveArea] = useState(null);
@@ -902,8 +918,8 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
     if (!['editor', 'admin', 'owner'].includes(String(userRole || '').toLowerCase())) return '目前帳號沒有發布權限。';
     if (project?.status === 'disabled') return '此專案已停用，請先啟用後再發布。';
     if (projectDirty) return '請先儲存專案變更。';
-    if (!publishReadiness.loaded) return '正在確認發布條件。';
-    if (!publishReadiness.ready) return publishReadiness.reason;
+    if (aiEnabled && !publishReadiness.loaded) return '正在確認發布條件。';
+    if (aiEnabled && !publishReadiness.ready) return publishReadiness.reason;
     return '';
   })();
   const publishDisabled = Boolean(publishBlockedReason) || publishState.status === 'publishing';
@@ -1031,7 +1047,7 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
         </div>
       </div>
 
-      <div className={`flex-1 grid grid-cols-1 lg:grid-cols-2 overflow-hidden transition-[padding] ${guideCollapsed ? '' : 'xl:pr-[400px]'}`}>
+      <div className={`flex-1 grid grid-cols-1 lg:grid-cols-2 overflow-hidden transition-[padding] ${guideCollapsed || !aiEnabled ? '' : 'xl:pr-[400px]'}`}>
         <div className="bg-white border-r border-gray-200 overflow-y-auto p-6 space-y-6">
           <div>
             <h3 className="font-bold text-gray-900 mb-2">請完成客戶內容</h3>
@@ -1164,20 +1180,24 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
             </div>
           )}
           <LineIntelligencePanel projectId={projectId} request={authFetch} userRole={userRole} />
-          <ProposalManagement
-            projectId={projectId}
-            project={project}
-            userRole={userRole}
-            request={authFetch}
-            refreshKey={proposalRefreshKey}
-            onExecuted={handleProposalExecuted}
-            onRolledBack={handleProposalRolledBack}
-          />
-          <OperationPlanManagement
-            projectId={projectId}
-            request={authFetch}
-            refreshKey={proposalRefreshKey}
-          />
+          {aiEnabled && (
+            <>
+              <ProposalManagement
+                projectId={projectId}
+                project={project}
+                userRole={userRole}
+                request={authFetch}
+                refreshKey={proposalRefreshKey}
+                onExecuted={handleProposalExecuted}
+                onRolledBack={handleProposalRolledBack}
+              />
+              <OperationPlanManagement
+                projectId={projectId}
+                request={authFetch}
+                refreshKey={proposalRefreshKey}
+              />
+            </>
+          )}
         </div>
 
         <div className="bg-gray-100 p-8 flex items-center justify-center overflow-y-auto">
@@ -1205,20 +1225,22 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
           </div>
         </div>
       </div>
-      <SmartGuide
-        projectId={projectId}
-        selectedAreaId={activeArea}
-        request={authFetch}
-        onAction={handleGuideAction}
-        userRole={userRole}
-        onProposalSaved={() => setProposalRefreshKey(value => value + 1)}
-        onPublish={openPublishConfirmation}
-        publishDisabled={publishDisabled}
-        publishReason={publishBlockedReason}
-        collapsed={guideCollapsed}
-        onCollapsedChange={setGuideCollapsed}
-        onReadinessChange={handleGuideReadiness}
-      />
+      {aiEnabled && (
+        <SmartGuide
+          projectId={projectId}
+          selectedAreaId={activeArea}
+          request={authFetch}
+          onAction={handleGuideAction}
+          userRole={userRole}
+          onProposalSaved={() => setProposalRefreshKey(value => value + 1)}
+          onPublish={openPublishConfirmation}
+          publishDisabled={publishDisabled}
+          publishReason={publishBlockedReason}
+          collapsed={guideCollapsed}
+          onCollapsedChange={setGuideCollapsed}
+          onReadinessChange={handleGuideReadiness}
+        />
+      )}
 
       {publishState.status !== 'idle' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/55 p-4" role="dialog" aria-modal="true" aria-labelledby="publish-dialog-title">
@@ -1487,7 +1509,7 @@ const AccountView = ({ session, onSessionChanged }) => {
 };
 
 
-const LineHubView = ({ member, onBack, projectId }) => {
+const LineHubView = ({ member, onBack, projectId, aiEnabled }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [savingAccount, setSavingAccount] = useState(false);
@@ -1972,7 +1994,7 @@ const LineHubView = ({ member, onBack, projectId }) => {
           )}
         </div>
       </section>
-      {projectId && (
+      {projectId && aiEnabled && (
         <SmartGuide
           projectId={projectId}
           request={authFetch}
@@ -2264,7 +2286,7 @@ const CustomerAccountsView = ({ onOpenWorkspace }) => {
                     {row.company_name || row.name}
                   </div>
                   <div className="text-xs text-gray-500 mt-1">
-                    {row.id} · {row.plan || 'starter'} · 成員 {row.member_count || 0} 人
+                    {row.slug} · {row.plan || 'starter'} · 成員 {row.member_count || 0} 人
                   </div>
                   <div className="text-xs text-gray-500 mt-1">
                     LINE Webhook 啟用：{row.active_webhook_count || 0} 組
@@ -2608,7 +2630,7 @@ const WorkspaceAccountView = ({ workspace, onBack }) => {
           <ArrowLeft size={20} />
         </button>
         <div>
-          <div className="text-xs text-gray-500">客戶帳號 / {workspace.id}</div>
+          <div className="text-xs text-gray-500">客戶帳號 / {workspace.slug}</div>
           <h2 className="text-2xl font-bold text-gray-900">
             {profile.companyName || profile.workspaceName}
           </h2>
@@ -4266,7 +4288,7 @@ const SystemTemplatesView = () => {
 };
 
 
-const TemplatesView = ({ onNavigate, onEditTemplate }) => {
+const TemplatesView = ({ onNavigate, onEditTemplate, aiEnabled }) => {
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -4310,13 +4332,17 @@ const TemplatesView = ({ onNavigate, onEditTemplate }) => {
           <h2 className="text-2xl font-bold tracking-tight text-gray-900">模板中心</h2>
           <p className="text-gray-500 text-sm mt-1">模板圖片存 R2，座標與 Action 存 D1；建立一次即可重複套用。</p>
         </div>
-        <button
-          onClick={onNavigate}
-          className="bg-black hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2"
-        >
-          <Plus size={16} />
-          建立新模板
-        </button>
+        {aiEnabled ? (
+          <button
+            onClick={onNavigate}
+            className="bg-black hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2"
+          >
+            <Plus size={16} />
+            建立新模板
+          </button>
+        ) : (
+          <span className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">AI 模組未啟用，智慧熱區偵測目前隱藏。</span>
+        )}
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
@@ -4381,7 +4407,7 @@ const TemplatesView = ({ onNavigate, onEditTemplate }) => {
   );
 };
 
-const EditorView = ({ onBack, mode = 'project', templateId = null }) => {
+const EditorView = ({ onBack, mode = 'project', templateId = null, aiEnabled }) => {
   const [activeArea, setActiveArea] = useState(1);
   const [activeTab, setActiveTab] = useState('image');
   
@@ -4725,7 +4751,8 @@ const EditorView = ({ onBack, mode = 'project', templateId = null }) => {
                     <p className="text-xs text-gray-500 mt-2">這裡建立的是「母版」；客戶日後選用時只替換內容，不重新計算座標。</p>
                   </div>
                 )}
-                <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-6 rounded-xl border border-indigo-100">
+                {aiEnabled ? (
+                  <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-6 rounded-xl border border-indigo-100">
                   <div className="flex items-start gap-4">
                     <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 shrink-0 mt-1">
                       <Sparkles size={20} />
@@ -4788,7 +4815,12 @@ const EditorView = ({ onBack, mode = 'project', templateId = null }) => {
                       )}
                     </div>
                   </div>
-                </div>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
+                    AI 模組未啟用，智慧熱區偵測目前隱藏。您仍可編輯已有模板的熱區與動作。
+                  </div>
+                )}
               </div>
             )}
 
@@ -5014,6 +5046,17 @@ function AppShell() {
   const [selectedWorkspace, setSelectedWorkspace] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [session, setSession] = useState(null);
+  const [moduleNotice, setModuleNotice] = useState('');
+
+  const isSystemAdmin = Boolean(session?.user?.is_system_admin);
+  const isPlatformAdminMode =
+    isSystemAdmin &&
+    String(session?.activeWorkspaceId || '') === 'default';
+  const moduleAuthority = useWorkspaceModuleAuthority({
+    enabled: Boolean(session) && !isPlatformAdminMode,
+    request: authFetch,
+    workspaceKey: String(session?.activeWorkspaceId || ''),
+  });
 
   const loadSession = async () => {
     const token = getAuthToken();
@@ -5056,6 +5099,28 @@ function AppShell() {
   useEffect(() => {
     loadSession();
   }, []);
+
+  useEffect(() => {
+    if (!session || isPlatformAdminMode) {
+      setModuleNotice('');
+      return;
+    }
+    const moduleKey = moduleKeyForView(currentView);
+    if (!moduleKey) return;
+    if (moduleAuthority.status === 'loading' && moduleKey !== 'CORE_MENU') {
+      setCurrentView('dashboard');
+      return;
+    }
+    if (moduleAuthority.status === 'error' && moduleKey !== 'CORE_MENU') {
+      setModuleNotice('此工作區尚未啟用此功能模組。');
+      setCurrentView('dashboard');
+      return;
+    }
+    if (moduleAuthority.status === 'ready' && moduleAuthority.modules[moduleKey] !== true) {
+      setModuleNotice('此工作區尚未啟用此功能模組。');
+      setCurrentView(firstAvailableTenantView(moduleAuthority.modules));
+    }
+  }, [currentView, isPlatformAdminMode, moduleAuthority.modules, moduleAuthority.status, session]);
 
   const logout = async () => {
     try {
@@ -5111,20 +5176,17 @@ function AppShell() {
   const activeWorkspace =
     session.memberships?.find(x => x.workspace_id === session.activeWorkspaceId);
 
-  const isSystemAdmin = Boolean(session?.user?.is_system_admin);
-  const isPlatformAdminMode =
-    isSystemAdmin &&
-    String(session?.activeWorkspaceId || '') === 'default';
   const activeRole = String(session?.activeRole || 'viewer').toLowerCase();
 
   const visibleNavigation = isPlatformAdminMode
-    ? NAVIGATION.filter(item => ['accounts', 'templates', 'ai-usage', 'intelligence-health', 'tenant-inventory', 'tenant-integrity'].includes(item.id))
+    ? NAVIGATION.filter(item => ['accounts', 'modules', 'templates', 'ai-usage', 'intelligence-health', 'tenant-inventory', 'tenant-integrity'].includes(item.id))
     : NAVIGATION.filter(item => {
         if (item.id === 'accounts') return false;
         if (item.id === 'members') return activeRole === 'owner' || activeRole === 'admin';
         if (item.id === 'settings') return activeRole === 'owner' || activeRole === 'admin';
         return ['dashboard', 'projects', 'templates', 'crm', 'campaigns', 'commerce', 'ai-usage'].includes(item.id);
-      });
+      }).filter(item => isTenantNavigationItemVisible(item, moduleAuthority));
+  const tenantViewAccessible = isPlatformAdminMode || moduleAuthority.canAccessView(currentView);
 
   const navigateHome = () => {
     setCurrentView(isPlatformAdminMode ? 'accounts' : 'dashboard');
@@ -5169,7 +5231,7 @@ function AppShell() {
             return (
               <button
                 key={item.id}
-                onClick={() => setCurrentView(item.id)}
+                onClick={() => { setModuleNotice(''); setCurrentView(item.id); }}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
                   isActive ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50'
                 }`}
@@ -5228,11 +5290,14 @@ function AppShell() {
 
         <div className="flex-1 overflow-auto p-8">
           <div className={currentView === 'project-editor' ? 'h-full' : 'max-w-6xl mx-auto'}>
-            {currentView === 'dashboard' && !isPlatformAdminMode && <DashboardView onNavigate={setCurrentView} />}
-            {currentView === 'projects' && !isPlatformAdminMode && (
+            {!isPlatformAdminMode && moduleAuthority.status === 'loading' && <div className="mb-5 flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-700"><Loader2 size={16} className="animate-spin" />正在載入工作區模組...</div>}
+            {!isPlatformAdminMode && moduleAuthority.status === 'error' && <div className="mb-5 flex items-center justify-between gap-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"><span>{moduleAuthority.error}</span><button type="button" onClick={moduleAuthority.retry} className="shrink-0 rounded-md border border-amber-300 bg-white px-3 py-1.5 font-medium">重新載入</button></div>}
+            {moduleNotice && !isPlatformAdminMode && <div role="status" className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{moduleNotice}</div>}
+            {currentView === 'dashboard' && !isPlatformAdminMode && tenantViewAccessible && <DashboardView onNavigate={setCurrentView} />}
+            {currentView === 'projects' && !isPlatformAdminMode && tenantViewAccessible && (
               <ProjectsView onStartNew={startNewProject} onEditProject={editProject} />
             )}
-            {currentView === 'project-builder' && (
+            {currentView === 'project-builder' && tenantViewAccessible && (
               <ProjectBuilderView
                 onBack={() => setCurrentView('projects')}
                 onCreated={(projectId) => {
@@ -5241,10 +5306,11 @@ function AppShell() {
                 }}
               />
             )}
-            {currentView === 'project-editor' && (
+            {currentView === 'project-editor' && tenantViewAccessible && (
               <ProjectEditorView
                 projectId={currentProjectId}
                 userRole={activeRole}
+                aiEnabled={moduleAuthority.isEnabled('AI') === true}
                 onStartNew={startNewProject}
                 onBack={() => setCurrentView('projects')}
                 onGuideNavigate={(target) => {
@@ -5268,6 +5334,9 @@ function AppShell() {
                 }}
               />
             )}
+            {currentView === 'modules' && isPlatformAdminMode && (
+              <SystemWorkspaceModules request={authFetch} />
+            )}
             {currentView === 'workspace-account' && isPlatformAdminMode && selectedWorkspace && (
               <WorkspaceAccountView
                 workspace={selectedWorkspace}
@@ -5289,6 +5358,7 @@ function AppShell() {
               <LineHubView
                 member={selectedMember}
                 projectId={currentProjectId}
+                aiEnabled={moduleAuthority.isEnabled('AI') === true}
                 onBack={() => {
                   setSelectedMember(null);
                   setCurrentView('members');
@@ -5298,19 +5368,24 @@ function AppShell() {
             {currentView === 'account' && (
               <AccountView session={session} onSessionChanged={loadSession} />
             )}
-            {currentView === 'crm' && !isPlatformAdminMode && (
+            {currentView === 'crm' && !isPlatformAdminMode && tenantViewAccessible && (
               <CrmWorkspace request={authFetch} userRole={activeRole} />
             )}
-            {currentView === 'campaigns' && !isPlatformAdminMode && (
+            {currentView === 'campaigns' && !isPlatformAdminMode && tenantViewAccessible && (
               <CampaignWorkspace request={authFetch} userRole={activeRole} />
             )}
-            {currentView === 'commerce' && !isPlatformAdminMode && (
+            {currentView === 'commerce' && !isPlatformAdminMode && tenantViewAccessible && (
               <CommerceAdminWorkspace request={authFetch} userRole={activeRole} />
             )}
             {currentView === 'settings' && !isPlatformAdminMode && (
-              <><ConversionApiKeyPanel request={authFetch} userRole={activeRole} /><LiffReferralConfigPanel request={authFetch} userRole={activeRole} /><ReferralGrowthPanel request={authFetch} /><CommissionAttributionPanel request={authFetch} userRole={activeRole} /><RewardRedemptionPanel request={authFetch} userRole={activeRole} /><ContributionTierPanel request={authFetch} userRole={activeRole} /></>
+              <>
+                {moduleAuthority.isEnabled('COMMERCE') === true && <ConversionApiKeyPanel request={authFetch} userRole={activeRole} />}
+                {moduleAuthority.isEnabled('CRM') === true && <><LiffReferralConfigPanel request={authFetch} userRole={activeRole} /><ReferralGrowthPanel request={authFetch} /></>}
+                {moduleAuthority.isEnabled('DEALER_COMMISSION') === true && <CommissionAttributionPanel request={authFetch} userRole={activeRole} />}
+                {moduleAuthority.isEnabled('POINTS_REWARDS') === true && <><RewardRedemptionPanel request={authFetch} userRole={activeRole} /><ContributionTierPanel request={authFetch} userRole={activeRole} /></>}
+              </>
             )}
-            {currentView === 'ai-usage' && (
+            {currentView === 'ai-usage' && tenantViewAccessible && (
               <AIUsagePanel request={authFetch} systemAdmin={isPlatformAdminMode} />
             )}
             {currentView === 'intelligence-health' && isPlatformAdminMode && (
@@ -5322,13 +5397,14 @@ function AppShell() {
             {currentView === 'templates' && isPlatformAdminMode && (
               <SystemTemplatesView />
             )}
-            {currentView === 'templates' && !isPlatformAdminMode && (
-              <TemplatesView onNavigate={createTemplate} onEditTemplate={editTemplate} />
+            {currentView === 'templates' && !isPlatformAdminMode && tenantViewAccessible && (
+              <TemplatesView onNavigate={createTemplate} onEditTemplate={editTemplate} aiEnabled={moduleAuthority.isEnabled('AI') === true} />
             )}
-            {currentView === 'template-builder' && !isPlatformAdminMode && (
+            {currentView === 'template-builder' && !isPlatformAdminMode && tenantViewAccessible && (
               <EditorView
                 mode="template"
                 templateId={currentTemplateId}
+                aiEnabled={moduleAuthority.isEnabled('AI') === true}
                 onBack={() => {
                   setCurrentTemplateId(null);
                   setCurrentView('templates');
