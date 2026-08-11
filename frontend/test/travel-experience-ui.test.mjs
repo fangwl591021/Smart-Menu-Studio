@@ -1,0 +1,98 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import test from 'node:test';
+import { isBookingFullyPaid, travelEventLabel, travelStatusLabel } from '../src/travel-presentation.js';
+import { moduleKeyForView } from '../src/module-entitlements.js';
+
+const read = path => readFile(new URL(path, import.meta.url), 'utf8');
+const [app, tenant, member, presentation, modules] = await Promise.all([
+  read('../src/App.jsx'), read('../src/components/TravelWorkspace.jsx'), read('../src/components/LiffTravelPage.jsx'),
+  read('../src/travel-presentation.js'), read('../src/module-entitlements.js'),
+]);
+const all = `${app}\n${tenant}\n${member}\n${presentation}\n${modules}`;
+const acceptance = [
+  ['TRAVEL maps to tenant travel view', modules, /travel: 'TRAVEL'/],
+  ['Travel navigation is present', app, /id: 'travel', label: '旅遊管理'/],
+  ['Travel appears in tenant navigation contract', app, /'commerce', 'travel', 'ai-usage'/],
+  ['Travel workspace is entitlement guarded', app, /currentView === 'travel'[^]*tenantViewAccessible[^]*<TravelWorkspace/],
+  ['member Travel route is mounted', app, /pathname === '\/liff\/travel'[^]*<LiffTravelPage/],
+  ['tenant has itinerary tab', tenant, /\['itineraries','行程'\]/],
+  ['tenant has departure tab', tenant, /\['departures','出發團'\]/],
+  ['tenant has booking tab', tenant, /\['bookings','訂位管理'\]/],
+  ['itinerary list uses approved route', tenant, /request\('\/api\/travel\/itineraries'\)/],
+  ['itinerary create uses approved route', tenant, /: '\/api\/travel\/itineraries'/],
+  ['itinerary update uses safe reference', tenant, /\/api\/travel\/itineraries\/\$\{encodeURIComponent\(item\.safeItineraryReference\)\}/],
+  ['itinerary fields include title', tenant, /name="title"/],
+  ['itinerary fields include summary', tenant, /name="summary"/],
+  ['itinerary fields include duration', tenant, /name="durationDays"/],
+  ['itinerary fields include region', tenant, /name="region"/],
+  ['itinerary fields include notes', tenant, /name="notes"/],
+  ['cover reuses approved asset upload', tenant, /request\('\/api\/templates\/upload-image'/],
+  ['cover sends safe asset reference only', tenant, /coverAssetReference: body\.asset\.id/],
+  ['itinerary submit-review action exists', tenant, /'submit-review'/],
+  ['itinerary approve action exists', tenant, /transition\(item, 'approve'\)/],
+  ['itinerary reject action captures review note', tenant, /reviewNote = window\.prompt/],
+  ['itinerary archive action exists', tenant, /transition\(item, 'archive'\)/],
+  ['approve is owner-only', tenant, /owner && item\.status === 'IN_REVIEW'/],
+  ['departure list is scoped below itinerary', tenant, /\/api\/travel\/itineraries\/\$\{encodeURIComponent\(itinerary\.safeItineraryReference\)\}\/departures/],
+  ['no global departure creation route', tenant, /path = item \?[^]*: `\/api\/travel\/itineraries/],
+  ['departure patch uses safe reference', tenant, /\/api\/travel\/departures\/\$\{encodeURIComponent\(item\.safeDepartureReference\)\}/],
+  ['departure open action exists', tenant, /transition\(item, 'open'\)/],
+  ['departure close action exists', tenant, /transition\(item, 'close'\)/],
+  ['departure cancel action exists', tenant, /transition\(item, 'cancel'\)/],
+  ['departure archive action exists', tenant, /transition\(item, 'archive'\)/],
+  ['seat authority values are displayed', tenant, /已保留 \{item\.reservedTravelerCount\}[^]*剩餘 \{item\.remainingSeats\}/],
+  ['booking windows are displayed', tenant, /報名期間/],
+  ['tenant booking list uses approved route', tenant, /request\('\/api\/travel\/bookings'\)/],
+  ['tenant booking detail uses approved route', tenant, /\/api\/travel\/bookings\/\$\{ref\}`/],
+  ['tenant timeline uses approved route', tenant, /\/api\/travel\/bookings\/\$\{ref\}\/events/],
+  ['tenant shows safe customer label', tenant, /safeCustomerLabel/],
+  ['tenant shows traveler snapshots', tenant, /旅客資料/],
+  ['tenant shows payment schedule', tenant, /付款排程/],
+  ['tenant maps Travel timeline labels', tenant, /travelEventLabel\(event\)/],
+  ['member starts with LIFF bootstrap', member, /\/api\/member\/referral\/bootstrap/],
+  ['member establishes verified identity', member, /\/api\/member\/establish/],
+  ['member request uses bearer LIFF token', member, /Authorization[^]*Bearer \$\{auth\.accessToken\}/],
+  ['member lists published itineraries through backend', member, /\/api\/member\/travel\/itineraries/],
+  ['member reads itinerary departures', member, /itineraries\/\$\{ref\}\/departures/],
+  ['member reads purchasable departure', member, /\/api\/member\/travel\/departures\/\$\{encodeURIComponent/],
+  ['traveler count is bounded', member, /Math\.max\(1, Math\.min\(100, count\)\)/],
+  ['multiple traveler snapshots are authored', member, /travelers\.map\(item => \(\{ \.\.\.item/],
+  ['booking creation sends safe departure reference', member, /safeDepartureReference: state\.departure\.safeDepartureReference/],
+  ['member lists own bookings', member, /member\/travel\/bookings'\)/],
+  ['member reads own booking timeline', member, /member\/travel\/bookings\/\$\{ref\}\/events/],
+  ['payment intent sends only selected payment leg', member, /JSON\.stringify\(\{ paymentLeg: leg \}\)/],
+  ['FULL payment label exists', presentation, /FULL: '全額'/],
+  ['DEPOSIT payment label exists', presentation, /DEPOSIT: '訂金'/],
+  ['BALANCE payment label exists', presentation, /BALANCE: '尾款'/],
+  ['payment handoff uses POST form', member, /form\.method = 'POST'[^]*form\.submit\(\)/],
+  ['return confirmation is bounded to four-second interval', member, /POLL_INTERVAL_MS = 4000/],
+  ['return confirmation is bounded to sixty seconds', member, /POLL_LIMIT_MS = 60000/],
+  ['return confirmation rereads server booking', member, /pollTravelBooking[^]*member\/travel\/bookings/],
+  ['browser return URL is not payment truth', member, /location\.(?:search|hash)|URLSearchParams|paymentSuccess|tradeStatus/, false],
+  ['Travel payment state is never browser-persisted', member, /localStorage|sessionStorage|indexedDB/, false],
+  ['FULL action uses approved wording', member, /paymentLeg === 'FULL' \? '前往付款'/],
+  ['deposit success uses approved wording', member, /return '訂金已完成'/],
+  ['deposit alone cannot satisfy fully-paid display', presentation, /every\(item => item\.status === 'PAID'\)/],
+  ['unknown event has safe zh-TW fallback', presentation, /行程狀態更新/],
+  ['raw event enum is not rendered as primary text', `${tenant}\n${member}`, /\{event\.eventType\}/, false],
+  ['Travel UI does not render raw Commerce references', `${tenant}\n${member}`, /safeOrderReference|paymentObligation|providerTransaction/, false],
+  ['Travel UI contains no high-risk identity fields', all, /passport|national.?id|healthData|身分證|護照|病歷/i, false],
+  ['Travel UI contains no storage internals', `${tenant}\n${member}`, /storageKey|storage_key|r2Key|R2_BUCKET/, false],
+  ['Travel UI contains no TravelKeeper product label', all, /TravelKeeper/i, false],
+  ['Travel UI contains no referral mutation', `${tenant}\n${member}`, /\/api\/(?!member\/referral\/bootstrap)[^\n]*referral|推薦關係|歸戶推薦/i, false],
+  ['Travel UI contains no commission payout', `${tenant}\n${member}`, /commission|payout|佣金|提領/i, false],
+  ['Travel UI contains no points mutation', `${tenant}\n${member}`, /points|rewards?|點數|紅利/i, false],
+  ['Travel UI contains no CRM automation', `${tenant}\n${member}`, /pipelineStage|automaticTag|followUp|自動標籤/i, false],
+  ['Travel UI contains no campaign mutation', `${tenant}\n${member}`, /campaigns?\/[^\n]*(?:execute|resume)|cancelExecution/i, false],
+  ['Travel UI contains no AI invocation', `${tenant}\n${member}`, /gemini|generateContent|AI 呼叫/i, false],
+  ['Travel member flow does not use generic cart', member, /購物車|cartItems|commerce\/products/i, false],
+];
+
+for (const [name, source, pattern, expected = true] of acceptance) test(`8C-UI acceptance: ${name}`, () => expected ? assert.match(source, pattern) : assert.doesNotMatch(source, pattern));
+test('8C-UI behavior: Travel view requires TRAVEL entitlement', () => assert.equal(moduleKeyForView('travel'), 'TRAVEL'));
+test('8C-UI behavior: deposit alone is not fully paid', () => assert.equal(isBookingFullyPaid({ paymentSchedule: [{ paymentLeg: 'DEPOSIT', status: 'PAID' }, { paymentLeg: 'BALANCE', status: 'PENDING' }] }), false));
+test('8C-UI behavior: all required legs paid is fully paid', () => assert.equal(isBookingFullyPaid({ paymentSchedule: [{ paymentLeg: 'DEPOSIT', status: 'PAID' }, { paymentLeg: 'BALANCE', status: 'PAID' }] }), true));
+test('8C-UI behavior: unknown event fallback is safe zh-TW', () => assert.equal(travelEventLabel({ eventType: 'FUTURE_EVENT' }), '行程狀態更新'));
+test('8C-UI behavior: unknown status fallback is not a raw enum', () => assert.equal(travelStatusLabel('FUTURE_STATUS'), '狀態更新'));
+test('8C-UI focused suite contains at least 65 named acceptance checks', () => assert.ok(acceptance.length >= 65, `expected at least 65 checks, received ${acceptance.length}`));

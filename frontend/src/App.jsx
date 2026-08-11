@@ -18,6 +18,8 @@ import CampaignWorkspace from './components/CampaignWorkspace';
 import TrackedUriTool from './components/TrackedUriTool';
 import CommerceAdminWorkspace from './components/CommerceAdminWorkspace';
 import LiffCommercePage from './components/LiffCommercePage';
+import TravelWorkspace from './components/TravelWorkspace';
+import LiffTravelPage from './components/LiffTravelPage';
 import SystemWorkspaceModules from './components/SystemWorkspaceModules';
 import { useWorkspaceModuleAuthority } from './components/WorkspaceModuleProvider';
 import {
@@ -49,7 +51,8 @@ import {
   CheckCircle2,
   Send,
   Loader2,
-  ShoppingBag
+  ShoppingBag,
+  MapPin
 } from 'lucide-react';
 
 const NAVIGATION = [
@@ -59,6 +62,7 @@ const NAVIGATION = [
   { id: 'crm', label: 'CRM 客戶管理', icon: Users },
   { id: 'campaigns', label: '行銷活動', icon: MessageSquare },
   { id: 'commerce', label: '商城', icon: ShoppingBag },
+  { id: 'travel', label: '旅遊管理', icon: MapPin },
   { id: 'ai-usage', label: 'AI \u7528\u91cf', icon: Sparkles },
   { id: 'intelligence-health', label: 'LINE Health', icon: MousePointerClick },
   { id: 'accounts', label: '客戶帳號', icon: Users },
@@ -5185,7 +5189,7 @@ function AppShell() {
         if (item.id === 'accounts') return false;
         if (item.id === 'members') return activeRole === 'owner' || activeRole === 'admin';
         if (item.id === 'settings') return activeRole === 'owner' || activeRole === 'admin';
-        return ['dashboard', 'projects', 'templates', 'crm', 'campaigns', 'commerce', 'ai-usage'].includes(item.id);
+        return ['dashboard', 'projects', 'templates', 'crm', 'campaigns', 'commerce', 'travel', 'ai-usage'].includes(item.id);
       }).filter(item => isTenantNavigationItemVisible(item, moduleAuthority));
   const tenantViewAccessible = isPlatformAdminMode || moduleAuthority.canAccessView(currentView);
 
@@ -5378,6 +5382,9 @@ function AppShell() {
             {currentView === 'commerce' && !isPlatformAdminMode && tenantViewAccessible && (
               <CommerceAdminWorkspace request={authFetch} userRole={activeRole} />
             )}
+            {currentView === 'travel' && !isPlatformAdminMode && tenantViewAccessible && (
+              <TravelWorkspace request={authFetch} userRole={activeRole} />
+            )}
             {currentView === 'settings' && !isPlatformAdminMode && (
               <>
                 {moduleAuthority.isEnabled('COMMERCE') === true && <ConversionApiKeyPanel request={authFetch} userRole={activeRole} />}
@@ -5422,5 +5429,6 @@ function AppShell() {
 export default function App() {
   if (window.location.pathname === '/liff/referral') return <LiffReferralPage />;
   if (window.location.pathname === '/liff/commerce') return <LiffCommercePage />;
+  if (window.location.pathname === '/liff/travel') return <LiffTravelPage />;
   return <AppShell />;
 }

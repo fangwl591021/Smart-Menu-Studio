@@ -21,6 +21,7 @@ export const TENANT_VIEW_MODULE = Object.freeze({
   crm: 'CRM',
   campaigns: 'CAMPAIGN',
   commerce: 'COMMERCE',
+  travel: 'TRAVEL',
   'ai-usage': 'AI',
 });
 
@@ -29,6 +30,7 @@ const TENANT_MODULE_HOME = Object.freeze([
   ['CRM', 'crm'],
   ['CAMPAIGN', 'campaigns'],
   ['COMMERCE', 'commerce'],
+  ['TRAVEL', 'travel'],
   ['AI', 'ai-usage'],
 ]);
 

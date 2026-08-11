@@ -15,7 +15,7 @@ const campaignUi = `${workspace}\n${editor}\n${audience}`;
 
 const acceptance = [
   ['tenant navigation contains campaign entry', app, /id: 'campaigns', label: '行銷活動'/],
-  ['tenant navigation permits campaign view', app, /'crm', 'campaigns', 'commerce', 'ai-usage'/],
+  ['tenant navigation permits campaign view', app, /'crm', 'campaigns', 'commerce', 'travel', 'ai-usage'/],
   ['application imports campaign workspace', app, /import CampaignWorkspace from '\.\/components\/CampaignWorkspace'/],
   ['application renders campaign workspace', app, /currentView === 'campaigns'[\s\S]*<CampaignWorkspace request=\{authFetch\} userRole=\{activeRole\}/],
   ['campaign workspace exposes stable test landmark', workspace, /data-testid="campaign-workspace"/],

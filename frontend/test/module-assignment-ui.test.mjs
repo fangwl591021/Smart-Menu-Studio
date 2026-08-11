@@ -23,7 +23,7 @@ const moduleUi = `${systemModules}\n${toggle}\n${provider}\n${entitlementSource}
 const acceptance = [
   ['System Admin navigation has module management entry', app, /id: 'modules', label: '模組管理'/],
   ['module management is in platform navigation only', app, /isPlatformAdminMode[\s\S]*\['accounts', 'modules', 'templates'/],
-  ['tenant navigation does not include module management', app, /return \['dashboard', 'projects', 'templates', 'crm', 'campaigns', 'commerce', 'ai-usage'\]/],
+  ['tenant navigation does not include module management', app, /return \['dashboard', 'projects', 'templates', 'crm', 'campaigns', 'commerce', 'travel', 'ai-usage'\]/],
   ['module management renders only in platform mode', app, /currentView === 'modules' && isPlatformAdminMode[\s\S]*<SystemWorkspaceModules request=\{authFetch\}/],
   ['workspace module panel has stable landmark', systemModules, /data-testid="workspace-module-panel"/],
   ['workspace module panel title is zh-TW', systemModules, /工作區模組設定/],
@@ -37,8 +37,8 @@ const acceptance = [
   ['backend label is the primary module heading', systemModules, /<h3[^>]*>\{module\.label\}<\/h3>/],
   ['backend description is rendered', systemModules, /\{module\.description\}/],
   ['TRAVEL appears in canonical catalog', entitlementSource, /'TRAVEL'/],
-  ['TRAVEL has future UI hint', systemModules, /旅遊模組功能將於後續版本啟用/],
-  ['TRAVEL dependency hint does not auto-enable', systemModules, /搭配 CRM 與電商模組使用/],
+  ['TRAVEL has active UI hint', systemModules, /旅遊模組需先啟用電商模組/],
+  ['TRAVEL dependency hint does not auto-enable CRM', systemModules, /CRM 為建議搭配，不會自動啟用/],
   ['module control is an accessible switch', toggle, /role="switch"[\s\S]*aria-label=[\s\S]*aria-checked=\{enabled\}/],
   ['module control is keyboard-native button', toggle, /<button[\s\S]*type="button"[\s\S]*role="switch"/],
   ['module status says enabled in zh-TW', toggle, /已啟用/],
@@ -147,9 +147,9 @@ test('8A-UI behavior: safe redirect selects first backend-enabled module', () =>
   assert.equal(firstAvailableTenantView({ CORE_MENU: false, CRM: false }), 'account');
 });
 
-test('8A-UI behavior: TRAVEL has no invented tenant route', () => {
-  assert.equal(moduleKeyForView('travel'), null);
-  assert.doesNotMatch(entitlementSource, /travel: 'TRAVEL'/);
+test('8A-UI behavior: TRAVEL uses the approved tenant route', () => {
+  assert.equal(moduleKeyForView('travel'), 'TRAVEL');
+  assert.match(entitlementSource, /travel: 'TRAVEL'/);
 });
 
 test('8A-UI focused suite contains at least 53 acceptance checks', () => {

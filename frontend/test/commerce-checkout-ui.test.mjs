@@ -12,7 +12,7 @@ const [app, admin, member] = await Promise.all([
 
 const acceptance = [
   ['tenant navigation contains commerce entry', app, /id: 'commerce', label: '商城'/],
-  ['tenant navigation permits commerce view', app, /'campaigns', 'commerce', 'ai-usage'/],
+  ['tenant navigation permits commerce view', app, /'campaigns', 'commerce', 'travel', 'ai-usage'/],
   ['application imports commerce workspace', app, /import CommerceAdminWorkspace from '\.\/components\/CommerceAdminWorkspace'/],
   ['application renders commerce workspace', app, /currentView === 'commerce'[\s\S]*<CommerceAdminWorkspace request=\{authFetch\} userRole=\{activeRole\}/],
   ['member storefront has dedicated LIFF route', app, /pathname === '\/liff\/commerce'[\s\S]*<LiffCommercePage/],

@@ -148,7 +148,7 @@ export default function SystemWorkspaceModules({ request }) {
                   <div>
                     <h3 className="font-semibold text-gray-900">{module.label}</h3>
                     <p className="mt-1 text-sm text-gray-500">{module.description}</p>
-                    {module.moduleKey === 'TRAVEL' && <p className="mt-2 text-xs text-amber-700">旅遊模組功能將於後續版本啟用，並將搭配 CRM 與電商模組使用。</p>}
+                    {module.moduleKey === 'TRAVEL' && <p className="mt-2 text-xs text-blue-700">旅遊模組需先啟用電商模組；CRM 為建議搭配，不會自動啟用。</p>}
                   </div>
                   <ModuleEntitlementToggle
                     label={module.label}
