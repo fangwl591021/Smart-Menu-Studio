@@ -28,6 +28,15 @@ type ExecutionRow = Record<string, unknown> & {
   started_at?: string | null;
   completed_at?: string | null;
   cancelled_at?: string | null;
+  campaign_status?: string;
+};
+
+type ResumeAuthorityDelivery = {
+  execution_id?: string;
+  status: string;
+  attempt_count: number;
+  retryable: number;
+  created_at: string;
 };
 
 type CampaignExecutionContext = {
@@ -241,7 +250,11 @@ async function frozenRecipients(db: D1Database, workspaceId: string, context: Ca
   }));
 }
 
-function publicExecution(row: ExecutionRow, idempotent = false) {
+function publicExecution(
+  row: ExecutionRow,
+  idempotent = false,
+  authority = { canResume: false, retryableRemaining: 0 },
+) {
   return {
     safeExecutionReference: clean(row.public_ref, 100),
     status: clean(row.status, 30),
@@ -259,23 +272,33 @@ function publicExecution(row: ExecutionRow, idempotent = false) {
     startedAt: row.started_at || null,
     completedAt: row.completed_at || null,
     cancelledAt: row.cancelled_at || null,
+    canResume: authority.canResume,
+    retryableRemaining: authority.retryableRemaining,
     idempotent,
   };
 }
 
 async function executionRowByAction(db: D1Database, workspaceId: string, campaignId: string, actionHash: string) {
-  return db.prepare(`SELECT * FROM campaign_executions
-    WHERE workspace_id=? AND campaign_id=? AND action_reference_hash=? LIMIT 1`)
+  return db.prepare(`SELECT e.*,c.status campaign_status FROM campaign_executions e
+    JOIN campaigns c ON c.id=e.campaign_id AND c.workspace_id=e.workspace_id
+    WHERE e.workspace_id=? AND e.campaign_id=? AND e.action_reference_hash=? LIMIT 1`)
     .bind(workspaceId, campaignId, actionHash).first<ExecutionRow>();
 }
 
 async function executionRowByReference(db: D1Database, workspaceId: string, campaignReference: string, executionReference: string) {
-  const row = await db.prepare(`SELECT e.* FROM campaign_executions e
+  const row = await db.prepare(`SELECT e.*,c.status campaign_status FROM campaign_executions e
     JOIN campaigns c ON c.id=e.campaign_id AND c.workspace_id=e.workspace_id
     WHERE e.workspace_id=? AND c.public_ref=? AND e.public_ref=? LIMIT 1`)
     .bind(workspaceId, campaignReference, executionReference).first<ExecutionRow>();
   if (!row) throw new Error('CAMPAIGN_EXECUTION_NOT_FOUND');
   return row;
+}
+
+async function executionRowById(db: D1Database, workspaceId: string, executionId: string) {
+  return db.prepare(`SELECT e.*,c.status campaign_status FROM campaign_executions e
+    JOIN campaigns c ON c.id=e.campaign_id AND c.workspace_id=e.workspace_id
+    WHERE e.workspace_id=? AND e.id=? LIMIT 1`)
+    .bind(workspaceId, executionId).first<ExecutionRow>();
 }
 
 async function createExecution(db: D1Database, input: {
@@ -345,8 +368,7 @@ async function createExecution(db: D1Database, input: {
 }
 
 async function refreshExecutionSummary(db: D1Database, workspaceId: string, executionId: string) {
-  const execution = await db.prepare('SELECT * FROM campaign_executions WHERE workspace_id=? AND id=? LIMIT 1')
-    .bind(workspaceId, executionId).first<ExecutionRow>();
+  const execution = await executionRowById(db, workspaceId, executionId);
   if (!execution) throw new Error('CAMPAIGN_EXECUTION_NOT_FOUND');
   const counts = await db.prepare(`SELECT
       COUNT(*) total_count,
@@ -374,13 +396,90 @@ async function refreshExecutionSummary(db: D1Database, workspaceId: string, exec
   await db.prepare(`UPDATE campaign_executions SET status=?,queued_count=?,sent_count=?,failed_count=?,
       skipped_count=?,cancelled_count=?,completed_at=? WHERE workspace_id=? AND id=?`)
     .bind(status, queued, sent, failed, skipped, cancelled, completedAt, workspaceId, executionId).run();
-  return db.prepare('SELECT * FROM campaign_executions WHERE workspace_id=? AND id=? LIMIT 1')
-    .bind(workspaceId, executionId).first<ExecutionRow>();
+  return executionRowById(db, workspaceId, executionId);
 }
 
-function retryWindowOpen(createdAt: string) {
+function retryWindowOpen(createdAt: string, atMs = Date.now()) {
   const created = Date.parse(createdAt);
-  return Number.isFinite(created) && Date.now() - created < RETRY_WINDOW_MS;
+  return Number.isFinite(created) && atMs - created < RETRY_WINDOW_MS;
+}
+
+function executionStatusMayResume(executionStatus: string, campaignStatus: string) {
+  return campaignStatus === 'PREPARED' && ['PENDING', 'RUNNING', 'FAILED', 'PARTIAL_FAILED'].includes(executionStatus);
+}
+
+export function campaignDeliveryCanResume(delivery: ResumeAuthorityDelivery, atMs = Date.now()) {
+  const attempts = Number(delivery.attempt_count);
+  if (!Number.isSafeInteger(attempts) || attempts < 0 || attempts >= CAMPAIGN_DELIVERY_MAX_ATTEMPTS) return false;
+  if (delivery.status === 'PENDING') return true;
+  if (!retryWindowOpen(delivery.created_at, atMs)) return false;
+  if (delivery.status === 'SENDING') return true;
+  return delivery.status === 'FAILED' && Number(delivery.retryable) === 1;
+}
+
+export function campaignExecutionRetryAuthority(input: {
+  executionStatus: string;
+  campaignStatus: string;
+  deliveries: readonly ResumeAuthorityDelivery[];
+  atMs?: number;
+}) {
+  if (!executionStatusMayResume(input.executionStatus, input.campaignStatus)) {
+    return { canResume: false, retryableRemaining: 0 };
+  }
+  const retryableRemaining = input.deliveries.filter(delivery => campaignDeliveryCanResume(delivery, input.atMs)).length;
+  return { canResume: retryableRemaining > 0, retryableRemaining };
+}
+
+async function resumeCandidateRows(db: D1Database, workspaceId: string, executionIds: string[]) {
+  if (!executionIds.length) return [] as ResumeAuthorityDelivery[];
+  const placeholders = executionIds.map(() => '?').join(',');
+  const rows = await db.prepare(`SELECT execution_id,status,attempt_count,retryable,created_at
+    FROM campaign_deliveries WHERE workspace_id=? AND execution_id IN (${placeholders})
+      AND status IN ('PENDING','SENDING','FAILED')`)
+    .bind(workspaceId, ...executionIds).all<ResumeAuthorityDelivery>();
+  return rows.results || [];
+}
+
+async function projectExecutions(db: D1Database, workspaceId: string, executions: ExecutionRow[], idempotent = false) {
+  const candidates = await resumeCandidateRows(
+    db,
+    workspaceId,
+    executions.filter(row => executionStatusMayResume(String(row.status), String(row.campaign_status))).map(row => row.id),
+  );
+  return executions.map(row => {
+    const authority = campaignExecutionRetryAuthority({
+      executionStatus: String(row.status),
+      campaignStatus: String(row.campaign_status),
+      deliveries: candidates.filter(delivery => delivery.execution_id === row.id),
+    });
+    return publicExecution(row, idempotent, authority);
+  });
+}
+
+async function projectExecution(db: D1Database, workspaceId: string, execution: ExecutionRow, idempotent = false) {
+  const projected = await projectExecutions(db, workspaceId, [execution], idempotent);
+  return projected[0];
+}
+
+async function resumeWorkRows(db: D1Database, input: {
+  workspaceId: string;
+  execution: ExecutionRow;
+  lineAccountId: string;
+}) {
+  const rows = await db.prepare(`SELECT d.*,t.provider_recipient_id FROM campaign_deliveries d
+    LEFT JOIN line_member_delivery_targets t ON t.workspace_id=d.workspace_id
+      AND t.line_account_id=? AND t.line_member_id=d.line_member_id
+    WHERE d.workspace_id=? AND d.execution_id=? AND d.status IN ('PENDING','SENDING','FAILED')
+    ORDER BY d.created_at ASC,d.id ASC`)
+    .bind(input.lineAccountId, input.workspaceId, input.execution.id).all<DeliveryWorkRow>();
+  const candidates = rows.results || [];
+  const authority = campaignExecutionRetryAuthority({
+    executionStatus: String(input.execution.status),
+    campaignStatus: String(input.execution.campaign_status),
+    deliveries: candidates,
+  });
+  if (!authority.canResume) return [];
+  return candidates.filter(delivery => campaignDeliveryCanResume(delivery));
 }
 
 async function recordUnsendable(db: D1Database, workspaceId: string, deliveryId: string) {
@@ -415,21 +514,14 @@ async function runExecution(db: D1Database, input: {
   workspaceId: string;
   execution: ExecutionRow;
   context: CampaignExecutionContext;
+  work: DeliveryWorkRow[];
   fetcher?: typeof fetch;
 }) {
   await db.prepare(`UPDATE campaign_executions SET status='RUNNING',started_at=COALESCE(started_at,CURRENT_TIMESTAMP),completed_at=NULL
     WHERE workspace_id=? AND id=? AND status IN ('PENDING','RUNNING','FAILED','PARTIAL_FAILED')`)
     .bind(input.workspaceId, input.execution.id).run();
-  const work = await db.prepare(`SELECT d.*,t.provider_recipient_id FROM campaign_deliveries d
-    LEFT JOIN line_member_delivery_targets t ON t.workspace_id=d.workspace_id
-      AND t.line_account_id=? AND t.line_member_id=d.line_member_id
-    WHERE d.workspace_id=? AND d.execution_id=? AND (
-      d.status='PENDING' OR d.status='SENDING' OR (d.status='FAILED' AND d.retryable=1)
-    ) AND d.attempt_count<? ORDER BY d.created_at ASC,d.id ASC`)
-    .bind(input.context.lineAccountId, input.workspaceId, input.execution.id, CAMPAIGN_DELIVERY_MAX_ATTEMPTS)
-    .all<DeliveryWorkRow>();
 
-  for (const row of work.results || []) {
+  for (const row of input.work) {
     const state = await db.prepare('SELECT status FROM campaign_executions WHERE workspace_id=? AND id=? LIMIT 1')
       .bind(input.workspaceId, input.execution.id).first<Record<string, unknown>>();
     if (String(state?.status) === 'CANCELLED') break;
@@ -486,7 +578,7 @@ export async function executePreparedCampaign(db: D1Database, input: {
   fetcher?: typeof fetch;
 }) {
   const replay = await replayExecutionByAction(db, input);
-  if (replay) return publicExecution(replay, true);
+  if (replay) return projectExecution(db, input.workspaceId, replay, true);
   const context = await preparedContext(db, input.workspaceId, input.safeCampaignReference);
   const preflight = await preflightLineCampaignSend({
     channelAccessToken: context.channelAccessToken,
@@ -496,10 +588,11 @@ export async function executePreparedCampaign(db: D1Database, input: {
   if (!preflight.ready) throw new Error(preflight.safeErrorCode || 'LINE_CREDENTIAL_PREFLIGHT_FAILED');
   const recipients = await frozenRecipients(db, input.workspaceId, context);
   const created = await createExecution(db, { ...input, context, recipients });
-  if (created.idempotent) return publicExecution(created.row, true);
-  const completed = await runExecution(db, { workspaceId: input.workspaceId, execution: created.row, context, fetcher: input.fetcher });
+  if (created.idempotent) return projectExecution(db, input.workspaceId, created.row, true);
+  const work = await resumeWorkRows(db, { workspaceId: input.workspaceId, execution: created.row, lineAccountId: context.lineAccountId });
+  const completed = await runExecution(db, { workspaceId: input.workspaceId, execution: created.row, context, work, fetcher: input.fetcher });
   if (!completed) throw new Error('CAMPAIGN_EXECUTION_READ_FAILED');
-  return publicExecution(completed, false);
+  return projectExecution(db, input.workspaceId, completed, false);
 }
 
 async function contextForExecution(db: D1Database, workspaceId: string, campaignReference: string, execution: ExecutionRow) {
@@ -522,20 +615,21 @@ export async function resumeCampaignExecution(db: D1Database, input: {
   const execution = await executionRowByReference(db, input.workspaceId, input.safeCampaignReference, input.safeExecutionReference);
   if (execution.status === 'CANCELLED') throw new Error('CAMPAIGN_EXECUTION_CANCELLED');
   if (execution.status === 'COMPLETED') throw new Error('CAMPAIGN_EXECUTION_COMPLETED');
+  if (!executionStatusMayResume(String(execution.status), String(execution.campaign_status))) {
+    throw new Error('CAMPAIGN_EXECUTION_NOT_RESUMABLE');
+  }
   const context = await contextForExecution(db, input.workspaceId, input.safeCampaignReference, execution);
-  const remaining = await db.prepare(`SELECT COUNT(*) count FROM campaign_deliveries
-    WHERE workspace_id=? AND execution_id=? AND (
-      status='PENDING' OR status='SENDING' OR (status='FAILED' AND retryable=1 AND attempt_count<?)
-    )`).bind(input.workspaceId, execution.id, CAMPAIGN_DELIVERY_MAX_ATTEMPTS).first<Record<string, unknown>>();
+  const work = await resumeWorkRows(db, { workspaceId: input.workspaceId, execution, lineAccountId: context.lineAccountId });
+  if (!work.length) throw new Error('CAMPAIGN_EXECUTION_NOT_RESUMABLE');
   const preflight = await preflightLineCampaignSend({
     channelAccessToken: context.channelAccessToken,
-    recipientCount: Number(remaining?.count || 0),
+    recipientCount: work.length,
     fetcher: input.fetcher,
   });
   if (!preflight.ready) throw new Error(preflight.safeErrorCode || 'LINE_CREDENTIAL_PREFLIGHT_FAILED');
-  const result = await runExecution(db, { workspaceId: input.workspaceId, execution, context, fetcher: input.fetcher });
+  const result = await runExecution(db, { workspaceId: input.workspaceId, execution, context, work, fetcher: input.fetcher });
   if (!result) throw new Error('CAMPAIGN_EXECUTION_READ_FAILED');
-  return publicExecution(result);
+  return projectExecution(db, input.workspaceId, result);
 }
 
 export async function cancelCampaignExecution(db: D1Database, input: {
@@ -563,10 +657,11 @@ export async function listCampaignExecutions(db: D1Database, workspaceId: string
   const campaign = await db.prepare('SELECT id FROM campaigns WHERE workspace_id=? AND public_ref=? LIMIT 1')
     .bind(workspaceId, safeCampaignReference).first<Record<string, unknown>>();
   if (!campaign) throw new Error('CAMPAIGN_NOT_FOUND');
-  const rows = await db.prepare(`SELECT * FROM campaign_executions
-    WHERE workspace_id=? AND campaign_id=? ORDER BY created_at DESC,public_ref ASC LIMIT 100`)
+  const rows = await db.prepare(`SELECT e.*,c.status campaign_status FROM campaign_executions e
+    JOIN campaigns c ON c.id=e.campaign_id AND c.workspace_id=e.workspace_id
+    WHERE e.workspace_id=? AND e.campaign_id=? ORDER BY e.created_at DESC,e.public_ref ASC LIMIT 100`)
     .bind(workspaceId, campaign.id).all<ExecutionRow>();
-  return (rows.results || []).map(row => publicExecution(row));
+  return projectExecutions(db, workspaceId, rows.results || []);
 }
 
 export async function campaignExecutionByReference(db: D1Database, input: {
@@ -574,7 +669,8 @@ export async function campaignExecutionByReference(db: D1Database, input: {
   safeCampaignReference: string;
   safeExecutionReference: string;
 }) {
-  return publicExecution(await executionRowByReference(db, input.workspaceId, input.safeCampaignReference, input.safeExecutionReference));
+  const execution = await executionRowByReference(db, input.workspaceId, input.safeCampaignReference, input.safeExecutionReference);
+  return projectExecution(db, input.workspaceId, execution);
 }
 
 export async function listCampaignDeliveries(db: D1Database, input: {

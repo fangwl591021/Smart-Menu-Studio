@@ -96,12 +96,12 @@ test('16 credential token is absent from Tenant projections', () => {
 test('17 same execute action returns the same execution', async () => {
   const base = { workspaceId: 'ws-a', campaignId: 'camp-a', audienceVersionNo: 1, contentVersionNo: 2, actionReference: 'execute-action-0001' };
   assert.equal(await campaignExecutionActionHash(base), await campaignExecutionActionHash(base));
-  assert.match(execution, /const replay = await replayExecutionByAction[\s\S]*if \(replay\) return publicExecution\(replay, true\)/);
+  assert.match(execution, /const replay = await replayExecutionByAction[\s\S]*if \(replay\) return projectExecution\(db, input\.workspaceId, replay, true\)/);
   assert.ok(execution.indexOf('replayExecutionByAction(db, input)') < execution.indexOf('preparedContext(db, input.workspaceId'));
 });
 
 test('18 duplicate logical delivery rows are blocked', () => assert.match(migration, /UNIQUE\(workspace_id,execution_id,crm_person_id\)/));
-test('19 SENT recipients are never selected for resume', () => assert.match(execution, /d\.status='PENDING' OR d\.status='SENDING' OR \(d\.status='FAILED' AND d\.retryable=1\)/));
+test('19 SENT recipients are never selected for resume', () => assert.match(execution, /status IN \('PENDING','SENDING','FAILED'\)/));
 test('20 resume selects only pending uncertain or retryable failed work', () => assert.doesNotMatch(execution.match(/async function runExecution[\s\S]*?(?=\nexport async function executePreparedCampaign)/)?.[0] || '', /status='CANCELLED' OR|status='SKIPPED' OR|status='SENT' OR/));
 test('20a uncertain SENDING resume preserves the original attempt number', () => {
   assert.match(execution, /continuingUncertainAttempt = row\.status === 'SENDING'/);
@@ -132,7 +132,7 @@ test('26 invalid or missing credential fails before send', () => {
 });
 test('27 maximum attempts are enforced', () => {
   assert.equal(CAMPAIGN_DELIVERY_MAX_ATTEMPTS, 3);
-  assert.match(execution, /d\.attempt_count<\?/);
+  assert.match(execution, /attempts >= CAMPAIGN_DELIVERY_MAX_ATTEMPTS/);
   assert.match(migration, /attempt_count BETWEEN 0 AND 3/);
 });
 
