@@ -8,6 +8,8 @@
   "files": [
     "src/commerce/providers/newebpay.ts",
     "src/commerce/commerce.ts",
+    "src/commerce/member-commerce.ts",
+    "src/commerce/member-routes.ts",
     "src/commerce/routes.ts"
   ]
 }

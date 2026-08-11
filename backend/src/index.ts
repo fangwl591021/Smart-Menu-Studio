@@ -145,6 +145,7 @@ import { registerCampaignAudienceRoutes } from './campaign/audience-routes';
 import { registerCampaignExecutionRoutes } from './campaign/execution-routes';
 import { registerCampaignRoutes } from './campaign/campaign-routes';
 import { registerCommerceRoutes } from './commerce/routes';
+import { registerMemberCommerceRoutes } from './commerce/member-routes';
 import { acquisitionSummary, assignCrmOwner, assignmentSummary, referralSummary } from './crm/acquisition';
 import { assigneeReference, createAssigneeHandle, verifyAssigneeHandle } from './crm/assignee-handle';
 
@@ -6767,6 +6768,7 @@ registerCampaignAudienceRoutes(app,{requireRole,workspaceIdOf,text});
 registerCampaignExecutionRoutes(app,{requireRole,workspaceIdOf,text});
 registerCampaignRoutes(app,{requireRole,workspaceIdOf,text});
 registerCommerceRoutes(app,{requireRole,workspaceIdOf,text});
+registerMemberCommerceRoutes(app,{verifiedReferralMember,ensureCrmPersonForVerifiedMember,text});
 app.post('/api/system/workspaces/:workspaceId/line-simulator', async (c) => {
   try {
     await requireSystemAdmin(c);

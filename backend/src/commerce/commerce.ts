@@ -81,6 +81,7 @@ export async function createOrder(db: any, input: any) {
   const orderId=makeId('co'), ref=publicRef('ord'), timestamp=now();
   const statements=[db.prepare(`INSERT INTO commerce_orders(id,public_ref,workspace_id,status,payment_status,subtotal_amount_minor,total_amount_minor,currency_code,created_by_user_id,created_at,updated_at) VALUES(?,?,?,'DRAFT','UNPAID',?,?,'TWD',?,?,?)`).bind(orderId,ref,input.workspaceId,total,total,input.userId,timestamp,timestamp)];
   prepared.forEach(({product,quantity,line})=>statements.push(db.prepare(`INSERT INTO commerce_order_items(id,workspace_id,order_id,product_id,sku_snapshot,name_snapshot,unit_amount_minor,quantity,line_amount_minor,currency_code,created_at) VALUES(?,?,?,?,?,?,?,?,?,'TWD',?)`).bind(makeId('ci'),input.workspaceId,orderId,product.id,product.sku,product.name,product.price_amount_minor,quantity,line,timestamp)));
+  if(input.memberOwner) statements.push(db.prepare(`INSERT INTO commerce_order_member_owners(order_id,workspace_id,line_account_id,line_member_id,crm_person_id,created_at) VALUES(?,?,?,?,?,?)`).bind(orderId,input.workspaceId,input.memberOwner.lineAccountId,input.memberOwner.lineMemberId,input.memberOwner.crmPersonId,timestamp));
   await db.batch(statements); return readOrder(db,input.workspaceId,ref);
 }
 export async function listOrders(db:any,workspaceId:string){return Promise.all((await results(db.prepare(`SELECT * FROM commerce_orders WHERE workspace_id=? ORDER BY created_at DESC,id DESC`).bind(workspaceId))).map((o:any)=>orderView(o)));}
