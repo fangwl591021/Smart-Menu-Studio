@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Loader2, Sparkles } from 'lucide-react';
 import { emitGuideEvent, GUIDE_REFRESH_EVENT } from '../guide-events';
 import RecommendationSection from './RecommendationSection';
 
@@ -22,8 +22,24 @@ const STEP_SYMBOLS = {
   blocked: '!',
 };
 
-export default function SmartGuide({ projectId, selectedAreaId, request, onAction, userRole, onProposalSaved }) {
+export default function SmartGuide({
+  projectId,
+  selectedAreaId,
+  request,
+  onAction,
+  userRole,
+  onProposalSaved,
+  onPublish,
+  publishDisabled = false,
+  publishReason = '',
+  collapsed,
+  onCollapsedChange,
+  onReadinessChange,
+}) {
   const [state, setState] = useState({ loading: true, error: '', payload: null });
+  const [internalCollapsed, setInternalCollapsed] = useState(() => (
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches
+  ));
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [toast, setToast] = useState('');
   const [fallback, setFallback] = useState('');
@@ -72,6 +88,7 @@ export default function SmartGuide({ projectId, selectedAreaId, request, onActio
         workflowRef.current = nextWorkflow;
         setFallback('');
         setState({ loading: false, error: '', payload });
+        onReadinessChange?.(payload);
       })
       .catch(error => {
         console.error(error);
@@ -79,7 +96,13 @@ export default function SmartGuide({ projectId, selectedAreaId, request, onActio
       });
 
     return () => { active = false; };
-  }, [projectId, selectedAreaId, refreshNonce, request]);
+  }, [projectId, selectedAreaId, refreshNonce, request, onReadinessChange]);
+
+  const isCollapsed = collapsed ?? internalCollapsed;
+  const changeCollapsed = next => {
+    if (collapsed === undefined) setInternalCollapsed(next);
+    onCollapsedChange?.(next);
+  };
 
   const guide = state.payload?.guide;
   const workflow = state.payload?.workflow;
@@ -104,6 +127,22 @@ export default function SmartGuide({ projectId, selectedAreaId, request, onActio
     if (handled === false) setFallback('請前往對應設定頁完成此步驟。');
   };
 
+  if (isCollapsed) {
+    return (
+      <button
+        type="button"
+        data-guide-collapsed="true"
+        aria-expanded="false"
+        onClick={() => changeCollapsed(false)}
+        className="fixed bottom-5 right-0 z-40 flex items-center gap-2 rounded-l-xl border border-r-0 border-indigo-200 bg-white px-3 py-2 text-sm font-bold text-indigo-800 shadow-lg hover:bg-indigo-50"
+      >
+        <ChevronLeft size={16} />
+        <Sparkles size={16} />
+        智慧導引
+      </button>
+    );
+  }
+
   return (
     <aside data-guide-state={guide?.status || (state.loading ? 'loading' : 'error')} className={`fixed bottom-5 right-5 z-40 w-[min(380px,calc(100vw-2.5rem))] rounded-2xl border p-4 shadow-xl ${STATUS_STYLES[guide?.status] || 'border-gray-200 bg-white text-gray-900'}`}>
       {toast && (
@@ -113,8 +152,13 @@ export default function SmartGuide({ projectId, selectedAreaId, request, onActio
       )}
 
       <div className="flex items-center justify-between gap-3 font-bold">
-        <span className="flex items-center gap-2"><Sparkles size={18} />Smart Guide</span>
-        {guide && <span className="rounded-full bg-white/70 px-2 py-1 text-[11px]">{STATUS_LABELS[guide.status]}</span>}
+        <span className="flex items-center gap-2"><Sparkles size={18} />智慧導引</span>
+        <div className="flex items-center gap-2">
+          {guide && <span className="rounded-full bg-white/70 px-2 py-1 text-[11px]">{STATUS_LABELS[guide.status]}</span>}
+          <button type="button" aria-label="收合智慧導引" aria-expanded="true" onClick={() => changeCollapsed(true)} className="rounded-md p-1 hover:bg-white/80">
+            <ChevronRight size={17} />
+          </button>
+        </div>
       </div>
 
       {state.loading && !state.payload && (
@@ -157,7 +201,10 @@ export default function SmartGuide({ projectId, selectedAreaId, request, onActio
 
           <div className="mt-3 rounded-lg bg-white/70 p-3 text-sm">
             {workflow?.status === 'complete' ? (
-              <span className="flex items-start gap-2"><CheckCircle2 size={17} className="mt-0.5 shrink-0" />{workflow.message}</span>
+              <div>
+                <span className="flex items-start gap-2"><CheckCircle2 size={17} className="mt-0.5 shrink-0" />{workflow.message}</span>
+                <div className="mt-2 font-bold">下一步：發布圖文選單</div>
+              </div>
             ) : (
               <>
                 <div className="text-xs font-bold opacity-70">目前要處理</div>
@@ -176,6 +223,20 @@ export default function SmartGuide({ projectId, selectedAreaId, request, onActio
             >
               帶我到這一步
             </button>
+          )}
+
+          {workflow?.status === 'complete' && onPublish && (
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={onPublish}
+                disabled={publishDisabled}
+                className="w-full rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                前往發布
+              </button>
+              {publishDisabled && publishReason && <div className="mt-2 text-xs font-medium">{publishReason}</div>}
+            </div>
           )}
 
           <RecommendationSection

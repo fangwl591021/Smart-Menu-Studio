@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import SmartGuide from './components/SmartGuide';
 import ProposalManagement from './components/ProposalManagement';
 import OperationPlanManagement from './components/OperationPlanManagement';
@@ -38,6 +38,7 @@ import {
   Sparkles,
   UploadCloud,
   CheckCircle2,
+  Send,
   Loader2
 } from 'lucide-react';
 
@@ -574,6 +575,22 @@ const PROJECT_ACTION_BADGES = {
   richmenuswitch: '↔ 切換頁',
 };
 
+const PUBLISH_STEP_REASONS = {
+  PROJECT_IMAGE: '請先設定有效的圖文選單圖片。',
+  PROJECT_ACTIONS: '請先設定所有點擊區域的動作。',
+  LINE_ACCOUNT: '請先連結 LINE Official Account。',
+  LINE_BOT_TOKEN: '請先設定 Messaging API Bot Token。',
+  BASIC_VALIDATION: '請先完成基本檢查。',
+};
+
+const safePublishErrorMessage = message => {
+  const value = String(message || '');
+  if (/credential|unauthorized|access token|LINE_CHANNEL_ACCESS_TOKEN|401|403|驗證/i.test(value)) return 'LINE Messaging API 驗證失敗，請確認官方帳號設定。';
+  if (/圖片|image|content|尺寸/i.test(value)) return '圖文選單圖片不符合 LINE 規格。';
+  if (/熱區|area|action|bounds|切換/i.test(value)) return '部分點擊區域設定不完整。';
+  return 'LINE 圖文選單發布失敗，請稍後再試。';
+};
+
 const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, userRole }) => {
   const [project, setProject] = useState(null);
   const [switchTargets, setSwitchTargets] = useState([]);
@@ -581,6 +598,11 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
   const [loading, setLoading] = useState(true);
   const [changingImage, setChangingImage] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [projectDirty, setProjectDirty] = useState(false);
+  const [publishReadiness, setPublishReadiness] = useState({ loaded: false, ready: false, reason: '正在確認發布條件。' });
+  const [publishState, setPublishState] = useState({ status: 'idle', message: '' });
+  const [lineAccountName, setLineAccountName] = useState('');
+  const [guideCollapsed, setGuideCollapsed] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 1279px)').matches);
   const [proposalRefreshKey, setProposalRefreshKey] = useState(0);
   const projectImageInputRef = useRef(null);
 
@@ -592,8 +614,13 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
         const data = await res.json();
         if (!res.ok || !data.success) throw new Error(data.error || '專案讀取失敗');
         setProject(data.project);
+        setProjectDirty(false);
         setSwitchTargets(data.switchTargets || []);
         setActiveArea(data.project.areas?.[0]?.id || null);
+        authFetch('/api/line/account')
+          .then(response => response.json().then(payload => ({ response, payload })))
+          .then(({ response, payload }) => setLineAccountName(response.ok && payload.success ? (payload.account?.oaName || '') : ''))
+          .catch(() => setLineAccountName(''));
       } catch (e) {
         console.error(e);
         alert('專案讀取失敗：' + e.message);
@@ -648,10 +675,12 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
 
 
   const updateProjectName = (name) => {
+    setProjectDirty(true);
     setProject(prev => ({ ...prev, name }));
   };
 
   const updateProjectAreaAction = (areaId, patch) => {
+    setProjectDirty(true);
     setProject(prev => ({
       ...prev,
       areas: (prev.areas || []).map(area =>
@@ -669,6 +698,7 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
   };
 
   const replaceProjectAreaAction = (areaId, action) => {
+    setProjectDirty(true);
     setProject(prev => ({
       ...prev,
       areas: (prev.areas || []).map(area =>
@@ -735,6 +765,7 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
         workflowId: 'rich-menu-project-setup',
         stepId: 'PROJECT_ACTIONS',
       });
+      setProjectDirty(false);
       alert('專案內容已儲存。');
     } catch (e) {
       console.error(e);
@@ -837,6 +868,59 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
     return false;
   };
 
+  const handleGuideReadiness = useCallback(payload => {
+    const workflow = payload?.workflow;
+    const ready = workflow?.status === 'complete';
+    const reason = ready ? '' : (PUBLISH_STEP_REASONS[workflow?.currentStepId] || '請先完成發布前檢查。');
+    setPublishReadiness(previous => (
+      previous.loaded && previous.ready === ready && previous.reason === reason
+        ? previous
+        : { loaded: true, ready, reason }
+    ));
+  }, []);
+
+  const publishBlockedReason = (() => {
+    if (!['editor', 'admin', 'owner'].includes(String(userRole || '').toLowerCase())) return '目前帳號沒有發布權限。';
+    if (project?.status === 'disabled') return '此專案已停用，請先啟用後再發布。';
+    if (projectDirty) return '請先儲存專案變更。';
+    if (!publishReadiness.loaded) return '正在確認發布條件。';
+    if (!publishReadiness.ready) return publishReadiness.reason;
+    return '';
+  })();
+  const publishDisabled = Boolean(publishBlockedReason) || publishState.status === 'publishing';
+
+  const openPublishConfirmation = () => {
+    if (publishBlockedReason) {
+      setPublishState({ status: 'error', message: publishBlockedReason });
+      return;
+    }
+    setPublishState({ status: 'confirming', message: '' });
+  };
+
+  const publishProject = async () => {
+    if (publishBlockedReason) {
+      setPublishState({ status: 'error', message: publishBlockedReason });
+      return;
+    }
+    setPublishState({ status: 'publishing', message: '' });
+    try {
+      const response = await authFetch(`/api/projects/${projectId}/publish`, { method: 'POST' });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.error || 'PUBLISH_FAILED');
+      setProject(previous => ({ ...previous, status: payload.project?.status || previous.status }));
+      setProjectDirty(false);
+      setPublishState({ status: 'success', message: '圖文選單已成功發布至 LINE 官方帳號。' });
+      emitGuideEvent({
+        type: 'guide-refresh',
+        workflowId: 'rich-menu-project-setup',
+        stepId: 'BASIC_VALIDATION',
+      });
+    } catch (error) {
+      console.error('Rich Menu publish failed');
+      setPublishState({ status: 'error', message: safePublishErrorMessage(error?.message) });
+    }
+  };
+
   if (loading) {
     return <div className="py-20 flex justify-center items-center gap-2 text-gray-500"><Loader2 size={20} className="animate-spin" />載入專案...</div>;
   }
@@ -860,8 +944,8 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
 
   return (
     <div className="h-full flex flex-col bg-gray-50">
-      <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-col gap-4 border-b border-gray-200 bg-white px-4 py-4 sm:px-6 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex min-w-0 items-center gap-4">
           <button onClick={onBack} className="p-2 rounded-full hover:bg-gray-100 text-gray-600">
             <ArrowLeft size={20} />
           </button>
@@ -869,12 +953,12 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
             <input
               value={project.name || ''}
               onChange={(e) => updateProjectName(e.target.value)}
-              className="font-bold text-gray-900 border-b border-transparent hover:border-gray-300 focus:border-blue-500 outline-none bg-transparent px-0 py-0.5 min-w-[280px]"
+              className="w-full min-w-0 border-b border-transparent bg-transparent px-0 py-0.5 font-bold text-gray-900 outline-none hover:border-gray-300 focus:border-blue-500 sm:min-w-[280px]"
             />
             <div className="text-xs text-gray-500 mt-1">專案內容設定 · 已從模板建立獨立快照</div>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex w-full flex-wrap items-start gap-3 xl:w-auto xl:justify-end">
           <input
             ref={projectImageInputRef}
             type="file"
@@ -893,12 +977,25 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
           </button>
           <button
             onClick={saveProject}
-            disabled={saving}
+            disabled={saving || publishState.status === 'publishing'}
             className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2"
           >
             {saving && <Loader2 size={15} className="animate-spin" />}
             儲存專案
           </button>
+          <div className="flex max-w-[220px] flex-col items-stretch gap-1">
+            <button
+              type="button"
+              data-guide-target="project-publish"
+              onClick={openPublishConfirmation}
+              disabled={publishDisabled}
+              className="flex items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {publishState.status === 'publishing' ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
+              {publishState.status === 'publishing' ? '發布中...' : '發布圖文選單'}
+            </button>
+            {publishBlockedReason && <span className="text-right text-[11px] leading-4 text-amber-700">{publishBlockedReason}</span>}
+          </div>
           <span className={`text-xs px-2.5 py-1 rounded-full ${
             project.status === 'default'
               ? 'bg-blue-100 text-blue-700'
@@ -913,7 +1010,7 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
         </div>
       </div>
 
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 overflow-hidden">
+      <div className={`flex-1 grid grid-cols-1 lg:grid-cols-2 overflow-hidden transition-[padding] ${guideCollapsed ? '' : 'xl:pr-[400px]'}`}>
         <div className="bg-white border-r border-gray-200 overflow-y-auto p-6 space-y-6">
           <div>
             <h3 className="font-bold text-gray-900 mb-2">請完成客戶內容</h3>
@@ -1094,7 +1191,63 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
         onAction={handleGuideAction}
         userRole={userRole}
         onProposalSaved={() => setProposalRefreshKey(value => value + 1)}
+        onPublish={openPublishConfirmation}
+        publishDisabled={publishDisabled}
+        publishReason={publishBlockedReason}
+        collapsed={guideCollapsed}
+        onCollapsedChange={setGuideCollapsed}
+        onReadinessChange={handleGuideReadiness}
       />
+
+      {publishState.status !== 'idle' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/55 p-4" role="dialog" aria-modal="true" aria-labelledby="publish-dialog-title">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 text-gray-900 shadow-2xl">
+            <div className="text-xs font-bold uppercase tracking-wide text-emerald-700">
+              {publishState.status === 'confirming' ? '準備發布' : publishState.status === 'publishing' ? '發布中' : publishState.status === 'success' ? '發布成功' : '發布失敗'}
+            </div>
+            <h2 id="publish-dialog-title" className="mt-1 text-xl font-bold">發布圖文選單</h2>
+
+            {(publishState.status === 'confirming' || publishState.status === 'publishing') && (
+              <>
+                <p className="mt-3 text-sm text-gray-600">確認要將目前專案發布至已連結的 LINE 官方帳號嗎？</p>
+                <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 rounded-xl bg-gray-50 p-4 text-sm">
+                  <dt className="text-gray-500">專案名稱</dt><dd className="font-medium">{project.name}</dd>
+                  <dt className="text-gray-500">圖片尺寸</dt><dd className="font-medium">{project.imageWidth} × {project.imageHeight}</dd>
+                  <dt className="text-gray-500">點擊區域</dt><dd className="font-medium">{project.areas?.length || 0} 個</dd>
+                  <dt className="text-gray-500">LINE 官方帳號</dt><dd className="font-medium">{lineAccountName || '已連結的官方帳號'}</dd>
+                </dl>
+              </>
+            )}
+
+            {publishState.status === 'publishing' && (
+              <div className="mt-5 flex items-center gap-2 rounded-lg bg-blue-50 p-3 text-sm font-medium text-blue-800"><Loader2 size={17} className="animate-spin" />正在由後端發布至 LINE，請稍候...</div>
+            )}
+            {publishState.status === 'success' && (
+              <div className="mt-5 flex items-start gap-2 rounded-lg bg-emerald-50 p-4 text-sm font-medium text-emerald-800"><CheckCircle2 size={18} className="mt-0.5 shrink-0" />{publishState.message}</div>
+            )}
+            {publishState.status === 'error' && (
+              <div className="mt-5 rounded-lg bg-red-50 p-4 text-sm font-medium text-red-700">{publishState.message}</div>
+            )}
+
+            <div className="mt-6 flex justify-end gap-3">
+              {publishState.status === 'confirming' && (
+                <>
+                  <button type="button" onClick={() => setPublishState({ status: 'idle', message: '' })} className="rounded-md border border-gray-300 px-4 py-2 text-sm font-bold text-gray-700">取消</button>
+                  <button type="button" onClick={publishProject} className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700">確認發布</button>
+                </>
+              )}
+              {publishState.status === 'publishing' && <button type="button" disabled className="rounded-md bg-gray-200 px-4 py-2 text-sm font-bold text-gray-500">發布中...</button>}
+              {publishState.status === 'success' && <button type="button" onClick={() => setPublishState({ status: 'idle', message: '' })} className="rounded-md bg-gray-900 px-4 py-2 text-sm font-bold text-white">完成</button>}
+              {publishState.status === 'error' && (
+                <>
+                  <button type="button" onClick={() => setPublishState({ status: 'idle', message: '' })} className="rounded-md border border-gray-300 px-4 py-2 text-sm font-bold text-gray-700">關閉</button>
+                  {!publishBlockedReason && <button type="button" onClick={() => setPublishState({ status: 'confirming', message: '' })} className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-bold text-white">重新確認</button>}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

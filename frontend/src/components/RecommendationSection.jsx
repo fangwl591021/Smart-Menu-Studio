@@ -168,7 +168,7 @@ function RecommendationContent({ result, onAction, request, projectId, userRole 
         <span className="rounded-full bg-white/75 px-2 py-1 text-xs font-bold">{recommendations.length}</span>
       </div>
 
-      {result?.behaviorDataQuality?.sufficient === false && (<div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">Data quality: {result.behaviorDataQuality.reasonCode}. Behavior insights are withheld until reliable LINE intelligence is available.</div>)}
+      {result?.behaviorDataQuality?.sufficient === false && (<div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">目前尚無足夠的 LINE 互動資料，因此暫時無法提供智慧建議。</div>)}
 
       {recommendations.length === 0 ? (
         <div className="mt-2 text-xs opacity-70">目前沒有智慧建議。</div>
@@ -283,7 +283,7 @@ function RecommendationContent({ result, onAction, request, projectId, userRole 
           <div className="max-h-[85vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-6 text-gray-900 shadow-2xl">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <div className="inline-flex rounded-full bg-indigo-100 px-2.5 py-1 text-[11px] font-bold text-indigo-700">Preview Only</div>
+                <div className="inline-flex rounded-full bg-indigo-100 px-2.5 py-1 text-[11px] font-bold text-indigo-700">僅供預覽</div>
                 <h3 className="mt-2 text-lg font-bold">✨ 改善方案預覽</h3>
               </div>
               <button type="button" onClick={closeProposal} className="rounded-md px-2 py-1 text-sm font-bold text-gray-500 hover:bg-gray-100">關閉</button>
