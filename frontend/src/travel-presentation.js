@@ -10,8 +10,8 @@ export const paymentScheduleLabel = value => value === 'DEPOSIT_BALANCE' ? '訂�
 export const travelEventLabel = event => event?.safeEventLabel || ({
   BOOKING_CREATED: '訂位已建立', DEPOSIT_PAID: '訂金已付款', BALANCE_PAID: '尾款已付款',
   FULL_PAYMENT_PAID: '全額已付款', BOOKING_CONFIRMED: '訂位已確認', BOOKING_CANCELLED: '訂位已取消',
-  DEPARTURE_OPENED: '出發團開放報名', DEPARTURE_CLOSED: '出發團停止報名',
-  DEPARTURE_CANCELLED: '出發團已取消', DEPARTURE_ARCHIVED: '出發團已封存',
+  DEPARTURE_OPENED: '出發日開放報名', DEPARTURE_CLOSED: '出發日停止報名',
+  DEPARTURE_CANCELLED: '出發日已取消', DEPARTURE_ARCHIVED: '出發日已封存',
 }[event?.eventType] || '行程狀態更新');
 
 export const money = (amount, currency = 'TWD') => currency === 'TWD'

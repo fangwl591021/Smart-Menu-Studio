@@ -17,8 +17,11 @@ const acceptance = [
   ['Travel workspace is entitlement guarded', app, /currentView === 'travel'[^]*tenantViewAccessible[^]*<TravelWorkspace/],
   ['member Travel route is mounted', app, /pathname === '\/liff\/travel'[^]*<LiffTravelPage/],
   ['tenant has itinerary tab', tenant, /\['itineraries','行程'\]/],
-  ['tenant has departure tab', tenant, /\['departures','出發團'\]/],
-  ['tenant has booking tab', tenant, /\['bookings','訂位管理'\]/],
+  ['tenant has departure tab', tenant, /\['departures','出發日'\]/],
+  ['tenant has booking tab', tenant, /\['bookings','報名訂單'\]/],
+  ['itinerary create wording is exact', tenant, />新增行程<\/button>/],
+  ['itinerary submit wording is exact', tenant, />送出審核<\/button>/],
+  ['itinerary approval wording is exact', tenant, />核准上架<\/button>/],
   ['itinerary list uses approved route', tenant, /request\('\/api\/travel\/itineraries'\)/],
   ['itinerary create uses approved route', tenant, /: '\/api\/travel\/itineraries'/],
   ['itinerary update uses safe reference', tenant, /\/api\/travel\/itineraries\/\$\{encodeURIComponent\(item\.safeItineraryReference\)\}/],
@@ -73,6 +76,9 @@ const acceptance = [
   ['Travel payment state is never browser-persisted', member, /localStorage|sessionStorage|indexedDB/, false],
   ['FULL action uses approved wording', member, /paymentLeg === 'FULL' \? '前往付款'/],
   ['deposit success uses approved wording', member, /return '訂金已完成'/],
+  ['member booking action wording is exact', member, /: '立即報名'\}<\/button>/],
+  ['member booking list wording is exact', member, /aria-label="我的旅遊訂單"[^]*>我的旅遊訂單<\/h2>/],
+  ['fully settled wording is exact', member, /isBookingFullyPaid\(state\.booking\)[^]*款項已付清/],
   ['deposit alone cannot satisfy fully-paid display', presentation, /every\(item => item\.status === 'PAID'\)/],
   ['unknown event has safe zh-TW fallback', presentation, /行程狀態更新/],
   ['raw event enum is not rendered as primary text', `${tenant}\n${member}`, /\{event\.eventType\}/, false],
@@ -87,6 +93,7 @@ const acceptance = [
   ['Travel UI contains no campaign mutation', `${tenant}\n${member}`, /campaigns?\/[^\n]*(?:execute|resume)|cancelExecution/i, false],
   ['Travel UI contains no AI invocation', `${tenant}\n${member}`, /gemini|generateContent|AI 呼叫/i, false],
   ['Travel member flow does not use generic cart', member, /購物車|cartItems|commerce\/products/i, false],
+  ['Travel UI contains no obsolete wording', `${tenant}\n${member}\n${presentation}`, /出發團|訂位管理|建立行程|送審|核准發布|建立訂位|我的訂位|付款已完成/, false],
 ];
 
 for (const [name, source, pattern, expected = true] of acceptance) test(`8C-UI acceptance: ${name}`, () => expected ? assert.match(source, pattern) : assert.doesNotMatch(source, pattern));
