@@ -56,8 +56,8 @@ const acceptance = [
   ['member never sends internal identity authority', member, /memberId|crmPersonId|workspaceId|customerId|lineMemberId/, false],
   ['member never persists access token or checkout payload', member, /setItem\([^\n]*(?:accessToken|TradeInfo|TradeSha|MerchantID|safePaymentReference)/, false],
   ['member never renders internal payment identifiers', member, /safePaymentReference|paymentIntentId|orderId|paymentId/, false],
-  ['commerce UI contains no campaign conversion mutation', `${admin}\n${member}`, /conversion|campaign/i, false],
-  ['commerce UI contains no referral or dealer business feature', `${admin}\n${member}`, /attribution|dealer|推薦|經銷/i, false],
+  ['member storefront contains no tenant campaign or conversion analytics', member, /conversion|campaign/i, false],
+  ['member storefront contains no tenant attribution or dealer business feature', member, /attribution|dealer|推薦|經銷/i, false],
   ['commerce UI contains no points rewards commission or payout', `${admin}\n${member}`, /points|rewards?|commission|payout|佣金|點數|提領/i, false],
   ['commerce UI contains no CRM automation', `${admin}\n${member}`, /pipelineStage|automaticTag|followUp|CRM Stage|自動標籤/i, false],
 ];

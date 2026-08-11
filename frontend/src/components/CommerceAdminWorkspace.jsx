@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Archive, Loader2, PackagePlus, RefreshCw, Save, ShoppingBag } from 'lucide-react';
+import CommerceConversionList from './CommerceConversionList';
 
 const money = (amount, currency = 'TWD') => currency === 'TWD'
   ? `NT$ ${Number(amount || 0).toLocaleString('zh-TW')}`
@@ -85,7 +86,7 @@ function ProductManagement({ request, canManage }) {
   </section>;
 }
 
-function OrderManagement({ request }) {
+function OrderManagement({ request, initialOrderReference }) {
   const [state, setState] = useState({ loading: true, orders: [], selected: null, payments: [], error: '' });
   const load = useCallback(async () => {
     setState(value => ({ ...value, loading: true, error: '' }));
@@ -93,14 +94,16 @@ function OrderManagement({ request }) {
     catch { setState(value => ({ ...value, loading: false, error: '目前無法讀取訂單資料。' })); }
   }, [request]);
   useEffect(() => { load(); }, [load]);
-  const open = async order => {
+  const openReference = useCallback(async reference => {
     setState(value => ({ ...value, selected: null, payments: [], error: '' }));
     try {
-      const ref = encodeURIComponent(order.safeOrderReference);
+      const ref = encodeURIComponent(reference);
       const [detail, history] = await Promise.all([readJson(await request(`/api/commerce/orders/${ref}`)), readJson(await request(`/api/commerce/orders/${ref}/payments`))]);
       setState(value => ({ ...value, selected: detail.order, payments: history.payments || [] }));
     } catch { setState(value => ({ ...value, error: '目前無法讀取訂單明細。' })); }
-  };
+  }, [request]);
+  useEffect(() => { if (initialOrderReference) void openReference(initialOrderReference); }, [initialOrderReference, openReference]);
+  const open = order => openReference(order.safeOrderReference);
   return <section aria-label="訂單管理">
     <div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-bold">訂單管理</h2><p className="mt-1 text-sm text-slate-500">查看訂單商品快照與安全付款紀錄。</p></div><button onClick={load} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm"><RefreshCw size={16} />重新整理</button></div>
     {state.error && <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{state.error}</p>}
@@ -110,6 +113,8 @@ function OrderManagement({ request }) {
 
 export default function CommerceAdminWorkspace({ request, userRole }) {
   const [tab, setTab] = useState('products');
+  const [orderReference, setOrderReference] = useState('');
   const canManage = ['owner', 'admin'].includes(String(userRole || '').toLowerCase());
-  return <div className="space-y-6"><header><div className="flex items-center gap-3"><span className="rounded-xl bg-slate-900 p-2 text-white"><ShoppingBag size={22} /></span><div><h1 className="text-2xl font-bold text-slate-900">商城</h1><p className="text-sm text-slate-500">管理商品與訂單；付款狀態以已驗證的伺服器結果為準。</p></div></div><div className="mt-5 flex gap-2 border-b border-slate-200"><button onClick={() => setTab('products')} className={tab === 'products' ? 'border-b-2 border-slate-900 px-4 py-2 text-sm font-bold' : 'px-4 py-2 text-sm text-slate-500'}>商品管理</button><button onClick={() => setTab('orders')} className={tab === 'orders' ? 'border-b-2 border-slate-900 px-4 py-2 text-sm font-bold' : 'px-4 py-2 text-sm text-slate-500'}>訂單管理</button></div></header>{tab === 'products' ? <ProductManagement request={request} canManage={canManage} /> : <OrderManagement request={request} />}</div>;
+  const openOrder = reference => { setOrderReference(reference); setTab('orders'); };
+  return <div className="space-y-6"><header><div className="flex items-center gap-3"><span className="rounded-xl bg-slate-900 p-2 text-white"><ShoppingBag size={22} /></span><div><h1 className="text-2xl font-bold text-slate-900">商城</h1><p className="text-sm text-slate-500">管理商品、訂單與已驗證付款建立的轉換紀錄。</p></div></div><div className="mt-5 flex gap-2 border-b border-slate-200"><button type="button" onClick={() => setTab('products')} className={tab === 'products' ? 'border-b-2 border-slate-900 px-4 py-2 text-sm font-bold' : 'px-4 py-2 text-sm text-slate-500'}>商品管理</button><button type="button" onClick={() => setTab('orders')} className={tab === 'orders' ? 'border-b-2 border-slate-900 px-4 py-2 text-sm font-bold' : 'px-4 py-2 text-sm text-slate-500'}>訂單管理</button><button type="button" onClick={() => setTab('conversions')} className={tab === 'conversions' ? 'border-b-2 border-slate-900 px-4 py-2 text-sm font-bold' : 'px-4 py-2 text-sm text-slate-500'}>轉換</button></div></header>{tab === 'products' ? <ProductManagement request={request} canManage={canManage} /> : tab === 'orders' ? <OrderManagement request={request} initialOrderReference={orderReference} /> : <CommerceConversionList request={request} onOpenOrder={openOrder} />}</div>;
 }

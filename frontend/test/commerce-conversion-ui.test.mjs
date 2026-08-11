@@ -1,0 +1,102 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+
+const read = path => readFile(new URL(path, import.meta.url), 'utf8');
+const [workspace, list, detail, attribution, member] = await Promise.all([
+  read('../src/components/CommerceAdminWorkspace.jsx'),
+  read('../src/components/CommerceConversionList.jsx'),
+  read('../src/components/CommerceConversionDetail.jsx'),
+  read('../src/components/CommerceAttributionSection.jsx'),
+  read('../src/components/LiffCommercePage.jsx'),
+]);
+const conversionUi = list + '\n' + detail + '\n' + attribution;
+
+const acceptance = [
+  ['01 conversion tab exists', workspace, />轉換<\/button>/],
+  ['02 conversion list is imported', workspace, /import CommerceConversionList/],
+  ['03 conversion list is mounted', workspace, /<CommerceConversionList request=\{request\} onOpenOrder=\{openOrder\}/],
+  ['04 product tab is preserved', workspace, />商品管理<\/button>/],
+  ['05 order tab is preserved', workspace, />訂單管理<\/button>/],
+  ['06 page title is localized', list, /轉換紀錄/],
+  ['07 page explanation identifies verified payment records', list, /查看由已驗證付款建立的轉換紀錄/],
+  ['08 conversion and attribution are explicitly different', list, /兩者並不相同/],
+  ['09 valid conversion does not require attribution', list, /轉換可以成立，即使目前沒有可信任的來源歸因/],
+  ['10 verified-payment explanation exists', detail, /此轉換由伺服器確認的已付款訂單建立/],
+  ['11 missing-attribution disclaimer exists', attribution, /沒有歸因資料不代表轉換無效/],
+  ['12 no summary endpoint is invented', list, /\/api\/commerce\/conversions\/summary/, false],
+  ['13 paginated rows are not treated as totals', list, /不以目前載入的分頁估算總筆數或總金額/],
+  ['14 list uses actual backend contract', list, /\/api\/commerce\/conversions\?limit=25/],
+  ['15 list reads backend conversions array', list, /body\.conversions \|\| \[\]/],
+  ['16 pagination uses backend next cursor', list, /nextCursor: body\.nextCursor \|\| null/],
+  ['17 cursor is encoded without parsing', list, /cursor=.*encodeURIComponent\(cursor\)/],
+  ['18 load-more control uses cursor authority', list, /onClick=\{\(\) => load\(state\.nextCursor\)\}/],
+  ['19 cursor is never rendered', list, />\{state\.nextCursor\}</, false],
+  ['20 stable conversion landmark exists', list, /data-testid="commerce-conversions"/],
+  ['21 conversion time column exists', list, />轉換時間</],
+  ['22 type column exists', list, />類型</],
+  ['23 safe order column exists', list, />安全訂單編號</],
+  ['24 customer column exists', list, />顧客</],
+  ['25 amount column exists', list, />金額</],
+  ['26 attribution status column exists', list, />歸因狀態</],
+  ['27 ORDER_PAID is localized', conversionUi, /value === 'ORDER_PAID' \? '已付款訂單'/],
+  ['28 TWD uses whole-unit display', conversionUi, /'NT\$ ' \+ Number\(amount \|\| 0\)\.toLocaleString\('zh-TW'\)/],
+  ['29 amount is never divided by 100', conversionUi, /amount\s*\/\s*100|amount\s*\*\s*100/, false],
+  ['30 safe customer label comes directly from backend field', conversionUi, /conversion\.customerLabel/],
+  ['31 safe order reference comes directly from backend field', conversionUi, /conversion\.safeOrderReference/],
+  ['32 occurrence time comes directly from backend field', conversionUi, /conversion\.occurredAt/],
+  ['33 attribution state uses backend summaries only', list, /\(conversion\.attributionSummaries \|\| \[\]\)\.length/],
+  ['34 safe conversion reference is only the row/detail carrier', list, /key=\{conversion\.safeConversionReference\}/],
+  ['35 detail route encodes safe conversion reference', list, /encodeURIComponent\(conversion\.safeConversionReference\)/],
+  ['36 detail uses actual backend route', list, /request\('\/api\/commerce\/conversions\/' \+ ref\)/],
+  ['37 detail renders backend conversion object', list, /selected: body\.conversion/],
+  ['38 detail is explicitly read-only', detail, /唯讀的已驗證付款結果/],
+  ['39 Campaign subsection exists', attribution, /title: 'Campaign'/],
+  ['40 Referral subsection exists', attribution, /title: '推薦關係'/],
+  ['41 Dealer subsection exists', attribution, /title: '經銷關係'/],
+  ['42 safe order navigation uses only safe reference', detail, /onOpenOrder\(conversion\.safeOrderReference\)/],
+  ['43 safe order navigation opens existing order tab', workspace, /setOrderReference\(reference\); setTab\('orders'\)/],
+  ['44 order detail contract remains safe', workspace, /encodeURIComponent\(reference\)/],
+  ['45 invalid detail has non-enumerating safe error', list, /找不到可查看的轉換紀錄，或您沒有權限查看/],
+  ['46 current Campaign gap is represented safely', attribution, /目前尚未提供可信任的 Campaign 歸因資料/],
+  ['47 current Referral gap is represented safely', attribution, /目前尚未提供可信任的推薦關係資料/],
+  ['48 current Dealer gap is represented safely', attribution, /目前尚未提供可信任的經銷關係資料/],
+  ['49 future attribution renders only explicit safe label', attribution, /summary\?\.safeLabel/],
+  ['50 no browser referrer inference', conversionUi, /document\.referrer|Referer/, false],
+  ['51 no UTM inference', conversionUi, /utm_source|utm_campaign|utm_medium/i, false],
+  ['52 no query parameter attribution inference', conversionUi, /URLSearchParams/, false],
+  ['53 no local storage attribution', conversionUi, /localStorage/, false],
+  ['54 no session storage attribution', conversionUi, /sessionStorage/, false],
+  ['55 no conversion mutation request', conversionUi, /method:\s*'(?:POST|PATCH|PUT|DELETE)'/, false],
+  ['56 no manual attribution control', conversionUi, /建立歸因|編輯歸因|刪除歸因|指派 Campaign|指派推薦|指派經銷/, false],
+  ['57 no referral or dealer mutation control', conversionUi, /建立推薦|變更推薦人|指派經銷|經銷資格/, false],
+  ['58 no points rewards or tiers', conversionUi, /點數|獎勵|Contribution|Tier/i, false],
+  ['59 no commission or payout control', conversionUi, /佣金|分潤|提領|Commission|Payout/i, false],
+  ['60 no CRM automation control', conversionUi, /變更階段|建立追蹤|新增標籤|指派負責人|followUp|pipelineStage/i, false],
+  ['61 no ROI or ROAS', conversionUi, /ROI|ROAS|CAC|LTV|cost per conversion/i, false],
+  ['62 no raw conversion database ID access', conversionUi, /conversion\.id\b|conversionId\b/, false],
+  ['63 no raw order database ID access', conversionUi, /order\.id\b|orderId\b/, false],
+  ['64 no CRM or member internal ID access', conversionUi, /crmPersonId|memberId|lineMemberId|workspaceId/, false],
+  ['65 no LINE UID or hash', conversionUi, /lineUserId|line_user_id|uidHash|identityHash/i, false],
+  ['66 no payment internals', conversionUi, /paymentIntentId|paymentTransactionId|merchantOrderNo/i, false],
+  ['67 no Campaign execution or delivery internals', conversionUi, /campaignExecutionId|campaignDeliveryId|clickId/i, false],
+  ['68 no referral dealer internals or source ref', conversionUi, /referralId|dealerId|source_ref|sourceRef/i, false],
+  ['69 no provider secret or payload', conversionUi, /HashKey|HashIV|MerchantID|TradeInfo|TradeSha|raw callback/i, false],
+  ['70 loading state exists', list, /正在讀取轉換紀錄…/],
+  ['71 empty state exists', list, /目前尚無已驗證的轉換紀錄/],
+  ['72 safe list error exists', list, /目前無法讀取轉換紀錄，請稍後再試/],
+  ['73 detail loading state exists', list, /正在讀取轉換明細…/],
+  ['74 pagination load-more exists', list, /載入更多轉換/],
+  ['75 member self has no conversion analytics', member, /\/api\/commerce\/conversions/, false],
+  ['76 member checkout remains present', member, /建立訂單[\s\S]*前往付款/],
+  ['77 payment polling remains present', member, /正在確認付款結果…[\s\S]*付款已完成/],
+  ['78 products and orders still use approved routes', workspace, /\/api\/commerce\/products[\s\S]*\/api\/commerce\/orders/],
+];
+
+for (const [name, source, pattern, expected = true] of acceptance) {
+  test('7E-UI acceptance: ' + name, () => expected ? assert.match(source, pattern) : assert.doesNotMatch(source, pattern));
+}
+
+test('7E-UI focused suite contains at least 64 named acceptance checks', () => {
+  assert.ok(acceptance.length >= 64, 'expected at least 64 checks, received ' + acceptance.length);
+});
