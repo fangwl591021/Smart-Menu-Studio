@@ -146,6 +146,12 @@ import { registerCampaignExecutionRoutes } from './campaign/execution-routes';
 import { registerCampaignRoutes } from './campaign/campaign-routes';
 import { registerCommerceRoutes } from './commerce/routes';
 import { registerMemberCommerceRoutes } from './commerce/member-routes';
+import {
+  newWorkspaceModuleEntitlementStatements,
+  requireWorkspaceModule,
+  type WorkspaceModuleKey,
+} from './modules/entitlements';
+import { registerModuleEntitlementRoutes } from './modules/routes';
 import { acquisitionSummary, assignCrmOwner, assignmentSummary, referralSummary } from './crm/acquisition';
 import { assigneeReference, createAssigneeHandle, verifyAssigneeHandle } from './crm/assignee-handle';
 
@@ -840,7 +846,9 @@ app.post('/auth/register', async (c) => {
       `).bind(
         id('wht'),
         workspaceId
-      )
+      ),
+
+      ...newWorkspaceModuleEntitlementStatements(c.env.smart_menu_db, workspaceId)
     ]);
 
     const session = await issueSession(c.env, userId);
@@ -985,9 +993,11 @@ function requireRole(c: any, minimum: 'viewer' | 'editor' | 'admin' | 'owner') {
   }
 }
 
+registerModuleEntitlementRoutes(app, { requireSystemAdmin, workspaceIdOf, text });
+
 function publicLiffConfig(row:any, account:any) { const channel=text(account?.line_login_channel_id); const status=!row?'NOT_CONFIGURED':!row.linkage_confirmed_at?'LINKAGE_NOT_CONFIRMED':!row.runtime_verified_at?'NOT_RUNTIME_VERIFIED':channel!==text(row.verified_line_login_channel_id)?'STALE':'READY'; return {liffId:row?text(row.liff_id):null,liffEntryUrl:row?text(row.liff_entry_url):null,verifiedLineLoginChannelId:row?text(row.verified_line_login_channel_id):null,status,linkageConfirmedAt:row?.linkage_confirmed_at||null,runtimeVerifiedAt:row?.runtime_verified_at||null,friendshipVerifiedAt:row?.friendship_verified_at||null}; }
 async function referralAccount(db:D1Database,lineAccountId:string) { return await db.prepare('SELECT id,workspace_id,line_login_channel_id FROM workspace_line_accounts WHERE id=? LIMIT 1').bind(lineAccountId).first<any>(); }
-async function verifiedReferralMember(c:any, body:any) { const account=await referralAccount(c.env.smart_menu_db,text(body.lineAccountId)); if(!account) throw new Error('CONFIG_NOT_READY'); const config:any=await c.env.smart_menu_db.prepare('SELECT * FROM workspace_liff_configs WHERE workspace_id=? AND line_account_id=? LIMIT 1').bind(account.workspace_id,account.id).first(); const state=publicLiffConfig(config,account); if(state.status==='STALE'||state.status==='NOT_CONFIGURED'||state.status==='LINKAGE_NOT_CONFIRMED') throw new Error('CONFIG_NOT_READY'); const token=text(body.liffAccessToken,4096); if(!token) throw new Error('LIFF_TOKEN_INVALID'); const verified=await verifyLiffAccessToken(token,text(account.line_login_channel_id)); const hash=await memberIdentityHash(text(c.env.MEMBER_IDENTITY_HMAC_SECRET),account.workspace_id,account.id,verified.lineUserId); const memberId=await establishMember(c.env.smart_menu_db,{workspaceId:account.workspace_id,lineAccountId:account.id,identityHash:hash,providerRecipientId:verified.lineUserId}); await c.env.smart_menu_db.prepare('UPDATE workspace_liff_configs SET runtime_verified_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(config.id).run(); return {account,config,memberId,token}; }
+async function verifiedReferralMember(c:any, body:any, requiredModuleKey?:WorkspaceModuleKey) { const account=await referralAccount(c.env.smart_menu_db,text(body.lineAccountId)); if(!account) throw new Error('CONFIG_NOT_READY'); const config:any=await c.env.smart_menu_db.prepare('SELECT * FROM workspace_liff_configs WHERE workspace_id=? AND line_account_id=? LIMIT 1').bind(account.workspace_id,account.id).first(); const state=publicLiffConfig(config,account); if(state.status==='STALE'||state.status==='NOT_CONFIGURED'||state.status==='LINKAGE_NOT_CONFIRMED') throw new Error('CONFIG_NOT_READY'); const token=text(body.liffAccessToken,4096); if(!token) throw new Error('LIFF_TOKEN_INVALID'); const verified=await verifyLiffAccessToken(token,text(account.line_login_channel_id)); if(requiredModuleKey)await requireWorkspaceModule({db:c.env.smart_menu_db,workspaceId:String(account.workspace_id),moduleKey:requiredModuleKey}); const hash=await memberIdentityHash(text(c.env.MEMBER_IDENTITY_HMAC_SECRET),account.workspace_id,account.id,verified.lineUserId); const memberId=await establishMember(c.env.smart_menu_db,{workspaceId:account.workspace_id,lineAccountId:account.id,identityHash:hash,providerRecipientId:verified.lineUserId}); await c.env.smart_menu_db.prepare('UPDATE workspace_liff_configs SET runtime_verified_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(config.id).run(); return {account,config,memberId,token}; }
 
 async function verifiedDealerLedgerMember(c:any) { const lineAccountId=text(c.req.query('lineAccountId')); const account=await referralAccount(c.env.smart_menu_db,lineAccountId); if(!account) throw new Error('CONFIG_NOT_READY'); const config:any=await c.env.smart_menu_db.prepare('SELECT * FROM workspace_liff_configs WHERE workspace_id=? AND line_account_id=? LIMIT 1').bind(account.workspace_id,account.id).first(); const state=publicLiffConfig(config,account); if(state.status==='STALE'||state.status==='NOT_CONFIGURED'||state.status==='LINKAGE_NOT_CONFIRMED') throw new Error('CONFIG_NOT_READY'); const token=text(c.req.header('Authorization')).replace(/^Bearer\s+/i,''); if(!token) throw new Error('LIFF_TOKEN_INVALID'); const verified=await verifyLiffAccessToken(token,text(account.line_login_channel_id)); const hash=await memberIdentityHash(text(c.env.MEMBER_IDENTITY_HMAC_SECRET),account.workspace_id,account.id,verified.lineUserId); const member:any=await c.env.smart_menu_db.prepare('SELECT id FROM line_oa_members WHERE workspace_id=? AND line_account_id=? AND line_identity_hash=? LIMIT 1').bind(account.workspace_id,account.id,hash).first(); return { account, memberId: member ? String(member.id) : null }; }
 app.get('/api/line/account',async c=>{const workspaceId=workspaceIdOf(c);const account:any=await c.env.smart_menu_db.prepare('SELECT id,oa_name,line_login_channel_id FROM workspace_line_accounts WHERE workspace_id=? LIMIT 1').bind(workspaceId).first();return c.json({success:true,account:account?{id:account.id,oaName:account.oa_name||'',lineLoginChannelId:account.line_login_channel_id||null}:null});});
@@ -5499,6 +5509,8 @@ app.post('/api/system/workspaces', async (c) => {
       )
     );
 
+    statements.push(...newWorkspaceModuleEntitlementStatements(c.env.smart_menu_db, workspaceId));
+
     await c.env.smart_menu_db.batch(statements);
     await ensureWorkspaceLineHub(c.env, workspaceId);
 
@@ -5613,6 +5625,8 @@ app.post('/api/system/users/:userId/promote-to-workspace', async (c) => {
         text(body.address),
         text(body.notes)
       ),
+
+      ...newWorkspaceModuleEntitlementStatements(c.env.smart_menu_db, workspaceId),
     ]);
 
     await ensureWorkspaceLineHub(c.env, workspaceId);

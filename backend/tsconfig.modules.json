@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": ["@cloudflare/workers-types"]
+  },
+  "files": [
+    "src/modules/entitlements.ts",
+    "src/modules/routes.ts"
+  ]
+}

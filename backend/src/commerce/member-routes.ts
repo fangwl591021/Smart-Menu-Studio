@@ -14,8 +14,8 @@ const known = /^COMMERCE_[A-Z0-9_]+$/;
 
 function fail(c: any, error: unknown, fallback: string) {
   const raw = error instanceof Error ? error.message : '';
-  const code = known.test(raw) ? raw : fallback;
-  const status = code === 'MEMBER_CONTEXT_REQUIRED' ? 401 : code.endsWith('_NOT_FOUND') ? 404 : code.includes('PAID') || code.includes('CANCELLED') ? 409 : 400;
+  const code = raw === 'MODULE_NOT_ENABLED' ? raw : known.test(raw) ? raw : fallback;
+  const status = code === 'MODULE_NOT_ENABLED' ? 403 : code === 'MEMBER_CONTEXT_REQUIRED' ? 401 : code.endsWith('_NOT_FOUND') ? 404 : code.includes('PAID') || code.includes('CANCELLED') ? 409 : 400;
   return c.json({ success: false, error: code }, status);
 }
 
@@ -23,7 +23,7 @@ async function memberContext(c: any, deps: any, bindCustomer = false) {
   const verified = await deps.verifiedReferralMember(c, {
     lineAccountId: deps.text(c.req.query('lineAccountId'), 100),
     liffAccessToken: deps.text(c.req.header('Authorization'), 4096).replace(/^Bearer\s+/i, ''),
-  });
+  }, 'COMMERCE');
   const person = bindCustomer ? await deps.ensureCrmPersonForVerifiedMember(c.env.smart_menu_db, {
     workspaceId: verified.account.workspace_id,
     lineAccountId: verified.account.id,
@@ -40,7 +40,7 @@ async function memberContext(c: any, deps: any, bindCustomer = false) {
 export function registerMemberCommerceRoutes(app: any, deps: any) {
   app.get('/api/member/commerce/products', async (c: any) => {
     try { const context = await memberContext(c, deps); return c.json({ success: true, products: await listMemberProducts(c.env.smart_menu_db, context) }); }
-    catch { return c.json({ success: false, error: 'MEMBER_CONTEXT_REQUIRED' }, 401); }
+    catch (error) { return fail(c, error, 'MEMBER_CONTEXT_REQUIRED'); }
   });
 
   app.get('/api/member/commerce/products/:safeProductReference', async (c: any) => {
@@ -55,7 +55,7 @@ export function registerMemberCommerceRoutes(app: any, deps: any) {
 
   app.get('/api/member/commerce/orders', async (c: any) => {
     try { const context = await memberContext(c, deps); return c.json({ success: true, orders: await listMemberOrders(c.env.smart_menu_db, context) }); }
-    catch { return c.json({ success: false, error: 'MEMBER_CONTEXT_REQUIRED' }, 401); }
+    catch (error) { return fail(c, error, 'MEMBER_CONTEXT_REQUIRED'); }
   });
 
   app.get('/api/member/commerce/orders/:safeOrderReference', async (c: any) => {

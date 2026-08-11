@@ -8,7 +8,8 @@
     "cf-typegen": "wrangler types --env-interface CloudflareBindings",
     "typecheck:campaign": "tsc -p tsconfig.campaign.json",
     "typecheck:commerce": "tsc -p tsconfig.commerce.json",
-    "typecheck": "npm run typecheck:campaign && npm run typecheck:commerce"
+    "typecheck:modules": "tsc -p tsconfig.modules.json",
+    "typecheck": "npm run typecheck:campaign && npm run typecheck:commerce && npm run typecheck:modules"
   },
   "dependencies": {
     "hash-wasm": "4.12.0",
