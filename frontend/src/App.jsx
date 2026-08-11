@@ -2280,13 +2280,13 @@ const CustomerAccountsView = ({ onOpenWorkspace }) => {
         ) : (
           <div className="divide-y divide-gray-100">
             {rows.map(row => (
-              <div key={row.id} className="p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div key={row.slug} className="p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                 <div>
                   <div className="font-semibold text-gray-900">
                     {row.company_name || row.name}
                   </div>
                   <div className="text-xs text-gray-500 mt-1">
-                    {row.slug} · {row.plan || 'starter'} · 成員 {row.member_count || 0} 人
+                    {row.slug} · {row.status || 'active'} · 成員 {row.member_count || 0} 人
                   </div>
                   <div className="text-xs text-gray-500 mt-1">
                     LINE Webhook 啟用：{row.active_webhook_count || 0} 組
@@ -2308,6 +2308,7 @@ const CustomerAccountsView = ({ onOpenWorkspace }) => {
 };
 
 const WorkspaceAccountView = ({ workspace, onBack }) => {
+  const safeWorkspaceReference = encodeURIComponent(workspace.slug);
   const [tab, setTab] = useState('profile');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -2337,7 +2338,7 @@ const WorkspaceAccountView = ({ workspace, onBack }) => {
   const load = async () => {
     setLoading(true);
     try {
-      const json = await cachedAuthJson(`/api/system/workspaces/${workspace.id}`, 3000);
+      const json = await cachedAuthJson(`/api/system/workspaces/${safeWorkspaceReference}`, 3000);
       setData(json);
 
       const w = json.workspace || {};
@@ -2374,19 +2375,19 @@ const WorkspaceAccountView = ({ workspace, onBack }) => {
     }
   };
 
-  useEffect(() => { load(); }, [workspace.id]);
+  useEffect(() => { load(); }, [workspace.slug]);
 
   const saveProfile = async () => {
     setSaving(true);
     try {
-      const res = await authFetch(`/api/system/workspaces/${workspace.id}/profile`, {
+      const res = await authFetch(`/api/system/workspaces/${safeWorkspaceReference}/profile`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(profile),
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || '一般資訊儲存失敗');
-      clearApiCache(`/api/system/workspaces/${workspace.id}`);
+      clearApiCache(`/api/system/workspaces/${safeWorkspaceReference}`);
       clearApiCache('/api/system/workspaces');
       await load();
       alert('一般資訊已儲存。');
@@ -2400,14 +2401,14 @@ const WorkspaceAccountView = ({ workspace, onBack }) => {
   const saveLine = async () => {
     setSaving(true);
     try {
-      const res = await authFetch(`/api/system/workspaces/${workspace.id}/line-account`, {
+      const res = await authFetch(`/api/system/workspaces/${safeWorkspaceReference}/line-account`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(lineForm),
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'LINE OA 儲存失敗');
-      clearApiCache(`/api/system/workspaces/${workspace.id}`);
+      clearApiCache(`/api/system/workspaces/${safeWorkspaceReference}`);
       await load();
       alert('LINE OA 設定已儲存。');
     } catch (e) {
@@ -2419,7 +2420,7 @@ const WorkspaceAccountView = ({ workspace, onBack }) => {
 
   const saveTarget = async (target) => {
     try {
-      const res = await authFetch(`/api/system/workspaces/${workspace.id}/targets/${target.id}`, {
+      const res = await authFetch(`/api/system/workspaces/${safeWorkspaceReference}/targets/${target.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2433,7 +2434,7 @@ const WorkspaceAccountView = ({ workspace, onBack }) => {
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Webhook 儲存失敗');
-      clearApiCache(`/api/system/workspaces/${workspace.id}`);
+      clearApiCache(`/api/system/workspaces/${safeWorkspaceReference}`);
     } catch (e) {
       alert(e.message || 'Webhook 儲存失敗');
     }
@@ -2452,7 +2453,7 @@ const WorkspaceAccountView = ({ workspace, onBack }) => {
       return;
     }
     try {
-      const res = await authFetch(`/api/system/workspaces/${workspace.id}/keywords/check-conflict`, {
+      const res = await authFetch(`/api/system/workspaces/${safeWorkspaceReference}/keywords/check-conflict`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ keyword: keyword.trim(), matchType }),
@@ -2470,7 +2471,7 @@ const WorkspaceAccountView = ({ workspace, onBack }) => {
     if (!targetId) return alert('請選擇 System A 或 B。');
 
     try {
-      const res = await authFetch(`/api/system/workspaces/${workspace.id}/keywords`, {
+      const res = await authFetch(`/api/system/workspaces/${safeWorkspaceReference}/keywords`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2496,7 +2497,7 @@ const WorkspaceAccountView = ({ workspace, onBack }) => {
   const removeKeyword = async (route) => {
     if (!confirm(`確定刪除「${route.keyword}」？`)) return;
     try {
-      const res = await authFetch(`/api/system/workspaces/${workspace.id}/keywords/${route.id}`, {
+      const res = await authFetch(`/api/system/workspaces/${safeWorkspaceReference}/keywords/${route.id}`, {
         method: 'DELETE',
       });
       const json = await res.json();
@@ -2513,7 +2514,7 @@ const WorkspaceAccountView = ({ workspace, onBack }) => {
     setSimRunning(true);
     setSimResult(null);
     try {
-      const res = await authFetch(`/api/system/workspaces/${workspace.id}/line-simulator`, {
+      const res = await authFetch(`/api/system/workspaces/${safeWorkspaceReference}/line-simulator`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: simMessage.trim(), mode: simMode }),
@@ -2533,7 +2534,7 @@ const WorkspaceAccountView = ({ workspace, onBack }) => {
     setMigrationLoading(true);
     try {
       const query = sourceId ? `?source=${encodeURIComponent(sourceId)}` : '';
-      const res = await authFetch(`/api/system/workspaces/${workspace.id}/data-migration-preview${query}`);
+      const res = await authFetch(`/api/system/workspaces/${safeWorkspaceReference}/data-migration-preview${query}`);
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || '資料移轉預覽失敗');
 
@@ -2551,7 +2552,7 @@ const WorkspaceAccountView = ({ workspace, onBack }) => {
     if (tab === 'migration' && !migrationPreview) {
       loadMigrationPreview('');
     }
-  }, [tab, workspace.id]);
+  }, [tab, workspace.slug]);
 
   const toggleMigrationId = (key, value) => {
     setMigrationOptions(prev => {
@@ -2581,7 +2582,7 @@ const WorkspaceAccountView = ({ workspace, onBack }) => {
 
     setMigrationRunning(true);
     try {
-      const res = await authFetch(`/api/system/workspaces/${workspace.id}/data-migration`, {
+      const res = await authFetch(`/api/system/workspaces/${safeWorkspaceReference}/data-migration`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2593,7 +2594,7 @@ const WorkspaceAccountView = ({ workspace, onBack }) => {
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || '資料移轉失敗');
 
-      clearApiCache(`/api/system/workspaces/${workspace.id}`);
+      clearApiCache(`/api/system/workspaces/${safeWorkspaceReference}`);
       clearApiCache('/api/system/templates');
       await load();
 

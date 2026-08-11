@@ -7,7 +7,12 @@ import {
   workspaceModuleKey,
 } from './entitlements';
 
-const MODULE_DISABLED_MESSAGE = '此工作區目前未啟用這項功能。';
+export const MODULE_DISABLED_HTTP_STATUS = 403;
+export const MODULE_DISABLED_RESPONSE = Object.freeze({
+  success: false,
+  error: 'MODULE_NOT_ENABLED',
+  message: '此工作區尚未啟用此功能模組。',
+});
 
 async function resolveWorkspaceBySafeReference(db: D1Database, safeReference: string) {
   return db.prepare(`
@@ -32,7 +37,7 @@ export function registerModuleEntitlementRoutes(app: any, deps: {
       return next();
     } catch (error) {
       if (error instanceof Error && (error.message === 'MODULE_NOT_ENABLED' || error.message === 'MODULE_DEPENDENCY_NOT_ENABLED')) {
-        return c.json({ success: false, error: 'MODULE_NOT_ENABLED', message: MODULE_DISABLED_MESSAGE }, 403);
+        return c.json(MODULE_DISABLED_RESPONSE, MODULE_DISABLED_HTTP_STATUS);
       }
       throw error;
     }

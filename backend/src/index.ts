@@ -152,6 +152,7 @@ import {
   type WorkspaceModuleKey,
 } from './modules/entitlements';
 import { registerModuleEntitlementRoutes } from './modules/routes';
+import { resolveSystemWorkspaceInternalId, safeSystemWorkspaceSummaries } from './modules/system-workspaces';
 import { acquisitionSummary, assignCrmOwner, assignmentSummary, referralSummary } from './crm/acquisition';
 import { assigneeReference, createAssigneeHandle, verifyAssigneeHandle } from './crm/assignee-handle';
 
@@ -994,6 +995,13 @@ function requireRole(c: any, minimum: 'viewer' | 'editor' | 'admin' | 'owner') {
 }
 
 registerModuleEntitlementRoutes(app, { requireSystemAdmin, workspaceIdOf, text });
+
+async function systemWorkspaceInternalId(c: any): Promise<string> {
+  const safeWorkspaceReference = text(c.req.param('safeWorkspaceReference'), 100);
+  const workspaceId = await resolveSystemWorkspaceInternalId(c.env.smart_menu_db, safeWorkspaceReference);
+  if (!workspaceId) throw new Error('WORKSPACE_NOT_FOUND');
+  return workspaceId;
+}
 
 function publicLiffConfig(row:any, account:any) { const channel=text(account?.line_login_channel_id); const status=!row?'NOT_CONFIGURED':!row.linkage_confirmed_at?'LINKAGE_NOT_CONFIRMED':!row.runtime_verified_at?'NOT_RUNTIME_VERIFIED':channel!==text(row.verified_line_login_channel_id)?'STALE':'READY'; return {liffId:row?text(row.liff_id):null,liffEntryUrl:row?text(row.liff_entry_url):null,verifiedLineLoginChannelId:row?text(row.verified_line_login_channel_id):null,status,linkageConfirmedAt:row?.linkage_confirmed_at||null,runtimeVerifiedAt:row?.runtime_verified_at||null,friendshipVerifiedAt:row?.friendship_verified_at||null}; }
 async function referralAccount(db:D1Database,lineAccountId:string) { return await db.prepare('SELECT id,workspace_id,line_login_channel_id FROM workspace_line_accounts WHERE id=? LIMIT 1').bind(lineAccountId).first<any>(); }
@@ -5774,11 +5782,11 @@ function transferAreaShape(row: any) {
   };
 }
 
-app.get('/api/system/workspaces/:workspaceId/data-migration-preview', async (c) => {
+app.get('/api/system/workspaces/:safeWorkspaceReference/data-migration-preview', async (c) => {
   try {
     await requireSystemAdmin(c);
 
-    const destinationWorkspaceId = text(c.req.param('workspaceId'));
+    const destinationWorkspaceId = await systemWorkspaceInternalId(c);
     const requestedSource = text(c.req.query('source'));
 
     const workspaceRows = await c.env.smart_menu_db.prepare(`
@@ -5928,13 +5936,13 @@ app.get('/api/system/workspaces/:workspaceId/data-migration-preview', async (c) 
   }
 });
 
-app.post('/api/system/workspaces/:workspaceId/data-migration', async (c) => {
+app.post('/api/system/workspaces/:safeWorkspaceReference/data-migration', async (c) => {
   const createdR2Keys: string[] = [];
 
   try {
     await requireSystemAdmin(c);
 
-    const destinationWorkspaceId = text(c.req.param('workspaceId'));
+    const destinationWorkspaceId = await systemWorkspaceInternalId(c);
     const body: any = await c.req.json();
     const sourceWorkspaceId = text(body.sourceWorkspaceId);
 
@@ -6415,14 +6423,7 @@ app.get('/api/system/workspaces', async (c) => {
         w.name,
         w.slug,
         w.status,
-        w.plan,
-        w.created_at,
-        w.updated_at,
-        p.contact_name,
-        p.phone,
         p.company_name,
-        p.tax_id,
-        p.industry,
         COALESCE(mc.member_count, 0) AS member_count,
         COALESCE(hc.active_webhook_count, 0) AS active_webhook_count
       FROM workspaces w
@@ -6451,7 +6452,7 @@ app.get('/api/system/workspaces', async (c) => {
 
     return c.json({
       success: true,
-      workspaces: r.results || [],
+      workspaces: safeSystemWorkspaceSummaries((r.results || []) as Record<string, unknown>[]),
       performance: { serverMs: Date.now() - startedAt },
     });
   } catch (e: any) {
@@ -6467,18 +6468,18 @@ app.get('/api/system/workspaces', async (c) => {
   }
 });
 
-app.get('/api/system/workspaces/:workspaceId', async (c) => {
+app.get('/api/system/workspaces/:safeWorkspaceReference', async (c) => {
   const startedAt = Date.now();
 
   try {
     await requireSystemAdmin(c);
-    const wid = text(c.req.param('workspaceId'));
+    const wid = await systemWorkspaceInternalId(c);
 
     // Read-only GET. No hidden initialization/writes.
     const result = await c.env.smart_menu_db.batch([
       c.env.smart_menu_db.prepare(`
         SELECT
-          w.*,
+          w.name, w.slug, w.status, w.created_at, w.updated_at,
           p.contact_name,
           p.phone,
           p.company_name,
@@ -6502,7 +6503,8 @@ app.get('/api/system/workspaces/:workspaceId', async (c) => {
       `).bind(wid),
 
       c.env.smart_menu_db.prepare(`
-        SELECT *
+        SELECT id, name, target_type, endpoint_url, position, enabled, can_reply,
+               forward_signature, timeout_ms
         FROM workspace_webhook_targets
         WHERE workspace_id = ?
         ORDER BY position
@@ -6510,7 +6512,7 @@ app.get('/api/system/workspaces/:workspaceId', async (c) => {
 
       c.env.smart_menu_db.prepare(`
         SELECT
-          r.*,
+          r.id, r.target_id, r.keyword, r.match_type, r.priority, r.enabled,
           t.name AS target_name
         FROM workspace_keyword_routes r
         JOIN workspace_webhook_targets t
@@ -6535,8 +6537,6 @@ app.get('/api/system/workspaces/:workspaceId', async (c) => {
       success: true,
       workspace: w,
       lineAccount: a ? {
-        id: a.id,
-        workspaceId: a.workspace_id,
         oaName: a.oa_name,
         lineLoginChannelId: a.line_login_channel_id,
         lineBotChannelId: a.line_channel_id,
@@ -6567,9 +6567,9 @@ app.get('/api/system/workspaces/:workspaceId', async (c) => {
   }
 });
 
-app.patch('/api/system/workspaces/:workspaceId/profile', async(c)=>{
+app.patch('/api/system/workspaces/:safeWorkspaceReference/profile', async(c)=>{
   try{
-    await requireSystemAdmin(c); const wid=text(c.req.param('workspaceId')); const b:any=await c.req.json();
+    await requireSystemAdmin(c); const wid=await systemWorkspaceInternalId(c); const b:any=await c.req.json();
     await c.env.smart_menu_db.prepare(`
       INSERT INTO workspace_profiles(workspace_id,contact_name,phone,company_name,tax_id,industry,address,notes,created_at,updated_at)
       VALUES(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
@@ -6583,9 +6583,9 @@ app.patch('/api/system/workspaces/:workspaceId/profile', async(c)=>{
   }catch(e:any){return c.json({success:false,error:e?.message==='SYSTEM_ADMIN_REQUIRED'?'需要系統管理員權限。':(e?.message||'一般資訊儲存失敗')},e?.message==='SYSTEM_ADMIN_REQUIRED'?403:500)}
 });
 
-app.patch('/api/system/workspaces/:workspaceId/line-account',async(c)=>{
+app.patch('/api/system/workspaces/:safeWorkspaceReference/line-account',async(c)=>{
  try{
-  await requireSystemAdmin(c);const wid=text(c.req.param('workspaceId'));const b:any=await c.req.json();await ensureWorkspaceLineHub(c.env,wid);
+  await requireSystemAdmin(c);const wid=await systemWorkspaceInternalId(c);const b:any=await c.req.json();await ensureWorkspaceLineHub(c.env,wid);
   await c.env.smart_menu_db.prepare(`
    UPDATE workspace_line_accounts SET oa_name=?,line_login_channel_id=?,
    line_login_channel_secret=COALESCE(NULLIF(?,''),line_login_channel_secret),line_channel_id=?,
@@ -6600,9 +6600,9 @@ app.patch('/api/system/workspaces/:workspaceId/line-account',async(c)=>{
  }catch(e:any){return c.json({success:false,error:e?.message==='SYSTEM_ADMIN_REQUIRED'?'需要系統管理員權限。':(e?.message||'LINE OA 設定失敗')},e?.message==='SYSTEM_ADMIN_REQUIRED'?403:500)}
 });
 
-app.patch('/api/system/workspaces/:workspaceId/targets/:targetId',async(c)=>{
+app.patch('/api/system/workspaces/:safeWorkspaceReference/targets/:targetId',async(c)=>{
  try{
-  await requireSystemAdmin(c);const wid=text(c.req.param('workspaceId')),tid=text(c.req.param('targetId'));const b:any=await c.req.json();
+  await requireSystemAdmin(c);const wid=await systemWorkspaceInternalId(c),tid=text(c.req.param('targetId'));const b:any=await c.req.json();
   const x:any=await c.env.smart_menu_db.prepare(`SELECT * FROM workspace_webhook_targets WHERE id=? AND workspace_id=? LIMIT 1`).bind(tid,wid).first();
   if(!x)return c.json({success:false,error:'找不到 Webhook target。'},404);
   await c.env.smart_menu_db.prepare(`
@@ -6615,9 +6615,9 @@ app.patch('/api/system/workspaces/:workspaceId/targets/:targetId',async(c)=>{
  }catch(e:any){return c.json({success:false,error:e?.message==='SYSTEM_ADMIN_REQUIRED'?'需要系統管理員權限。':(e?.message||'Webhook 更新失敗')},e?.message==='SYSTEM_ADMIN_REQUIRED'?403:500)}
 });
 
-app.post('/api/system/workspaces/:workspaceId/keywords/check-conflict',async(c)=>{
+app.post('/api/system/workspaces/:safeWorkspaceReference/keywords/check-conflict',async(c)=>{
  try{
-  await requireSystemAdmin(c);const wid=text(c.req.param('workspaceId'));const b:any=await c.req.json();
+  await requireSystemAdmin(c);const wid=await systemWorkspaceInternalId(c);const b:any=await c.req.json();
   const k=text(b.keyword),m=text(b.matchType||'exact').toLowerCase();
   if(!k)return c.json({success:false,error:'關鍵字不可空白。'},400);
   const x:any=await findKeywordConflict(c.env,wid,k,m,text(b.excludeRouteId));
@@ -6625,9 +6625,9 @@ app.post('/api/system/workspaces/:workspaceId/keywords/check-conflict',async(c)=
  }catch(e:any){return c.json({success:false,error:e?.message==='SYSTEM_ADMIN_REQUIRED'?'需要系統管理員權限。':(e?.message||'衝突檢查失敗')},e?.message==='SYSTEM_ADMIN_REQUIRED'?403:500)}
 });
 
-app.post('/api/system/workspaces/:workspaceId/keywords',async(c)=>{
+app.post('/api/system/workspaces/:safeWorkspaceReference/keywords',async(c)=>{
  try{
-  await requireSystemAdmin(c);const wid=text(c.req.param('workspaceId'));const b:any=await c.req.json();
+  await requireSystemAdmin(c);const wid=await systemWorkspaceInternalId(c);const b:any=await c.req.json();
   const k=text(b.keyword),m=text(b.matchType||'exact').toLowerCase(),tid=text(b.targetId);
   if(!k)return c.json({success:false,error:'關鍵字不可空白。'},400);
   if(!['exact','prefix','contains'].includes(m))return c.json({success:false,error:'matchType 不正確。'},400);
@@ -6645,9 +6645,9 @@ app.post('/api/system/workspaces/:workspaceId/keywords',async(c)=>{
  }catch(e:any){return c.json({success:false,error:e?.message==='SYSTEM_ADMIN_REQUIRED'?'需要系統管理員權限。':(e?.message||'關鍵字建立失敗')},e?.message==='SYSTEM_ADMIN_REQUIRED'?403:500)}
 });
 
-app.delete('/api/system/workspaces/:workspaceId/keywords/:routeId',async(c)=>{
+app.delete('/api/system/workspaces/:safeWorkspaceReference/keywords/:routeId',async(c)=>{
  try{
-  await requireSystemAdmin(c);const wid=text(c.req.param('workspaceId')),rid=text(c.req.param('routeId'));
+  await requireSystemAdmin(c);const wid=await systemWorkspaceInternalId(c),rid=text(c.req.param('routeId'));
   await c.env.smart_menu_db.prepare(`DELETE FROM workspace_keyword_routes WHERE id=? AND workspace_id=?`).bind(rid,wid).run();
   return c.json({success:true});
  }catch(e:any){return c.json({success:false,error:e?.message==='SYSTEM_ADMIN_REQUIRED'?'需要系統管理員權限。':(e?.message||'關鍵字刪除失敗')},e?.message==='SYSTEM_ADMIN_REQUIRED'?403:500)}
@@ -6783,10 +6783,10 @@ registerCampaignExecutionRoutes(app,{requireRole,workspaceIdOf,text});
 registerCampaignRoutes(app,{requireRole,workspaceIdOf,text});
 registerCommerceRoutes(app,{requireRole,workspaceIdOf,text});
 registerMemberCommerceRoutes(app,{verifiedReferralMember,ensureCrmPersonForVerifiedMember,text});
-app.post('/api/system/workspaces/:workspaceId/line-simulator', async (c) => {
+app.post('/api/system/workspaces/:safeWorkspaceReference/line-simulator', async (c) => {
   try {
     await requireSystemAdmin(c);
-    const workspaceId = text(c.req.param('workspaceId'));
+    const workspaceId = await systemWorkspaceInternalId(c);
     const body: any = await c.req.json();
     const message = text(body.message);
     const mode = text(body.mode || 'routing').toLowerCase();
