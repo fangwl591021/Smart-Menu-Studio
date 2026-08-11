@@ -13,6 +13,7 @@ import {
   setDefaultRichMenu,
   upsertRichMenuAlias,
 } from './line-rich-menu.mjs';
+import { resolveProjectLinePublishCredential } from './project-line-publish-credential';
 import { buildGuideContext, toPublicGuideContext } from './guide/context';
 import { evaluateGuide } from './guide/rules';
 import { buildGuideWorkflow } from './guide/workflow';
@@ -4298,12 +4299,6 @@ app.post('/api/projects/:projectId/publish', async (c) => {
   try {
     requireRole(c, 'editor');
 
-    if (!c.env.LINE_CHANNEL_ACCESS_TOKEN) {
-      return c.json({
-        success: false,
-        error: 'LINE_CHANNEL_ACCESS_TOKEN 尚未設定。',
-      }, 500);
-    }
 
     const workspaceId = workspaceIdOf(c);
     const project: any = await getProjectForPublish(c.env, workspaceId, projectId);
@@ -4311,6 +4306,22 @@ app.post('/api/projects/:projectId/publish', async (c) => {
     if (!project) {
       return c.json({ success: false, error: '找不到專案。' }, 404);
     }
+
+    const publishCredential = await resolveProjectLinePublishCredential(
+      c.env.smart_menu_db,
+      workspaceId,
+      projectId,
+    );
+    if (!publishCredential.ok) {
+      if (publishCredential.code === 'PROJECT_NOT_FOUND') {
+        return c.json({ success: false, error: '找不到專案。' }, 404);
+      }
+      if (publishCredential.code === 'LINE_ACCOUNT_NOT_CONNECTED') {
+        return c.json({ success: false, error: '目前專案所屬 Workspace 尚未連結 LINE 官方帳號。' }, 409);
+      }
+      return c.json({ success: false, error: '目前連結的 LINE 官方帳號尚未設定 Messaging API Bot Token。' }, 409);
+    }
+    const channelAccessToken = publishCredential.credential.channelAccessToken;
 
     if (project.status === 'disabled') {
       return c.json({ success: false, error: '此專案已停用，請先啟用後再發布。' }, 409);
@@ -4386,7 +4397,7 @@ app.post('/api/projects/:projectId/publish', async (c) => {
       {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${c.env.LINE_CHANNEL_ACCESS_TOKEN}`,
+          'Authorization': `Bearer ${channelAccessToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(richMenuObject),
@@ -4394,8 +4405,9 @@ app.post('/api/projects/:projectId/publish', async (c) => {
     );
 
     if (!createRes.ok) {
-      const detail = await createRes.text();
-      throw new Error(`建立 LINE Rich Menu 失敗：${detail}`);
+      throw new Error(createRes.status === 401 || createRes.status === 403
+        ? 'LINE_ACCOUNT_TOKEN_UNUSABLE'
+        : 'LINE_RICH_MENU_CREATE_FAILED');
     }
 
     const createData: any = await createRes.json();
@@ -4413,7 +4425,7 @@ app.post('/api/projects/:projectId/publish', async (c) => {
       {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${c.env.LINE_CHANNEL_ACCESS_TOKEN}`,
+          'Authorization': `Bearer ${channelAccessToken}`,
           'Content-Type': imageContentType,
         },
         body: object.body,
@@ -4421,22 +4433,23 @@ app.post('/api/projects/:projectId/publish', async (c) => {
     );
 
     if (!uploadRes.ok) {
-      const detail = await uploadRes.text();
-      throw new Error(`上傳 LINE Rich Menu 圖片失敗：${detail}`);
+      throw new Error(uploadRes.status === 401 || uploadRes.status === 403
+        ? 'LINE_ACCOUNT_TOKEN_UNUSABLE'
+        : 'LINE_RICH_MENU_UPLOAD_FAILED');
     }
 
     // 3. Point the stable Project alias to the newly published Rich Menu.
     const richMenuAliasId = richMenuAliasIdForProject(projectId);
     const alias = await upsertRichMenuAlias(
       fetch,
-      c.env.LINE_CHANNEL_ACCESS_TOKEN,
+      channelAccessToken,
       richMenuAliasId,
       richMenuId,
     );
 
     // 4. A republished home Project must remain the default; other Projects never replace it.
     if (project.status === 'default') {
-      await setDefaultRichMenu(fetch, c.env.LINE_CHANNEL_ACCESS_TOKEN, richMenuId);
+      await setDefaultRichMenu(fetch, channelAccessToken, richMenuId);
     }
 
     // 5. Store only lifecycle state. LINE alias remains the source of the current richMenuId mapping.
@@ -4462,14 +4475,20 @@ app.post('/api/projects/:projectId/publish', async (c) => {
       richMenu: richMenuObject,
     });
   } catch (e: any) {
-    console.error('publish-project:', e);
-    if (e?.message === 'FORBIDDEN_ROLE') {
+    const errorCode = text(e?.message);
+    console.error(JSON.stringify({
+      message: 'publish project failed',
+      code: ['FORBIDDEN_ROLE', 'LINE_ACCOUNT_TOKEN_UNUSABLE', 'LINE_RICH_MENU_CREATE_FAILED', 'LINE_RICH_MENU_UPLOAD_FAILED'].includes(errorCode)
+        ? errorCode
+        : 'LINE_PUBLISH_FAILED',
+    }));
+    if (errorCode === 'FORBIDDEN_ROLE') {
       return c.json({ success: false, error: '權限不足，需要 editor、admin 或 owner。' }, 403);
     }
-    return c.json({
-      success: false,
-      error: e?.message || '發布至 LINE 失敗',
-    }, 500);
+    if (errorCode === 'LINE_ACCOUNT_TOKEN_UNUSABLE') {
+      return c.json({ success: false, error: 'LINE 官方帳號的 Messaging API 設定無法使用，請重新確認帳號設定。' }, 409);
+    }
+    return c.json({ success: false, error: '發布至 LINE 失敗，請稍後再試。' }, 502);
   }
 });
 

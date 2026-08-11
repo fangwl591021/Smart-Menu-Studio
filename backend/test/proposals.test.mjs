@@ -198,7 +198,7 @@ test('frontend Proposal Preview is lazy, stateful, closable, and has no Apply ac
   assert.match(source, /status: 'success'/);
   assert.match(source, /status: 'error'/);
   assert.match(source, /changes\.length > 0/);
-  assert.match(source, /Preview Only/);
+  assert.match(source, /僅供預覽/);
   assert.match(source, /系統尚未修改任何資料/);
   assert.match(source, /closeProposal/);
   assert.doesNotMatch(source, /套用|確認修改|立即更新/);

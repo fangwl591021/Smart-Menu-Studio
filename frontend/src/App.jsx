@@ -585,7 +585,9 @@ const PUBLISH_STEP_REASONS = {
 
 const safePublishErrorMessage = message => {
   const value = String(message || '');
-  if (/credential|unauthorized|access token|LINE_CHANNEL_ACCESS_TOKEN|401|403|驗證/i.test(value)) return 'LINE Messaging API 驗證失敗，請確認官方帳號設定。';
+  if (/尚未連結 LINE 官方帳號|LINE_ACCOUNT_NOT_CONNECTED/i.test(value)) return '目前專案所屬 Workspace 尚未連結 LINE 官方帳號。';
+  if (/尚未設定 Messaging API Bot Token|LINE_ACCOUNT_TOKEN_MISSING/i.test(value)) return '目前連結的 LINE 官方帳號尚未設定 Messaging API Bot Token。';
+  if (/設定無法使用|LINE_ACCOUNT_TOKEN_UNUSABLE|credential|unauthorized|access token|401|403|驗證/i.test(value)) return 'LINE 官方帳號的 Messaging API 設定無法使用，請重新確認帳號設定。';
   if (/圖片|image|content|尺寸/i.test(value)) return '圖文選單圖片不符合 LINE 規格。';
   if (/熱區|area|action|bounds|切換/i.test(value)) return '部分點擊區域設定不完整。';
   return 'LINE 圖文選單發布失敗，請稍後再試。';

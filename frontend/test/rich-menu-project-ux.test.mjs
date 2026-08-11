@@ -76,7 +76,7 @@ test('draft status changes only after backend publish success', () => {
   assert.match(handler, /status: payload\.project\?\.status \|\| previous\.status/);
 });
 test('publish success message states actual LINE publication', () => assert.match(editor, /圖文選單已成功發布至 LINE 官方帳號/));
-test('credential failure has a safe zh-TW translation', () => assert.match(app, /LINE Messaging API 驗證失敗，請確認官方帳號設定/));
+test('credential failure has an account-scoped safe zh-TW translation', () => assert.match(app, /LINE 官方帳號的 Messaging API 設定無法使用，請重新確認帳號設定/));
 test('image failure has a safe zh-TW translation', () => assert.match(app, /圖文選單圖片不符合 LINE 規格/));
 test('area failure has a safe zh-TW translation', () => assert.match(app, /部分點擊區域設定不完整/));
 test('unknown provider failure has a safe fallback', () => assert.match(app, /LINE 圖文選單發布失敗，請稍後再試/));
