@@ -94,6 +94,11 @@ export async function createOrder(db: any, input: any) {
   prepared.forEach(({product,quantity,line})=>statements.push(db.prepare(`INSERT INTO commerce_order_items(id,workspace_id,order_id,product_id,sku_snapshot,name_snapshot,unit_amount_minor,quantity,line_amount_minor,currency_code,created_at) VALUES(?,?,?,?,?,?,?,?,?,'TWD',?)`).bind(makeId('ci'),input.workspaceId,orderId,product.id,product.sku,product.name,product.price_amount_minor,quantity,line,timestamp)));
   if(input.memberOwner) statements.push(db.prepare(`INSERT INTO commerce_order_member_owners(order_id,workspace_id,line_account_id,line_member_id,crm_person_id,created_at) VALUES(?,?,?,?,?,?)`).bind(orderId,input.workspaceId,input.memberOwner.lineAccountId,input.memberOwner.lineMemberId,input.memberOwner.crmPersonId,timestamp));
   statements.push(...paymentObligationInsertStatements(db,{workspaceId:input.workspaceId,orderId,orderTotalAmountMinor:total,requested:input.paymentObligations as readonly CommercePaymentObligationInput[]|undefined,createdAt:timestamp}));
+  if (typeof input.trustedAppendStatements === 'function') {
+    const appended = input.trustedAppendStatements({ orderId, orderReference: ref, totalAmountMinor: total, createdAt: timestamp });
+    if (!Array.isArray(appended)) throw new Error('COMMERCE_TRUSTED_STATEMENTS_INVALID');
+    statements.push(...appended);
+  }
   await db.batch(statements); return readOrder(db,input.workspaceId,ref);
 }
 export async function listOrders(db:any,workspaceId:string){return Promise.all((await results(db.prepare(`SELECT * FROM commerce_orders WHERE workspace_id=? ORDER BY created_at DESC,id DESC`).bind(workspaceId))).map((o:any)=>orderView(o)));}
@@ -140,6 +145,7 @@ export async function handleNewebPayCallback(db:any,input:any){
   const amountValue=Number(data.Amt),paymentLeg=commercePaymentLeg(intent.payment_leg||'FULL');
   const verified=String(data.MerchantID||'')===intent.merchant_id&&Number.isInteger(amountValue)&&amountValue===Number(intent.amount_minor);
   const timestamp=now(),transactionId=makeId('pt'),providerHash=data.TradeNo?await sha256Hex(String(data.TradeNo)):null;
+  const projectTravel=async()=>{if(typeof input.projectTravelPaymentMilestone==='function'){try{await input.projectTravelPaymentMilestone(db,{workspaceId:String(intent.workspace_id),orderId:String(intent.order_id),paymentLeg,occurredAt:timestamp});}catch(error){console.error(JSON.stringify({event:'travel_payment_projection_failed',paymentLeg,error:error instanceof Error?error.message:'UNKNOWN'}));}}};
   if(!verified){
     await db.prepare(`INSERT INTO commerce_payment_transactions(id,workspace_id,payment_intent_id,order_id,provider,callback_hash,provider_transaction_hash,payment_leg,status,amount_minor,currency_code,provider_response_code,safe_failure_code,created_at) VALUES(?,?,?,?,'NEWEBPAY',?,?,?,'VERIFICATION_FAILED',?,'TWD',?,'CALLBACK_BINDING_MISMATCH',?)`).bind(transactionId,intent.workspace_id,intent.id,intent.order_id,callbackHash,providerHash,paymentLeg,Number.isInteger(amountValue)?amountValue:null,cleanText(data.Status,40),timestamp).run();
     throw new Error('COMMERCE_PAYMENT_CALLBACK_MISMATCH');
@@ -154,16 +160,17 @@ export async function handleNewebPayCallback(db:any,input:any){
   }
   const success=String(data.Status||'').toUpperCase()==='SUCCESS';
   const duplicate:any=await row(db.prepare(`SELECT t.status,o.status AS order_status,o.payment_status AS order_payment_status FROM commerce_payment_transactions t JOIN commerce_orders o ON o.workspace_id=t.workspace_id AND o.id=t.order_id WHERE t.provider='NEWEBPAY' AND t.callback_hash=?`).bind(callbackHash));
-  if(duplicate)return {accepted:true,idempotent:true,paid:duplicate.order_status==='PAID'&&duplicate.order_payment_status==='PAID'};
+  if(duplicate){if(duplicate.status==='SUCCEEDED')await projectTravel();return {accepted:true,idempotent:true,paid:duplicate.order_status==='PAID'&&duplicate.order_payment_status==='PAID'};}
   if(providerHash){
     const prior:any=await row(db.prepare(`SELECT t.status,o.status AS order_status,o.payment_status AS order_payment_status FROM commerce_payment_transactions t JOIN commerce_orders o ON o.workspace_id=t.workspace_id AND o.id=t.order_id WHERE t.provider='NEWEBPAY' AND t.provider_transaction_hash=?`).bind(providerHash));
-    if(prior)return {accepted:true,idempotent:true,paid:prior.order_status==='PAID'&&prior.order_payment_status==='PAID'};
+    if(prior){if(prior.status==='SUCCEEDED')await projectTravel();return {accepted:true,idempotent:true,paid:prior.order_status==='PAID'&&prior.order_payment_status==='PAID'};}
   }
   const transactionStatus=success?'SUCCEEDED':'FAILED',safeFailure=success?null:'PROVIDER_PAYMENT_FAILED';
   const transactionStatement=db.prepare(`INSERT INTO commerce_payment_transactions(id,workspace_id,payment_intent_id,order_id,provider,callback_hash,provider_transaction_hash,payment_leg,status,amount_minor,currency_code,provider_response_code,safe_failure_code,paid_at,created_at) VALUES(?,?,?,?,'NEWEBPAY',?,?,?,?,?,'TWD',?,?,?,?)`).bind(transactionId,intent.workspace_id,intent.id,intent.order_id,callbackHash,providerHash,paymentLeg,transactionStatus,amountValue,cleanText(data.Status,40),safeFailure,success?timestamp:null,timestamp);
   try{
     if(success){
       const settled=await applyVerifiedPaymentLeg(db,{workspaceId:intent.workspace_id,orderId:intent.order_id,paymentIntentId:intent.id,paymentLeg,verifiedAmountMinor:amountValue,paidAt:timestamp,transactionStatement});
+      await projectTravel();
       return {accepted:true,idempotent:false,paid:settled.fullyPaid};
     }
     const statements=[transactionStatement];
@@ -176,7 +183,7 @@ export async function handleNewebPayCallback(db:any,input:any){
     return {accepted:true,idempotent:false,paid:failedOrder?.status==='PAID'&&failedOrder?.payment_status==='PAID'};
   }catch(error){
     const raced:any=await row(db.prepare(`SELECT t.status,o.status AS order_status,o.payment_status AS order_payment_status FROM commerce_payment_transactions t JOIN commerce_orders o ON o.workspace_id=t.workspace_id AND o.id=t.order_id WHERE t.provider='NEWEBPAY' AND (t.callback_hash=? OR (? IS NOT NULL AND t.provider_transaction_hash=?)) LIMIT 1`).bind(callbackHash,providerHash,providerHash));
-    if(raced)return {accepted:true,idempotent:true,paid:raced.order_status==='PAID'&&raced.order_payment_status==='PAID'};
+    if(raced){if(raced.status==='SUCCEEDED')await projectTravel();return {accepted:true,idempotent:true,paid:raced.order_status==='PAID'&&raced.order_payment_status==='PAID'};}
     throw error;
   }
 }

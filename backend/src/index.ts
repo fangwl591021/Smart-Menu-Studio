@@ -146,6 +146,9 @@ import { registerCampaignExecutionRoutes } from './campaign/execution-routes';
 import { registerCampaignRoutes } from './campaign/campaign-routes';
 import { registerCommerceRoutes } from './commerce/routes';
 import { registerMemberCommerceRoutes } from './commerce/member-routes';
+import { registerTravelRoutes } from './travel/routes';
+import { registerMemberTravelRoutes } from './travel/member-routes';
+import { projectTravelPaymentMilestone } from './travel/payment-projection';
 import {
   newWorkspaceModuleEntitlementStatements,
   requireWorkspaceModule,
@@ -6781,8 +6784,10 @@ registerCrmSegmentRoutes(app,{requireRole,workspaceIdOf,text});
 registerCampaignAudienceRoutes(app,{requireRole,workspaceIdOf,text});
 registerCampaignExecutionRoutes(app,{requireRole,workspaceIdOf,text});
 registerCampaignRoutes(app,{requireRole,workspaceIdOf,text});
-registerCommerceRoutes(app,{requireRole,workspaceIdOf,text});
+registerCommerceRoutes(app,{requireRole,workspaceIdOf,text,projectTravelPaymentMilestone});
 registerMemberCommerceRoutes(app,{verifiedReferralMember,ensureCrmPersonForVerifiedMember,text});
+registerTravelRoutes(app,{requireRole,workspaceIdOf,text});
+registerMemberTravelRoutes(app,{verifiedReferralMember,ensureCrmPersonForVerifiedMember,text});
 app.post('/api/system/workspaces/:safeWorkspaceReference/line-simulator', async (c) => {
   try {
     await requireSystemAdmin(c);

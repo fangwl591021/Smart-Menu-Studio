@@ -246,6 +246,7 @@ export function tenantModuleForPath(path: string): WorkspaceModuleKey | null {
     || path === '/api/campaign' || path.startsWith('/api/campaign/')) return 'CAMPAIGN';
   if ((path === '/api/commerce' || path.startsWith('/api/commerce/'))
     && path !== '/api/commerce/payments/newebpay/notify') return 'COMMERCE';
+  if (path === '/api/travel' || path.startsWith('/api/travel/')) return 'TRAVEL';
   if (path === '/api/dealers' || path.startsWith('/api/dealers/')
     || path === '/api/commission' || path.startsWith('/api/commission-')) return 'DEALER_COMMISSION';
   if (path.startsWith('/api/point-') || path.startsWith('/api/points-')

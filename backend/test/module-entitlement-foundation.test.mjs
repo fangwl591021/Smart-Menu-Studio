@@ -233,9 +233,9 @@ for (const [path, moduleKey] of routeMappings) {
 test('verified NewebPay notify is an integrity exception', () => assert.equal(tenantModuleForPath('/api/commerce/payments/newebpay/notify'), null));
 test('system routes are not tenant module-gated', () => assert.equal(tenantModuleForPath('/api/system/workspaces/safe/modules'), null));
 test('workspace module read route is not self-gated', () => assert.equal(tenantModuleForPath('/api/workspace/modules'), null));
-test('TRAVEL has no business route mapping', () => assert.equal(tenantModuleForPath('/api/travel/itineraries'), null));
+test('/api/travel/itineraries maps to TRAVEL', () => assert.equal(tenantModuleForPath('/api/travel/itineraries'), 'TRAVEL'));
 
-test('TRAVEL entitlement can be disabled and re-enabled without a Travel business route', async () => {
+test('TRAVEL entitlement can be disabled and re-enabled with the Travel business route guarded', async () => {
   const db = new FakeDb();
   await setWorkspaceModuleStatus({ db, workspaceId: 'a', moduleKey: 'TRAVEL', enabled: false, actorUserId: 'system' });
   await assert.rejects(() => requireWorkspaceModule({ db, workspaceId: 'a', moduleKey: 'TRAVEL' }), /MODULE_NOT_ENABLED/);

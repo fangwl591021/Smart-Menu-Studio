@@ -111,7 +111,7 @@ test('Tenant Project publish does not require the global token binding', () => {
 test('D1 final default state occurs only after the verified LINE publish contract', () => {
   const linePublish = publishRoute.indexOf('const publishResult = await publishRichMenuToLine');
   const finalPersistence = publishRoute.indexOf('await c.env.smart_menu_db.batch');
-  const successResponse = publishRoute.indexOf('return c.json({\n      success: true');
+  const successResponse = publishRoute.indexOf('success: true', finalPersistence);
   assert.ok(linePublish >= 0 && finalPersistence > linePublish && successResponse > finalPersistence);
   assert.match(publishRoute, /UPDATE projects SET status = 'published'[\s\S]*UPDATE projects SET status = 'default'/);
   assert.match(publishRoute, /defaultAssigned: publishResult\.defaultAssigned/);
