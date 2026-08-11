@@ -21,15 +21,16 @@ test('0043 is additive and creates only Campaign content and prepare contract ta
 test('TEXT content versions are immutable, bounded, and sequence guarded', async () => {
   const migration = await read('../migrations/0043_campaign_content_prepare_contract.sql');
   const source = await read('../src/campaign/campaigns.ts');
+  const contentContract = await read('../src/campaign/content.ts');
   for (const token of [
     "content_type TEXT NOT NULL CHECK(content_type='TEXT')",
     'campaign_content_version_sequence_guard',
     'campaign_content_versions_no_update',
     'campaign_content_versions_no_delete',
   ]) assert.match(migration, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.match(source, /CAMPAIGN_TEXT_MAX_LENGTH = 5000/);
-  assert.match(source, /content\.contentType !== 'TEXT'/);
-  assert.match(source, /Array\.from\(text\)\.length/);
+  assert.match(contentContract, /CAMPAIGN_TEXT_MAX_LENGTH = 5000/);
+  assert.match(contentContract, /raw\.contentType !== 'TEXT'/);
+  assert.match(contentContract, /Array\.from\(text\)\.length/);
   assert.match(source, /INSERT INTO campaign_content_versions[\s\S]*nextVersion/);
   assert.doesNotMatch(source, /UPDATE campaign_content_versions|DELETE FROM campaign_content_versions/);
 });

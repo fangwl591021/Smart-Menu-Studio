@@ -12,6 +12,7 @@
     "src/campaign/audiences.ts",
     "src/campaign/audience-routes.ts",
     "src/campaign/campaigns.ts",
+    "src/campaign/content.ts",
     "src/campaign/executions.ts",
     "src/campaign/execution-routes.ts",
     "src/campaign/line-push.ts",

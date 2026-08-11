@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { resolveProjectLinePublishCredential } from '../src/project-line-publish-credential.ts';
 
-const backend = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8');
+const backend = (await readFile(new URL('../src/index.ts', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 const guideContext = await readFile(new URL('../src/guide/context.ts', import.meta.url), 'utf8');
 const frontend = await readFile(new URL('../../frontend/src/App.jsx', import.meta.url), 'utf8');
 const publishRoute = backend.slice(

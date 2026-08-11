@@ -1,4 +1,5 @@
 import { preflightLineCampaignSend, sendLineTextPush, type LinePushResult } from './line-push.ts';
+import { renderCampaignTextContent } from './content.ts';
 
 export const CAMPAIGN_EXECUTION_MAX_RECIPIENTS = 100;
 export const CAMPAIGN_DELIVERY_MAX_ATTEMPTS = 3;
@@ -126,23 +127,6 @@ export async function campaignProviderRequestHash(input: {
   }));
 }
 
-function frozenText(contentType: unknown, payloadJson: unknown) {
-  if (String(contentType) !== 'TEXT') throw new Error('CAMPAIGN_EXECUTION_CONTENT_INVALID');
-  let payload: unknown;
-  try {
-    payload = JSON.parse(String(payloadJson || ''));
-  } catch {
-    throw new Error('CAMPAIGN_EXECUTION_CONTENT_INVALID');
-  }
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('CAMPAIGN_EXECUTION_CONTENT_INVALID');
-  const record = payload as Record<string, unknown>;
-  if (Object.keys(record).sort().join(',') !== 'text' || typeof record.text !== 'string') {
-    throw new Error('CAMPAIGN_EXECUTION_CONTENT_INVALID');
-  }
-  const text = record.text;
-  if (!text.trim() || Array.from(text).length > 5000) throw new Error('CAMPAIGN_EXECUTION_CONTENT_INVALID');
-  return text;
-}
 
 async function replayExecutionByAction(db: D1Database, input: {
   workspaceId: string;
@@ -210,7 +194,10 @@ async function preparedContext(db: D1Database, workspaceId: string, safeCampaign
     audienceVersionNo,
     snapshotId: clean(snapshot.id),
     contentVersionNo,
-    text: frozenText(content.content_type, content.payload_json),
+    text: await renderCampaignTextContent({
+      contentType: content.content_type,
+      payloadJson: content.payload_json,
+    }),
     totalRecipientCount: matched,
     eligibleRecipientCount: eligible,
     lineAccountId: clean(account.id),

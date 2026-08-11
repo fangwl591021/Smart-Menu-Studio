@@ -4,8 +4,12 @@ import {
   evaluateCampaignAudience,
   type CampaignAudienceSource,
 } from './audiences';
+import {
+  publicCampaignTextContent,
+  validateCampaignContent,
+} from './content.ts';
 
-export const CAMPAIGN_TEXT_MAX_LENGTH = 5000;
+export { CAMPAIGN_TEXT_MAX_LENGTH, validateCampaignContent } from './content.ts';
 const clean = (value: unknown, maximum = 160) => typeof value === 'string' ? value.trim().slice(0, maximum) : '';
 const internalId = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 const publicReference = () => `camp_${crypto.randomUUID().replace(/-/g, '')}`;
@@ -54,21 +58,6 @@ type PrepareActionRow = Record<string, unknown> & {
   source_segment_ref?: string | null;
 };
 
-function exactKeys(value: Record<string, unknown>, allowed: string[]) {
-  return Object.keys(value).sort().join(',') === [...allowed].sort().join(',');
-}
-
-export function validateCampaignContent(raw: unknown) {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('CAMPAIGN_CONTENT_INVALID');
-  const content = raw as Record<string, unknown>;
-  if (!exactKeys(content, ['contentType', 'text']) || content.contentType !== 'TEXT' || typeof content.text !== 'string') {
-    throw new Error('CAMPAIGN_CONTENT_INVALID');
-  }
-  const text = content.text;
-  const textLength = Array.from(text).length;
-  if (!text.trim() || textLength > CAMPAIGN_TEXT_MAX_LENGTH) throw new Error('CAMPAIGN_CONTENT_TEXT_INVALID');
-  return { contentType: 'TEXT' as const, text, textLength, payloadJson: JSON.stringify({ text }) };
-}
 
 export async function campaignPrepareActionHash(input: {
   workspaceId: string;
@@ -97,17 +86,16 @@ function parseBreakdown(raw: unknown) {
 }
 
 function parseContent(row: ContentVersionRow) {
-  let text = '';
+  let content: ReturnType<typeof publicCampaignTextContent> = { text: '' };
   try {
-    const parsed = JSON.parse(String(row.payload_json || '{}'));
-    text = typeof parsed.text === 'string' ? parsed.text : '';
+    content = publicCampaignTextContent(row.content_type, row.payload_json);
   } catch {
-    text = '';
+    content = { text: '' };
   }
   return {
     versionNo: Number(row.version_no),
     contentType: 'TEXT',
-    text,
+    ...content,
     createdAt: row.created_at || null,
   };
 }
