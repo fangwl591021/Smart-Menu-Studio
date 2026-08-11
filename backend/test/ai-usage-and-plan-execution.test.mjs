@@ -233,7 +233,7 @@ test('AI Usage frontend is wired for tenant and System Admin without exposing re
   assert.match(app, /<AIUsagePanel request=\{authFetch\} systemAdmin=\{isPlatformAdminMode\}/);
   assert.match(app, /currentView === 'templates' && isPlatformAdminMode/);
   const tenantNavigation = app.slice(app.indexOf('const visibleNavigation'), app.indexOf('const navigateHome'));
-  assert.ok(tenantNavigation.includes("return ['dashboard', 'projects', 'templates', 'crm', 'campaigns', 'commerce', 'ai-usage'].includes(item.id);"));
+  assert.ok(tenantNavigation.includes("return ['dashboard', 'projects', 'templates', 'crm', 'campaigns', 'commerce', 'travel', 'ai-usage'].includes(item.id);"));
   assert.equal(tenantNavigation.includes("return ['dashboard', 'projects', 'templates', 'crm', 'ai-usage', 'accounts'"), false);
   for (const marker of ['byWorkspace', 'byUser', 'byFeature', 'byModel', 'billableCostMicros']) assert.match(panel, new RegExp(marker));
 });
