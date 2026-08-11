@@ -69,7 +69,8 @@ test('backend summary and list routes are consumed without invented fields', () 
   assert.doesNotMatch(panel, /impressions|sentCount|recipientCount|uniqueAnonymous/);
 });
 
-test('Campaign Builder structured-link authoring UI is explicitly absent', () => {
-  assert.match(editor, /const content = \{ contentType: 'TEXT', text \}/);
-  assert.doesNotMatch(editor, /destinationUrl|\{\{link:|setLinks|tracked link/i);
+test('Campaign Builder structured-link authoring is integrated without mutating analytics', () => {
+  assert.match(editor, /<CampaignStructuredLinkEditor[\s\S]*links=\{links\}/);
+  assert.match(editor, /createStructuredCampaignContent\(text, links\)/);
+  assert.doesNotMatch(panel, /method:/);
 });

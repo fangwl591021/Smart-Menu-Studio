@@ -34,7 +34,7 @@ const acceptance = [
   ['prepared campaign is frozen and read-only', editor, /campaign\?\.status === 'PREPARED'[\s\S]*此版本已凍結/],
   ['archived campaign is read-only', editor, /campaign\?\.status === 'ARCHIVED'[\s\S]*目前僅供查看/],
   ['prepared status has zh-TW label', labels, /PREPARED: '已準備'/],
-  ['content contract is TEXT only', editor, /content = \{ contentType: 'TEXT', text \}/],
+  ['content contract remains TEXT with optional structured links', editor, /createStructuredCampaignContent\(text, links\)/],
   ['content textarea is limited to 5000 characters', editor, /<textarea[\s\S]*maxLength=\{5000\}/],
   ['content length is displayed', editor, /\{textLength\} \/ 5000/],
   ['invalid empty or oversized content is rejected', editor, /!text\.trim\(\) \|\| textLength > 5000/],

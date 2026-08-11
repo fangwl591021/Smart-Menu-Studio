@@ -1,8 +1,15 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import CampaignAudiencePanel from './CampaignAudiencePanel';
 import CampaignExecutionPanel from './CampaignExecutionPanel';
 import CampaignClickEngagementPanel from './CampaignClickEngagementPanel';
+import CampaignStructuredLinkEditor from './CampaignStructuredLinkEditor';
 import { labelStatus } from '../utils/presentationLabels';
+import {
+  createStructuredCampaignContent,
+  humanizeTrackedLinkText,
+  trackedLinkPlaceholder,
+  validateStructuredLinkDraft,
+} from '../utils/campaignStructuredLinks';
 
 const requestJson = async (request, path, options) => {
   const response = await request(path, options);
@@ -17,6 +24,14 @@ const errorLabel = (code) => {
     CAMPAIGN_NAME_CONFLICT: '已有相同名稱的活動。',
     CAMPAIGN_CONTENT_INVALID: '文字訊息格式不正確。',
     CAMPAIGN_CONTENT_TEXT_INVALID: '訊息內容必須為 1 至 5000 字。',
+    CAMPAIGN_CONTENT_LINK_TOKEN_INVALID: '追蹤連結設定不正確，請重新新增。',
+    CAMPAIGN_CONTENT_LINK_TOKEN_DUPLICATE: '追蹤連結設定重複，請重新新增。',
+    CAMPAIGN_CONTENT_LINK_TOKEN_UNDECLARED: '訊息中有找不到設定的追蹤連結，請重新插入。',
+    CAMPAIGN_CONTENT_LINK_TOKEN_REUSED: '同一個追蹤連結只能在訊息中插入一次。',
+    CAMPAIGN_CONTENT_LINK_UNUSED: '有追蹤連結尚未插入訊息內容。',
+    CAMPAIGN_CONTENT_LINK_LABEL_INVALID: '請檢查追蹤連結名稱。',
+    CAMPAIGN_CONTENT_LINK_DESTINATION_INVALID: '連結網址必須使用安全的 HTTPS 網址。',
+    CAMPAIGN_CONTENT_LINKS_INVALID: '追蹤連結最多可新增 10 筆。',
     CAMPAIGN_NOT_DRAFT: '只有草稿活動可以編輯。',
     FORBIDDEN: '目前角色沒有執行此操作的權限。',
   };
@@ -44,16 +59,19 @@ export default function CampaignEditor({
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [text, setText] = useState('');
+  const [links, setLinks] = useState([]);
   const [selectedSegmentReference, setSelectedSegmentReference] = useState('');
   const [saving, setSaving] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [error, setError] = useState('');
+  const textAreaRef = useRef(null);
   const textLength = useMemo(() => Array.from(text).length, [text]);
 
   useEffect(() => {
     setName(campaign?.name || '');
     setDescription(campaign?.description || '');
     setText(campaign?.currentContent?.text || '');
+    setLinks(Array.isArray(campaign?.currentContent?.links) ? campaign.currentContent.links : []);
     setSelectedSegmentReference('');
     setError('');
   }, [
@@ -62,8 +80,23 @@ export default function CampaignEditor({
     campaign?.name,
     campaign?.description,
     campaign?.currentContent?.text,
+    campaign?.currentContent?.links,
     creating,
   ]);
+
+  const insertTrackedLink = link => {
+    const placeholder = trackedLinkPlaceholder(link.token);
+    if (text.includes(placeholder)) return;
+    const textarea = textAreaRef.current;
+    const start = textarea?.selectionStart ?? text.length;
+    const end = textarea?.selectionEnd ?? start;
+    const nextText = text.slice(0, start) + placeholder + text.slice(end);
+    setText(nextText);
+    requestAnimationFrame(() => {
+      textarea?.focus();
+      textarea?.setSelectionRange(start + placeholder.length, start + placeholder.length);
+    });
+  };
 
   const refreshCampaign = async () => {
     if (!campaign?.safeCampaignReference) return null;
@@ -85,10 +118,15 @@ export default function CampaignEditor({
       setError('訊息內容必須為 1 至 5000 字。');
       return;
     }
+    const structuredLinkError = validateStructuredLinkDraft(text, links);
+    if (structuredLinkError) {
+      setError(errorLabel(structuredLinkError));
+      return;
+    }
     setSaving(true);
     setError('');
     try {
-      const content = { contentType: 'TEXT', text };
+      const content = createStructuredCampaignContent(text, links);
       if (creating) {
         const payload = await requestJson(request, '/api/campaigns', {
           method: 'POST',
@@ -197,6 +235,7 @@ export default function CampaignEditor({
         <label className="mt-4 block text-sm font-medium text-gray-700">
           訊息內容
           <textarea
+            ref={textAreaRef}
             aria-label="訊息內容"
             value={text}
             onChange={(event) => setText(event.target.value)}
@@ -208,6 +247,15 @@ export default function CampaignEditor({
         <div className={`mt-1 text-right text-xs ${textLength > 5000 ? 'text-red-600' : 'text-gray-500'}`}>{textLength} / 5000</div>
         {canEdit && <p className="mt-2 text-xs text-gray-500">內容有變更時，儲存會建立新的不可變版本，舊版本不會被覆寫。</p>}
 
+        <CampaignStructuredLinkEditor
+          text={text}
+          links={links}
+          disabled={!canEdit}
+          onTextChange={setText}
+          onLinksChange={setLinks}
+          onInsertLink={insertTrackedLink}
+        />
+
         {!creating && campaign?.contentVersions?.length > 0 && (
           <details className="mt-5 rounded border p-3">
             <summary className="cursor-pointer text-sm font-semibold">內容版本歷程（唯讀）</summary>
@@ -216,7 +264,12 @@ export default function CampaignEditor({
                 <article key={version.versionNo} className="rounded bg-slate-50 p-3 text-sm">
                   <div className="font-medium">v{version.versionNo} · 文字訊息{version.prepared ? ' · 已準備版本' : ''}</div>
                   <div className="mt-1 text-xs text-gray-500">{formatTime(version.createdAt)}</div>
-                  <p className="mt-2 whitespace-pre-wrap text-gray-700">{version.text}</p>
+                  <p className="mt-2 whitespace-pre-wrap text-gray-700">{humanizeTrackedLinkText(version.text, version.links || [])}</p>
+                  {!!version.links?.length && (
+                    <ul className="mt-2 space-y-1 border-t pt-2 text-xs text-gray-600">
+                      {version.links.map(link => <li key={link.token}><strong>{link.label}</strong> · {link.destinationUrl}</li>)}
+                    </ul>
+                  )}
                 </article>
               ))}
             </div>
