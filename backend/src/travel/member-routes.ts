@@ -1,4 +1,4 @@
-import { createMemberBooking, initiateTravelPayment, listBookings, listDepartures, listPublishedItineraries, readBooking, readDeparture, readItinerary } from './travel';
+import { createMemberBooking, initiateTravelPayment, listBookingEvents, listBookings, listDepartures, listPublishedItineraries, readBooking, readDeparture, readItinerary } from './travel';
 
 const known=/^(TRAVEL|COMMERCE|CRM|MODULE)_[A-Z0-9_]+$/;
 function fail(c:any,error:unknown,fallback:string){const raw=error instanceof Error?error.message:'';const code=known.test(raw)?raw:fallback;const status=code==='MODULE_NOT_ENABLED'||code==='MODULE_DEPENDENCY_NOT_ENABLED'?403:code==='MEMBER_CONTEXT_REQUIRED'?401:code.endsWith('_NOT_FOUND')?404:code.includes('CAPACITY')||code.includes('NOT_AVAILABLE')||code.includes('NOT_PURCHASABLE')||code.includes('NOT_PERMITTED')||code.includes('NOT_READY')?409:400;return c.json({success:false,error:code},status);}
@@ -6,11 +6,21 @@ async function context(c:any,deps:any,bindCustomer=false){const verified=await d
 
 export function registerMemberTravelRoutes(app:any,deps:any){
   app.get('/api/member/travel/itineraries',async(c:any)=>{try{const ctx=await context(c,deps);return c.json({success:true,itineraries:await listPublishedItineraries(c.env.smart_menu_db,ctx.workspaceId)});}catch(e){return fail(c,e,'MEMBER_CONTEXT_REQUIRED')}});
-  app.get('/api/member/travel/itineraries/:safeItineraryReference',async(c:any)=>{try{const ctx=await context(c,deps);const itinerary=await readItinerary(c.env.smart_menu_db,ctx.workspaceId,deps.text(c.req.param('safeItineraryReference'),100));if(itinerary.status!=='PUBLISHED')throw new Error('TRAVEL_ITINERARY_NOT_FOUND');return c.json({success:true,itinerary});}catch(e){return fail(c,e,'MEMBER_CONTEXT_REQUIRED')}});
+  app.get('/api/member/travel/itineraries/:safeItineraryReference',async(c:any)=>{try{const ctx=await context(c,deps);const itinerary=await readItinerary(c.env.smart_menu_db,ctx.workspaceId,deps.text(c.req.param('safeItineraryReference'),100),true);if(itinerary.status!=='PUBLISHED')throw new Error('TRAVEL_ITINERARY_NOT_FOUND');return c.json({success:true,itinerary});}catch(e){return fail(c,e,'MEMBER_CONTEXT_REQUIRED')}});
+  app.get('/api/member/travel/assets/:coverAssetReference',async(c:any)=>{try{
+    const ctx=await context(c,deps),reference=deps.text(c.req.param('coverAssetReference'),120);
+    const asset:any=await c.env.smart_menu_db.prepare(`SELECT storage_key,content_type FROM assets
+      WHERE id=? AND workspace_id=? AND deleted_at IS NULL AND status='ready' AND content_type LIKE 'image/%' LIMIT 1`).bind(reference,ctx.workspaceId).first();
+    if(!asset)throw new Error('TRAVEL_COVER_ASSET_NOT_FOUND');
+    const object=await c.env.smart_menu_assets.get(asset.storage_key);if(!object)throw new Error('TRAVEL_COVER_ASSET_NOT_FOUND');
+    const headers=new Headers();object.writeHttpMetadata(headers);headers.set('etag',object.httpEtag);headers.set('Cache-Control','private, max-age=3600');
+    headers.set('Content-Type',asset.content_type);return new Response(object.body,{headers});
+  }catch(e){return fail(c,e,'MEMBER_CONTEXT_REQUIRED')}});
   app.get('/api/member/travel/itineraries/:safeItineraryReference/departures',async(c:any)=>{try{const ctx=await context(c,deps);return c.json({success:true,departures:await listDepartures(c.env.smart_menu_db,ctx.workspaceId,deps.text(c.req.param('safeItineraryReference'),100),true)});}catch(e){return fail(c,e,'MEMBER_CONTEXT_REQUIRED')}});
   app.get('/api/member/travel/departures/:safeDepartureReference',async(c:any)=>{try{const ctx=await context(c,deps);return c.json({success:true,departure:await readDeparture(c.env.smart_menu_db,ctx.workspaceId,deps.text(c.req.param('safeDepartureReference'),100),true)});}catch(e){return fail(c,e,'MEMBER_CONTEXT_REQUIRED')}});
   app.post('/api/member/travel/bookings',async(c:any)=>{try{const ctx=await context(c,deps,true),body=await c.req.json().catch(()=>({}));return c.json({success:true,booking:await createMemberBooking(c.env.smart_menu_db,{...ctx,body})},201);}catch(e){return fail(c,e,'MEMBER_CONTEXT_REQUIRED')}});
   app.get('/api/member/travel/bookings',async(c:any)=>{try{const ctx=await context(c,deps);return c.json({success:true,bookings:await listBookings(c.env.smart_menu_db,ctx)});}catch(e){return fail(c,e,'MEMBER_CONTEXT_REQUIRED')}});
   app.get('/api/member/travel/bookings/:safeBookingReference',async(c:any)=>{try{const ctx=await context(c,deps);return c.json({success:true,booking:await readBooking(c.env.smart_menu_db,ctx,deps.text(c.req.param('safeBookingReference'),100))});}catch(e){return fail(c,e,'MEMBER_CONTEXT_REQUIRED')}});
+  app.get('/api/member/travel/bookings/:safeBookingReference/events',async(c:any)=>{try{const ctx=await context(c,deps);return c.json({success:true,events:await listBookingEvents(c.env.smart_menu_db,ctx,deps.text(c.req.param('safeBookingReference'),100))});}catch(e){return fail(c,e,'MEMBER_CONTEXT_REQUIRED')}});
   app.post('/api/member/travel/bookings/:safeBookingReference/payment-intents',async(c:any)=>{try{const ctx=await context(c,deps),body=await c.req.json().catch(()=>({}));if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).some(k=>k!=='paymentLeg'))throw new Error('TRAVEL_PAYMENT_INPUT_INVALID');const notifyUrl=new URL('/api/commerce/payments/newebpay/notify',c.req.url).toString();return c.json({success:true,payment:await initiateTravelPayment(c.env.smart_menu_db,{...ctx,bookingReference:deps.text(c.req.param('safeBookingReference'),100),paymentLeg:body.paymentLeg,env:c.env,notifyUrl})},201);}catch(e){return fail(c,e,'MEMBER_CONTEXT_REQUIRED')}});
 }
