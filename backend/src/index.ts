@@ -102,6 +102,15 @@ import {
 import type { OperationPlanStep } from './guide/proposals/composite-plan';
 import { syncLineRichMenuInsights, recordLineActionEvent } from './line-intelligence/service';
 import { GEMINI_MODEL, geminiProviderNotConfiguredResponse, requestGeminiContent } from './gemini';
+import {
+  classifyRichMenuLayout,
+  normalizeDetectedRichMenuAreas,
+  readImageDimensions,
+  resolveRichMenuDimensions,
+  richMenuAreaStyle,
+  validateRichMenuAreas,
+  validateRichMenuImageDimensions,
+} from './rich-menu-layout';
 import { authenticateConversionApiKey, conversionKeyHash, conversionMetadata, createConversionApiKey } from './journey/conversion-keys';
 import { writeGatewayJourneyEvent } from './journey/engine';
 import { funnel, lastObservedTouch, rebuildJourneyDaily } from './journey/core';
@@ -1039,16 +1048,18 @@ function normalizeAction(action: any) {
   return { type: 'none' };
 }
 
-function areaStyle(x: number, y: number, width: number, height: number) {
-  return {
-    left: `${(x / 2500) * 100}%`,
-    top: `${(y / 1686) * 100}%`,
-    width: `${(width / 2500) * 100}%`,
-    height: `${(height / 1686) * 100}%`,
-  };
+function areaStyle(x: number, y: number, width: number, height: number, imageWidth = 2500, imageHeight = 1686) {
+  return richMenuAreaStyle({ x, y, width, height }, imageWidth, imageHeight);
 }
 
-
+function richMenuProjection(width: unknown, height: unknown) {
+  const dimensions = resolveRichMenuDimensions(width, height);
+  return {
+    imageWidth: dimensions.width,
+    imageHeight: dimensions.height,
+    layoutType: classifyRichMenuLayout(dimensions.width, dimensions.height),
+  };
+}
 function buildLineAction(action: any) {
   const normalizedAction: any = normalizeProjectAreaAction(action);
   const type = normalizedAction.type;
@@ -1083,9 +1094,10 @@ function buildLineAction(action: any) {
 
 async function getProjectForPublish(env: Bindings, workspaceId: string, projectId: string) {
   const project: any = await env.smart_menu_db.prepare(`
-    SELECT *
-    FROM projects
-    WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
+    SELECT p.*, a.width AS image_width, a.height AS image_height
+    FROM projects p
+    LEFT JOIN assets a ON a.id = p.asset_id AND a.workspace_id = p.workspace_id
+    WHERE p.id = ? AND p.workspace_id = ? AND p.deleted_at IS NULL
     LIMIT 1
   `).bind(projectId, workspaceId).first();
 
@@ -1155,7 +1167,7 @@ function areaInsertStatement(env: Bindings, workspaceId: string, templateId: str
 
 async function ensureAsset(env: Bindings, workspaceId: string, assetId: string) {
   return env.smart_menu_db.prepare(`
-    SELECT id FROM assets
+    SELECT id, width, height FROM assets
     WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
     LIMIT 1
   `).bind(assetId, workspaceId).first();
@@ -1597,13 +1609,33 @@ app.post('/api/detect-layout', async (c) => {
     if (!image || typeof image === 'string' || !(image instanceof File)) {
       return c.json({ success: false, error: '請提供有效的圖片檔案。' }, 400);
     }
+    if (!['image/png', 'image/jpeg'].includes(image.type)) {
+      return c.json({ success: false, error: 'LINE Rich Menu 圖片只支援 PNG、JPG。' }, 400);
+    }
+    if (image.size > 1024 * 1024) {
+      return c.json({ success: false, error: 'LINE Rich Menu 圖片不可超過 1MB。' }, 400);
+    }
     if (!c.env.GEMINI_API_KEY) {
       return c.json(geminiProviderNotConfiguredResponse(), 503);
     }
 
-    const base64Image = arrayBufferToBase64(await image.arrayBuffer());
+    const imageBuffer = await image.arrayBuffer();
+    let dimensions;
+    try {
+      dimensions = readImageDimensions(imageBuffer, image.type || 'image/png');
+      validateRichMenuImageDimensions(dimensions.width, dimensions.height);
+    } catch {
+      return c.json({ success: false, error: '圖片尺寸不符合 LINE Rich Menu 規格，或無法讀取圖片尺寸。' }, 400);
+    }
+    const { width: imageWidth, height: imageHeight } = dimensions;
+    const layoutType = classifyRichMenuLayout(imageWidth, imageHeight);
+    const base64Image = arrayBufferToBase64(imageBuffer);
     const mimeType = image.type || 'image/png';
-    const prompt = `你是一個 LINE 官方帳號 Rich Menu 專業座標分析器。分析圖片中的可點擊功能區塊。整張圖片固定換算為 2500x1686，左上角為 0,0。每個區塊回傳 id,label,x,y,width,height。座標使用整數，區塊不得超界或重疊，label 使用繁體中文，可辨識規則或不規則版型。只輸出符合 JSON Schema 的資料。`;
+    const prompt = '你是一個 LINE 官方帳號 Rich Menu 專業座標分析器。這張圖片的實際尺寸是 '
+      + imageWidth + 'x' + imageHeight + '。請直接在這個像素座標系統中分析可點擊功能區塊：x 範圍 0..'
+      + (imageWidth - 1) + '，y 範圍 0..' + (imageHeight - 1)
+      + '。每個區塊回傳 id,label,x,y,width,height。座標使用整數，區塊不得超出圖片邊界或互相重疊，最多 20 個區塊，label 使用繁體中文。'
+      + '不要推測、縮放或改用其他畫布尺寸。只輸出符合 JSON Schema 的資料。';
 
     const geminiCall = await executeMeteredAiCall({
       db: c.env.smart_menu_db,
@@ -1625,6 +1657,7 @@ app.post('/api/detect-layout', async (c) => {
                 properties: {
                   areas: {
                     type: 'ARRAY',
+                    maxItems: 20,
                     items: {
                       type: 'OBJECT',
                       properties: {
@@ -1659,21 +1692,21 @@ app.post('/api/detect-layout', async (c) => {
     const parsed = JSON.parse(outputText);
     if (!Array.isArray(parsed.areas)) throw new Error('Gemini 回傳資料缺少 areas');
 
-    const areas = parsed.areas.map((area: any, index: number) => {
-      const x = Math.max(0, Math.round(num(area.x)));
-      const y = Math.max(0, Math.round(num(area.y)));
-      const width = Math.max(1, Math.round(num(area.width, 1)));
-      const height = Math.max(1, Math.round(num(area.height, 1)));
-      return { id: num(area.id, index + 1), label: text(area.label || `區塊 ${index + 1}`), x, y, width, height, style: areaStyle(x, y, width, height) };
+    const areas = normalizeDetectedRichMenuAreas(parsed.areas, imageWidth, imageHeight);
+    return c.json({
+      success: true,
+      provider: 'gemini',
+      model: GEMINI_MODEL,
+      imageWidth,
+      imageHeight,
+      layoutType,
+      areas,
     });
-
-    return c.json({ success: true, provider: 'gemini', model: GEMINI_MODEL, areas });
   } catch (e: any) {
     console.error('detect-layout:', e);
     return c.json({ success: false, error: e?.message || 'Gemini 圖片辨識失敗' }, 500);
   }
 });
-
 app.post('/api/templates/upload-image', async (c) => {
   try {
     const body = await c.req.parseBody();
@@ -1681,29 +1714,55 @@ app.post('/api/templates/upload-image', async (c) => {
     if (!image || typeof image === 'string' || !(image instanceof File)) {
       return c.json({ success: false, error: '請提供圖片檔案。' }, 400);
     }
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(image.type)) {
-      return c.json({ success: false, error: '只支援 PNG、JPG、WEBP。' }, 400);
+    if (!['image/png', 'image/jpeg'].includes(image.type)) {
+      return c.json({ success: false, error: 'LINE Rich Menu 圖片只支援 PNG、JPG。' }, 400);
     }
-    if (image.size > 10 * 1024 * 1024) return c.json({ success: false, error: '圖片不可超過 10MB。' }, 400);
+    if (image.size > 1024 * 1024) return c.json({ success: false, error: 'LINE Rich Menu 圖片不可超過 1MB。' }, 400);
+
+    const imageBuffer = await image.arrayBuffer();
+    let dimensions;
+    try {
+      dimensions = readImageDimensions(imageBuffer, image.type);
+      validateRichMenuImageDimensions(dimensions.width, dimensions.height);
+    } catch {
+      return c.json({ success: false, error: '圖片尺寸不符合 LINE Rich Menu 規格，或無法讀取圖片尺寸。' }, 400);
+    }
 
     const assetId = id('asset');
-    const storageKey = `templates/${workspaceIdOf(c)}/${assetId}/image.${safeExt(image.name)}`;
-    await c.env.smart_menu_assets.put(storageKey, await image.arrayBuffer(), {
+    const storageKey = 'templates/' + workspaceIdOf(c) + '/' + assetId + '/image.' + safeExt(image.name);
+    await c.env.smart_menu_assets.put(storageKey, imageBuffer, {
       httpMetadata: { contentType: image.type || 'image/png' },
       customMetadata: { assetId, workspaceId: workspaceIdOf(c) },
     });
-    await c.env.smart_menu_db.prepare(`
-      INSERT INTO assets (id, workspace_id, storage_key, original_filename, content_type, size_bytes, status)
-      VALUES (?, ?, ?, ?, ?, ?, 'ready')
-    `).bind(assetId, workspaceIdOf(c), storageKey, image.name, image.type || 'image/png', image.size).run();
+    await c.env.smart_menu_db.prepare(
+      "INSERT INTO assets (id, workspace_id, storage_key, original_filename, content_type, size_bytes, width, height, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ready')"
+    ).bind(
+      assetId,
+      workspaceIdOf(c),
+      storageKey,
+      image.name,
+      image.type || 'image/png',
+      image.size,
+      dimensions.width,
+      dimensions.height,
+    ).run();
 
-    return c.json({ success: true, asset: { id: assetId, storageKey, imageUrl: `/api/assets/${assetId}` } });
+    return c.json({
+      success: true,
+      asset: {
+        id: assetId,
+        storageKey,
+        imageUrl: '/api/assets/' + assetId,
+        imageWidth: dimensions.width,
+        imageHeight: dimensions.height,
+        layoutType: classifyRichMenuLayout(dimensions.width, dimensions.height),
+      },
+    });
   } catch (e: any) {
     console.error('upload-image:', e);
     return c.json({ success: false, error: e?.message || '圖片上傳失敗' }, 500);
   }
 });
-
 app.get('/api/assets/:assetId', async (c) => {
   try {
     const asset: any = await c.env.smart_menu_db.prepare(`
@@ -1730,8 +1789,16 @@ app.post('/api/templates', async (c) => {
     const assetId = text(body.assetId);
     const areas = Array.isArray(body.areas) ? body.areas : [];
     if (!name) return c.json({ success: false, error: '模板名稱不可空白。' }, 400);
-    if (!assetId || !(await ensureAsset(c.env, workspaceIdOf(c), assetId))) return c.json({ success: false, error: '模板圖片 Asset 不存在。' }, 400);
-    if (!areas.length) return c.json({ success: false, error: '模板至少需要一個熱區。' }, 400);
+    const asset: any = assetId ? await ensureAsset(c.env, workspaceIdOf(c), assetId) : null;
+    if (!asset) return c.json({ success: false, error: '模板圖片 Asset 不存在。' }, 400);
+    const dimensions = resolveRichMenuDimensions(asset.width, asset.height);
+    let validatedAreas;
+    try {
+      validateRichMenuImageDimensions(dimensions.width, dimensions.height);
+      validatedAreas = validateRichMenuAreas(areas, dimensions.width, dimensions.height);
+    } catch {
+      return c.json({ success: false, error: '模板圖片尺寸或熱區座標不符合 LINE Rich Menu 規格。' }, 400);
+    }
 
     const templateId = id('tpl');
     const statements: D1PreparedStatement[] = [
@@ -1741,12 +1808,12 @@ app.post('/api/templates', async (c) => {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       `).bind(
         templateId, workspaceIdOf(c), name, text(body.industry || '待分類'), text(body.status || 'draft'), assetId,
-        areas.length, Math.max(1, Math.round(num(body.pageCount, 1))), text(body.aiProvider || 'gemini'), text(body.aiModel || 'gemini-3.6-flash')
+        validatedAreas.length, Math.max(1, Math.round(num(body.pageCount, 1))), text(body.aiProvider || 'gemini'), text(body.aiModel || 'gemini-3.6-flash')
       ),
-      ...areas.map((area: any, index: number) => areaInsertStatement(c.env, workspaceIdOf(c), templateId, area, index)),
+      ...validatedAreas.map((area: any, index: number) => areaInsertStatement(c.env, workspaceIdOf(c), templateId, area, index)),
     ];
     await c.env.smart_menu_db.batch(statements);
-    return c.json({ success: true, template: { id: templateId, name, assetId, areaCount: areas.length, imageUrl: `/api/assets/${assetId}` } });
+    return c.json({ success: true, template: { id: templateId, name, assetId, areaCount: validatedAreas.length, imageWidth: dimensions.width, imageHeight: dimensions.height, layoutType: classifyRichMenuLayout(dimensions.width, dimensions.height), imageUrl: `/api/assets/${assetId}` } });
   } catch (e: any) {
     console.error('create-template:', e);
     return c.json({ success: false, error: e?.message || '模板建立失敗' }, 500);
@@ -1766,8 +1833,16 @@ app.patch('/api/templates/:templateId', async (c) => {
     const assetId = text(body.assetId);
     const areas = Array.isArray(body.areas) ? body.areas : [];
     if (!name) return c.json({ success: false, error: '模板名稱不可空白。' }, 400);
-    if (!assetId || !(await ensureAsset(c.env, workspaceIdOf(c), assetId))) return c.json({ success: false, error: '模板圖片 Asset 不存在。' }, 400);
-    if (!areas.length) return c.json({ success: false, error: '模板至少需要一個熱區。' }, 400);
+    const asset: any = assetId ? await ensureAsset(c.env, workspaceIdOf(c), assetId) : null;
+    if (!asset) return c.json({ success: false, error: '模板圖片 Asset 不存在。' }, 400);
+    const dimensions = resolveRichMenuDimensions(asset.width, asset.height);
+    let validatedAreas;
+    try {
+      validateRichMenuImageDimensions(dimensions.width, dimensions.height);
+      validatedAreas = validateRichMenuAreas(areas, dimensions.width, dimensions.height);
+    } catch {
+      return c.json({ success: false, error: '模板圖片尺寸或熱區座標不符合 LINE Rich Menu 規格。' }, 400);
+    }
 
     const statements: D1PreparedStatement[] = [
       c.env.smart_menu_db.prepare(`
@@ -1776,15 +1851,15 @@ app.patch('/api/templates/:templateId', async (c) => {
           ai_provider = ?, ai_model = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
       `).bind(
-        name, text(body.industry || '待分類'), text(body.status || 'draft'), assetId, areas.length,
+        name, text(body.industry || '待分類'), text(body.status || 'draft'), assetId, validatedAreas.length,
         Math.max(1, Math.round(num(body.pageCount, 1))), text(body.aiProvider || 'gemini'), text(body.aiModel || 'gemini-3.6-flash'),
         templateId, workspaceIdOf(c)
       ),
       c.env.smart_menu_db.prepare(`DELETE FROM template_areas WHERE template_id = ? AND workspace_id = ?`).bind(templateId, workspaceIdOf(c)),
-      ...areas.map((area: any, index: number) => areaInsertStatement(c.env, workspaceIdOf(c), templateId, area, index)),
+      ...validatedAreas.map((area: any, index: number) => areaInsertStatement(c.env, workspaceIdOf(c), templateId, area, index)),
     ];
     await c.env.smart_menu_db.batch(statements);
-    return c.json({ success: true, template: { id: templateId, name, assetId, areaCount: areas.length, imageUrl: `/api/assets/${assetId}` } });
+    return c.json({ success: true, template: { id: templateId, name, assetId, areaCount: validatedAreas.length, imageWidth: dimensions.width, imageHeight: dimensions.height, layoutType: classifyRichMenuLayout(dimensions.width, dimensions.height), imageUrl: `/api/assets/${assetId}` } });
   } catch (e: any) {
     console.error('update-template:', e);
     return c.json({ success: false, error: e?.message || '模板更新失敗' }, 500);
@@ -1833,8 +1908,11 @@ app.get('/api/system/templates', async (c) => {
         t.ai_provider,
         t.ai_model,
         t.created_at,
-        t.updated_at
+        t.updated_at,
+        a.width AS image_width,
+        a.height AS image_height
       FROM templates t
+      LEFT JOIN assets a ON a.id = t.asset_id AND a.workspace_id = t.workspace_id
       JOIN workspaces w
         ON w.id = t.workspace_id
        AND w.deleted_at IS NULL
@@ -1855,6 +1933,7 @@ app.get('/api/system/templates', async (c) => {
       pageCount: row.page_count,
       aiProvider: row.ai_provider,
       aiModel: row.ai_model,
+      ...richMenuProjection(row.image_width, row.image_height),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       imageUrl: row.asset_id ? `/api/system/assets/${row.asset_id}` : null,
@@ -1891,8 +1970,11 @@ app.get('/api/system/templates/:templateId', async (c) => {
         SELECT
           t.*,
           w.name AS workspace_name,
-          w.slug AS workspace_slug
+          w.slug AS workspace_slug,
+          a.width AS image_width,
+          a.height AS image_height
         FROM templates t
+        LEFT JOIN assets a ON a.id = t.asset_id AND a.workspace_id = t.workspace_id
         JOIN workspaces w
           ON w.id = t.workspace_id
          AND w.deleted_at IS NULL
@@ -1945,6 +2027,7 @@ app.get('/api/system/templates/:templateId', async (c) => {
         pageCount: template.page_count,
         aiProvider: template.ai_provider,
         aiModel: template.ai_model,
+        ...richMenuProjection(template.image_width, template.image_height),
         createdAt: template.created_at,
         updatedAt: template.updated_at,
         imageUrl: template.asset_id ? `/api/system/assets/${template.asset_id}` : null,
@@ -2009,8 +2092,10 @@ app.get('/api/templates', async (c) => {
   try {
     const result = await c.env.smart_menu_db.prepare(`
       SELECT t.id, t.name, t.industry, t.status, t.asset_id, t.area_count, t.page_count,
-             t.ai_provider, t.ai_model, t.created_at, t.updated_at
+             t.ai_provider, t.ai_model, t.created_at, t.updated_at,
+             a.width AS image_width, a.height AS image_height
       FROM templates t
+      LEFT JOIN assets a ON a.id = t.asset_id AND a.workspace_id = t.workspace_id
       WHERE t.workspace_id = ? AND t.deleted_at IS NULL
       ORDER BY t.updated_at DESC, t.created_at DESC
     `).bind(workspaceIdOf(c)).all();
@@ -2019,6 +2104,7 @@ app.get('/api/templates', async (c) => {
       id: row.id, name: row.name, industry: row.industry, status: row.status,
       assetId: row.asset_id, areaCount: row.area_count, pageCount: row.page_count,
       aiProvider: row.ai_provider, aiModel: row.ai_model,
+      ...richMenuProjection(row.image_width, row.image_height),
       createdAt: row.created_at, updatedAt: row.updated_at,
       imageUrl: row.asset_id ? `/api/assets/${row.asset_id}` : null,
     }));
@@ -2032,7 +2118,9 @@ app.get('/api/templates/:templateId', async (c) => {
   try {
     const templateId = c.req.param('templateId');
     const template: any = await c.env.smart_menu_db.prepare(`
-      SELECT * FROM templates WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL LIMIT 1
+      SELECT t.*, a.width AS image_width, a.height AS image_height FROM templates t
+      LEFT JOIN assets a ON a.id = t.asset_id AND a.workspace_id = t.workspace_id
+      WHERE t.id = ? AND t.workspace_id = ? AND t.deleted_at IS NULL LIMIT 1
     `).bind(templateId, workspaceIdOf(c)).first();
     if (!template) return c.json({ success: false, error: '找不到模板。' }, 404);
 
@@ -2040,6 +2128,7 @@ app.get('/api/templates/:templateId', async (c) => {
       SELECT * FROM template_areas WHERE template_id = ? AND workspace_id = ? ORDER BY area_index ASC
     `).bind(templateId, workspaceIdOf(c)).all();
 
+    const dimensions = resolveRichMenuDimensions(template.image_width, template.image_height);
     const areas = (areaResult.results || []).map((row: any) => {
       const action: any = { type: row.action_type || 'none' };
       if (action.type === 'uri') action.uri = row.action_uri || '';
@@ -2047,7 +2136,7 @@ app.get('/api/templates/:templateId', async (c) => {
       if (action.type === 'postback') { action.data = row.action_data || ''; action.displayText = row.action_display_text || ''; }
       if (action.type === 'richmenuswitch') { action.data = row.action_data || ''; action.targetPageId = row.target_page_id || ''; }
       const x = num(row.x), y = num(row.y), width = num(row.width), height = num(row.height);
-      return { id: row.area_index, areaId: row.id, label: row.label, x, y, width, height, action, style: areaStyle(x, y, width, height) };
+      return { id: row.area_index, areaId: row.id, label: row.label, x, y, width, height, action, style: areaStyle(x, y, width, height, dimensions.width, dimensions.height) };
     });
 
     return c.json({
@@ -2056,6 +2145,7 @@ app.get('/api/templates/:templateId', async (c) => {
         id: template.id, name: template.name, industry: template.industry, status: template.status,
         assetId: template.asset_id, areaCount: template.area_count, pageCount: template.page_count,
         aiProvider: template.ai_provider, aiModel: template.ai_model,
+        ...richMenuProjection(dimensions.width, dimensions.height),
         imageUrl: template.asset_id ? `/api/assets/${template.asset_id}` : null,
         areas,
       },
@@ -2107,9 +2197,10 @@ app.post('/api/projects/from-template', async (c) => {
     }
 
     const template: any = await c.env.smart_menu_db.prepare(`
-      SELECT *
-      FROM templates
-      WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
+      SELECT t.*, a.width AS image_width, a.height AS image_height
+      FROM templates t
+      LEFT JOIN assets a ON a.id = t.asset_id AND a.workspace_id = t.workspace_id
+      WHERE t.id = ? AND t.workspace_id = ? AND t.deleted_at IS NULL
       LIMIT 1
     `).bind(templateId, workspaceIdOf(c)).first();
 
@@ -2178,6 +2269,7 @@ app.post('/api/projects/from-template', async (c) => {
         assetId: template.asset_id,
         areaCount: sourceAreas.length,
         pageCount: Math.max(1, Math.round(num(template.page_count, 1))),
+        ...richMenuProjection(template.image_width, template.image_height),
         imageUrl: template.asset_id ? `/api/assets/${template.asset_id}` : null,
       },
     });
@@ -2193,8 +2285,10 @@ app.get('/api/projects', async (c) => {
       SELECT
         p.id, p.template_id, p.name, p.status, p.asset_id, p.page_count,
         p.created_at, p.updated_at,
+        a.width AS image_width, a.height AS image_height,
         COUNT(pa.id) AS area_count
       FROM projects p
+      LEFT JOIN assets a ON a.id = p.asset_id AND a.workspace_id = p.workspace_id
       LEFT JOIN project_areas pa
         ON pa.project_id = p.id AND pa.workspace_id = p.workspace_id
       WHERE p.workspace_id = ? AND p.deleted_at IS NULL
@@ -2213,6 +2307,7 @@ app.get('/api/projects', async (c) => {
       areaCount: row.area_count,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      ...richMenuProjection(row.image_width, row.image_height),
       imageUrl: row.asset_id ? `/api/assets/${row.asset_id}` : null,
       isDefault: row.status === 'default',
       disabled: row.status === 'disabled',
@@ -2250,20 +2345,34 @@ app.post('/api/projects/:projectId/upload-image', async (c) => {
       return c.json({ success: false, error: '請提供圖片檔案。' }, 400);
     }
 
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(image.type)) {
-      return c.json({ success: false, error: '只支援 PNG、JPG、WEBP。' }, 400);
+    if (!['image/png', 'image/jpeg'].includes(image.type)) {
+      return c.json({ success: false, error: 'LINE Rich Menu 圖片只支援 PNG、JPG。' }, 400);
     }
 
-    if (image.size > 10 * 1024 * 1024) {
-      return c.json({ success: false, error: '圖片不可超過 10MB。' }, 400);
+    if (image.size > 1024 * 1024) {
+      return c.json({ success: false, error: 'LINE Rich Menu 圖片不可超過 1MB。' }, 400);
     }
 
+    const imageBuffer = await image.arrayBuffer();
+    let dimensions;
+    try {
+      dimensions = readImageDimensions(imageBuffer, image.type);
+      validateRichMenuImageDimensions(dimensions.width, dimensions.height);
+      const existingAreas = await c.env.smart_menu_db.prepare(
+        'SELECT x, y, width, height FROM project_areas WHERE project_id = ? AND workspace_id = ? ORDER BY area_index ASC'
+      ).bind(projectId, workspaceId).all();
+      if ((existingAreas.results || []).length) {
+        validateRichMenuAreas(existingAreas.results || [], dimensions.width, dimensions.height);
+      }
+    } catch {
+      return c.json({ success: false, error: '圖片尺寸不符合 LINE Rich Menu 規格，或既有熱區超出新圖片邊界。' }, 400);
+    }
     const assetId = id('asset');
     const storageKey = `projects/${workspaceIdOf(c)}/${projectId}/${assetId}/image.${safeExt(image.name)}`;
 
     await c.env.smart_menu_assets.put(
       storageKey,
-      await image.arrayBuffer(),
+      imageBuffer,
       {
         httpMetadata: { contentType: image.type || 'image/png' },
         customMetadata: {
@@ -2277,15 +2386,17 @@ app.post('/api/projects/:projectId/upload-image', async (c) => {
     await c.env.smart_menu_db.batch([
       c.env.smart_menu_db.prepare(`
         INSERT INTO assets (
-          id, workspace_id, storage_key, original_filename, content_type, size_bytes, status
-        ) VALUES (?, ?, ?, ?, ?, ?, 'ready')
+          id, workspace_id, storage_key, original_filename, content_type, size_bytes, width, height, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ready')
       `).bind(
         assetId,
         workspaceIdOf(c),
         storageKey,
         image.name,
         image.type || 'image/png',
-        image.size
+        image.size,
+        dimensions.width,
+        dimensions.height
       ),
 
       c.env.smart_menu_db.prepare(`
@@ -2302,6 +2413,9 @@ app.post('/api/projects/:projectId/upload-image', async (c) => {
         storageKey,
         imageUrl: `/api/assets/${assetId}`,
       },
+      imageWidth: dimensions.width,
+      imageHeight: dimensions.height,
+      layoutType: classifyRichMenuLayout(dimensions.width, dimensions.height),
       previousAssetId: project.asset_id || null,
     });
   } catch (e: any) {
@@ -2316,9 +2430,10 @@ app.patch('/api/projects/:projectId', async (c) => {
     const workspaceId = workspaceIdOf(c);
 
     const existing: any = await c.env.smart_menu_db.prepare(`
-      SELECT id
-      FROM projects
-      WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
+      SELECT p.id, a.width AS image_width, a.height AS image_height
+      FROM projects p
+      LEFT JOIN assets a ON a.id = p.asset_id AND a.workspace_id = p.workspace_id
+      WHERE p.id = ? AND p.workspace_id = ? AND p.deleted_at IS NULL
       LIMIT 1
     `).bind(projectId, workspaceId).first();
 
@@ -2338,6 +2453,14 @@ app.patch('/api/projects/:projectId', async (c) => {
       return c.json({ success: false, error: '專案至少需要一個熱區。' }, 400);
     }
 
+    const dimensions = resolveRichMenuDimensions(existing.image_width, existing.image_height);
+    let validatedAreas;
+    try {
+      validateRichMenuImageDimensions(dimensions.width, dimensions.height);
+      validatedAreas = validateRichMenuAreas(areas, dimensions.width, dimensions.height);
+    } catch {
+      return c.json({ success: false, error: '專案圖片尺寸或熱區座標不符合 LINE Rich Menu 規格。' }, 400);
+    }
     const switchAreas = areas.filter(
       (area: any) => text(area?.action?.type).toLowerCase() === 'richmenuswitch'
     );
@@ -2384,7 +2507,7 @@ app.patch('/api/projects/:projectId', async (c) => {
         WHERE project_id = ? AND workspace_id = ?
       `).bind(projectId, workspaceIdOf(c)),
 
-      ...areas.map((area: any, index: number) =>
+      ...validatedAreas.map((area: any, index: number) =>
         projectAreaInsertStatement(c.env, workspaceIdOf(c), projectId, area, index)
       ),
     ];
@@ -2396,7 +2519,7 @@ app.patch('/api/projects/:projectId', async (c) => {
       project: {
         id: projectId,
         name,
-        areaCount: areas.length,
+        areaCount: validatedAreas.length,
       },
     });
   } catch (e: any) {
@@ -2411,9 +2534,10 @@ app.get('/api/projects/:projectId', async (c) => {
     const workspaceId = workspaceIdOf(c);
 
     const project: any = await c.env.smart_menu_db.prepare(`
-      SELECT *
-      FROM projects
-      WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
+      SELECT p.*, a.width AS image_width, a.height AS image_height
+      FROM projects p
+      LEFT JOIN assets a ON a.id = p.asset_id AND a.workspace_id = p.workspace_id
+      WHERE p.id = ? AND p.workspace_id = ? AND p.deleted_at IS NULL
       LIMIT 1
     `).bind(projectId, workspaceId).first();
 
@@ -2438,6 +2562,7 @@ app.get('/api/projects/:projectId', async (c) => {
       ORDER BY updated_at DESC, created_at DESC
     `).bind(workspaceId, projectId).all();
 
+    const dimensions = resolveRichMenuDimensions(project.image_width, project.image_height);
     const areas = (areaResult.results || []).map((row: any) => {
       const action: any = projectAreaActionFromRow(row);
 
@@ -2452,7 +2577,7 @@ app.get('/api/projects/:projectId', async (c) => {
         label: row.label,
         x, y, width, height,
         action,
-        style: areaStyle(x, y, width, height),
+        style: areaStyle(x, y, width, height, dimensions.width, dimensions.height),
       };
     });
 
@@ -2467,6 +2592,7 @@ app.get('/api/projects/:projectId', async (c) => {
         pageCount: project.page_count,
         createdAt: project.created_at,
         updatedAt: project.updated_at,
+        ...richMenuProjection(dimensions.width, dimensions.height),
         imageUrl: project.asset_id ? `/api/assets/${project.asset_id}` : null,
         areas,
       },
@@ -4225,7 +4351,15 @@ app.post('/api/projects/:projectId/publish', async (c) => {
       }
     }
 
-    const lineAreas = project.areas.map((area: any) => ({
+    const dimensions = resolveRichMenuDimensions(project.image_width, project.image_height);
+    let validatedAreas;
+    try {
+      validateRichMenuImageDimensions(dimensions.width, dimensions.height);
+      validatedAreas = validateRichMenuAreas(project.areas, dimensions.width, dimensions.height);
+    } catch {
+      return c.json({ success: false, error: '專案圖片尺寸或熱區座標不符合 LINE Rich Menu 規格。' }, 400);
+    }
+    const lineAreas = validatedAreas.map((area: any) => ({
       bounds: {
         x: Math.max(0, Math.round(num(area.x))),
         y: Math.max(0, Math.round(num(area.y))),
@@ -4237,8 +4371,8 @@ app.post('/api/projects/:projectId/publish', async (c) => {
 
     const richMenuObject = {
       size: {
-        width: 2500,
-        height: 1686,
+        width: dimensions.width,
+        height: dimensions.height,
       },
       selected: true,
       name: text(project.name).slice(0, 300) || 'Smart Menu',
@@ -5649,9 +5783,9 @@ async function copyAssetBundleToWorkspace(
   await env.smart_menu_db.prepare(`
     INSERT INTO assets (
       id, workspace_id, storage_key, original_filename,
-      content_type, size_bytes, status
+      content_type, size_bytes, width, height, status
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     newAssetId,
     destinationWorkspaceId,
@@ -5659,6 +5793,8 @@ async function copyAssetBundleToWorkspace(
     asset.original_filename || filename,
     asset.content_type || object.httpMetadata?.contentType || 'application/octet-stream',
     Number(asset.size_bytes || object.size || 0),
+    asset.width || null,
+    asset.height || null,
     asset.status || 'ready'
   ).run();
 

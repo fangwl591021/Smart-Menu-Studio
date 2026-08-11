@@ -64,6 +64,31 @@ const API_BASE_URL =
   (import.meta.env.PROD ? PRODUCTION_WORKER_BASE_URL : 'http://127.0.0.1:8788');
 const apiUrl = (path = '') => `${API_BASE_URL}${path}`;
 
+const LEGACY_RICH_MENU_DIMENSIONS = { imageWidth: 2500, imageHeight: 1686, layoutType: 'TALL' };
+const richMenuDimensions = (value = {}) => {
+  const imageWidth = Number(value.imageWidth);
+  const imageHeight = Number(value.imageHeight);
+  const width = Number.isFinite(imageWidth) && imageWidth > 0 ? imageWidth : LEGACY_RICH_MENU_DIMENSIONS.imageWidth;
+  const height = Number.isFinite(imageHeight) && imageHeight > 0 ? imageHeight : LEGACY_RICH_MENU_DIMENSIONS.imageHeight;
+  return {
+    imageWidth: width,
+    imageHeight: height,
+    layoutType: value.layoutType || (width / height > 2.2 ? 'COMPACT' : 'TALL'),
+  };
+};
+const richMenuAspectStyle = (value) => {
+  const dimensions = richMenuDimensions(value);
+  return { aspectRatio: dimensions.imageWidth + ' / ' + dimensions.imageHeight };
+};
+const richMenuOverlayStyle = (area, value) => {
+  const dimensions = richMenuDimensions(value);
+  return {
+    left: (Number(area.x) / dimensions.imageWidth * 100) + '%',
+    top: (Number(area.y) / dimensions.imageHeight * 100) + '%',
+    width: (Number(area.width) / dimensions.imageWidth * 100) + '%',
+    height: (Number(area.height) / dimensions.imageHeight * 100) + '%',
+  };
+};
 const AUTH_TOKEN_KEY = 'smart_menu_auth_token';
 
 const FRONTEND_BUILD = 'tenant-transfer-engine-v2.6.0';
@@ -476,7 +501,7 @@ const ProjectBuilderView = ({ onBack, onCreated }) => {
                       : 'border-gray-200 hover:border-gray-300'
                   }`}
                 >
-                  <div className="aspect-[2500/1686] bg-gray-100 overflow-hidden">
+                  <div className="bg-gray-100 overflow-hidden" style={richMenuAspectStyle(template)}>
                     {template.imageUrl ? (
                       <AuthImage src={template.imageUrl} alt={template.name} className="w-full h-full object-cover" />
                     ) : (
@@ -596,10 +621,16 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || '圖片更新失敗');
 
+      const dimensions = richMenuDimensions(data);
       setProject(prev => ({
         ...prev,
+        ...dimensions,
         assetId: data.asset.id,
         imageUrl: data.asset.imageUrl,
+        areas: (prev.areas || []).map(area => ({
+          ...area,
+          style: richMenuOverlayStyle(area, dimensions),
+        })),
       }));
       emitGuideEvent({
         type: 'guide-refresh',
@@ -847,7 +878,7 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
           <input
             ref={projectImageInputRef}
             type="file"
-            accept="image/png,image/jpeg,image/webp"
+            accept="image/png,image/jpeg"
             className="hidden"
             onChange={changeProjectImage}
           />
@@ -1034,7 +1065,7 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
         <div className="bg-gray-100 p-8 flex items-center justify-center overflow-y-auto">
           <div className="w-[350px] bg-white rounded-[40px] shadow-2xl border-[8px] border-gray-800 overflow-hidden">
             <div className="h-16 bg-[#06C755] px-4 flex items-center text-white font-bold">LINE 預覽</div>
-            <div className="aspect-[2500/1686] relative bg-gray-200">
+            <div className="relative bg-gray-200" style={richMenuAspectStyle(project)}>
               {project.imageUrl && <AuthImage src={project.imageUrl} alt={project.name} className="w-full h-full object-contain" />}
               {(project.areas || []).map(area => (
                 <button
@@ -4000,7 +4031,8 @@ const SystemTemplatesView = () => {
             <AuthImage
               src={selectedTemplate.imageUrl}
               alt={selectedTemplate.name}
-              className="w-full aspect-[2500/1686] rounded-lg object-cover border border-gray-200"
+              className="w-full rounded-lg object-cover border border-gray-200"
+              style={richMenuAspectStyle(selectedTemplate)}
             />
 
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
@@ -4184,6 +4216,7 @@ const EditorView = ({ onBack, mode = 'project', templateId = null }) => {
   const [templateStatus, setTemplateStatus] = useState('draft');
   const [assetId, setAssetId] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [imageDimensions, setImageDimensions] = useState(LEGACY_RICH_MENU_DIMENSIONS);
   const [isLoadingTemplate, setIsLoadingTemplate] = useState(false);
   const fileInputRef = useRef(null);
   const isTemplateMode = mode === 'template';
@@ -4198,6 +4231,7 @@ const EditorView = ({ onBack, mode = 'project', templateId = null }) => {
         setAreas([]);
         setAssetId(null);
         setSelectedFile(null);
+        setImageDimensions(LEGACY_RICH_MENU_DIMENSIONS);
       }
       return;
     }
@@ -4211,6 +4245,7 @@ const EditorView = ({ onBack, mode = 'project', templateId = null }) => {
         if (!res.ok || !data.success) throw new Error(data.error || '模板讀取失敗');
         if (cancelled) return;
         const tpl = data.template;
+        const dimensions = richMenuDimensions(tpl);
         setTemplateName(tpl.name || '');
         setTemplateStatus(tpl.status || 'draft');
         setAssetId(tpl.assetId || null);
@@ -4228,7 +4263,11 @@ const EditorView = ({ onBack, mode = 'project', templateId = null }) => {
           setBgImage(null);
         }
 
-        setAreas(tpl.areas || []);
+        setImageDimensions(dimensions);
+        setAreas((tpl.areas || []).map(area => ({
+          ...area,
+          style: richMenuOverlayStyle(area, dimensions),
+        })));
         setActiveArea(tpl.areas?.[0]?.id || 1);
         setActiveTab(tpl.areas?.length ? 'action' : 'image');
         setSelectedFile(null);
@@ -4294,9 +4333,10 @@ const EditorView = ({ onBack, mode = 'project', templateId = null }) => {
     return area;
   };
 
-  const normalizeDetectedArea = (area) => ({
+  const normalizeDetectedArea = (area, dimensions) => ({
     ...area,
     action: area.action || suggestAction(area.label),
+    style: richMenuOverlayStyle(area, dimensions),
   });
 
   const updateAreaAction = (areaId, patch) => {
@@ -4339,6 +4379,7 @@ const EditorView = ({ onBack, mode = 'project', templateId = null }) => {
 
     try {
       let finalAssetId = assetId;
+      let finalDimensions = imageDimensions;
 
       if (selectedFile) {
         const formData = new FormData();
@@ -4351,6 +4392,8 @@ const EditorView = ({ onBack, mode = 'project', templateId = null }) => {
         if (!uploadRes.ok || !uploadData.success) throw new Error(uploadData.error || '圖片寫入 R2 失敗');
         finalAssetId = uploadData.asset.id;
         setAssetId(finalAssetId);
+        finalDimensions = richMenuDimensions(uploadData.asset);
+        setImageDimensions(finalDimensions);
       }
 
       if (!finalAssetId) throw new Error('缺少模板圖片 Asset，請重新上傳圖片。');
@@ -4363,6 +4406,7 @@ const EditorView = ({ onBack, mode = 'project', templateId = null }) => {
         pageCount: 1,
         aiProvider: 'gemini',
         aiModel: 'gemini-3.6-flash',
+        ...finalDimensions,
         areas: preparedAreas.map(({ style, ...area }) => area),
       };
 
@@ -4415,7 +4459,9 @@ const EditorView = ({ onBack, mode = 'project', templateId = null }) => {
       console.log('4. 解析後的 JSON 資料:', data);
       
       if (data.success) {
-        const normalizedAreas = (data.areas || []).map(normalizeDetectedArea);
+        const dimensions = richMenuDimensions(data);
+        const normalizedAreas = (data.areas || []).map(area => normalizeDetectedArea(area, dimensions));
+        setImageDimensions(dimensions);
         setAreas(normalizedAreas);
         setActiveArea(normalizedAreas[0]?.id || 1);
         setActiveTab('action');
@@ -4515,7 +4561,7 @@ const EditorView = ({ onBack, mode = 'project', templateId = null }) => {
                       
                       <input 
                         type="file" 
-                        accept="image/jpeg, image/png, image/webp" 
+                        accept="image/jpeg, image/png"
                         className="hidden" 
                         ref={fileInputRef}
                         onChange={handleFileChange}
@@ -4536,7 +4582,7 @@ const EditorView = ({ onBack, mode = 'project', templateId = null }) => {
                             <>
                               <UploadCloud size={28} className="mb-2" />
                               <span className="text-sm font-bold">點擊上傳圖文選單圖片</span>
-                              <span className="text-xs text-indigo-400 font-normal mt-1">建議尺寸 2500x1686 JPG/PNG</span>
+                              <span className="text-xs text-indigo-400 font-normal mt-1">支援 2500x1686、2500x843 與其他 LINE 合法尺寸 JPG/PNG（最大 1MB）</span>
                             </>
                           )}
                         </button>
@@ -4547,7 +4593,7 @@ const EditorView = ({ onBack, mode = 'project', templateId = null }) => {
                               <CheckCircle2 size={16} className="text-green-500" />
                               圖片已就緒
                             </span>
-                            <button className="text-xs text-red-500 hover:text-red-700 font-medium" onClick={() => { setBgImage(null); setAreas([]); setSelectedFile(null); setAssetId(null); }}>移除圖片</button>
+                            <button className="text-xs text-red-500 hover:text-red-700 font-medium" onClick={() => { setBgImage(null); setAreas([]); setSelectedFile(null); setAssetId(null); setImageDimensions(LEGACY_RICH_MENU_DIMENSIONS); }}>移除圖片</button>
                           </div>
                           
                           {isDetecting ? (
@@ -4739,7 +4785,7 @@ const EditorView = ({ onBack, mode = 'project', templateId = null }) => {
             </div>
 
             <div className="bg-white border-t border-gray-300 relative group">
-              <div className="w-full aspect-[2500/1686] bg-gray-200 relative overflow-hidden flex items-center justify-center">
+              <div className="w-full bg-gray-200 relative overflow-hidden flex items-center justify-center" style={richMenuAspectStyle(imageDimensions)}>
                 
                 {bgImage ? (
                   <img src={bgImage} alt="Rich Menu Background" className={`w-full h-full object-contain transition-opacity duration-1000 ${isDetecting ? 'opacity-50 blur-sm' : 'opacity-100'}`} />
