@@ -262,12 +262,16 @@ const ProjectsView = ({ onStartNew, onEditProject }) => {
     try {
       const res = await authFetch(`/api/projects/${project.id}/${action}`, { method: 'POST' });
       const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error || '操作失敗');
+      const publishComplete = action !== 'publish' || publishContractComplete(data);
+      const defaultComplete = action !== 'set-default' || data.defaultAssigned === true;
+      if (!res.ok || !data.success || !publishComplete || !defaultComplete) {
+        throw new Error(data.error || data.errorCode || '操作失敗');
+      }
       alert(successMessage);
       await loadProjects();
     } catch (e) {
       console.error(e);
-      alert(`操作失敗：${e.message}`);
+      alert(`操作失敗：${action === 'publish' ? safePublishErrorMessage(e.message) : e.message}`);
     } finally {
       setBusyProjectId('');
     }
@@ -290,7 +294,7 @@ const ProjectsView = ({ onStartNew, onEditProject }) => {
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold tracking-tight text-gray-900">圖文選單專案</h2>
-          <p className="text-gray-500 text-sm mt-1">每個 Project 代表一個選單頁；發布各頁後，再指定其中一頁為預設首頁。</p>
+          <p className="text-gray-500 text-sm mt-1">每個 Project 代表一個選單頁；發布會同時將該頁設為目前使用中的 LINE 選單。</p>
         </div>
         <button
           onClick={onStartNew}
@@ -302,7 +306,7 @@ const ProjectsView = ({ onStartNew, onEditProject }) => {
       </div>
 
       <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-        發布順序：① 建立並設定各頁 → ② 逐頁發布以建立 Alias → ③ 選擇一個已發布頁面設為預設首頁。
+        發布會建立 Rich Menu、上傳圖片、更新 Alias，並將該頁切換為目前使用中的 LINE 選單。
       </div>
 
       {enabledProjectCount < 2 && (
@@ -370,7 +374,7 @@ const ProjectsView = ({ onStartNew, onEditProject }) => {
                     {!disabled && (
                       <button
                         disabled={busy}
-                        onClick={() => runProjectAction(project, 'publish', project.status === 'default' ? '首頁已重新發布並維持預設。' : '專案已發布並完成 Alias 綁定。')}
+                        onClick={() => runProjectAction(project, 'publish', '圖文選單已成功發布並設為目前使用中的 LINE 選單。')}
                         className="border border-green-300 px-3 py-1.5 rounded-md text-xs font-medium text-green-700 hover:bg-green-50 disabled:opacity-50"
                       >
                         {busy ? '處理中...' : published ? '重新發布' : '發布'}
@@ -583,8 +587,17 @@ const PUBLISH_STEP_REASONS = {
   BASIC_VALIDATION: '請先完成基本檢查。',
 };
 
+const publishContractComplete = payload => Boolean(
+  payload?.success
+  && payload?.created
+  && payload?.imageUploaded
+  && payload?.aliasAssigned
+  && payload?.defaultAssigned
+);
+
 const safePublishErrorMessage = message => {
   const value = String(message || '');
+  if (/LINE_DEFAULT_ASSIGN_FAILED|LINE_DEFAULT_VERIFY_FAILED|設定為目前使用中的選單失敗/i.test(value)) return '圖文選單內容已建立，但切換目前使用中的選單失敗。';
   if (/尚未連結 LINE 官方帳號|LINE_ACCOUNT_NOT_CONNECTED/i.test(value)) return '目前專案所屬 Workspace 尚未連結 LINE 官方帳號。';
   if (/尚未設定 Messaging API Bot Token|LINE_ACCOUNT_TOKEN_MISSING/i.test(value)) return '目前連結的 LINE 官方帳號尚未設定 Messaging API Bot Token。';
   if (/設定無法使用|LINE_ACCOUNT_TOKEN_UNUSABLE|credential|unauthorized|access token|401|403|驗證/i.test(value)) return 'LINE 官方帳號的 Messaging API 設定無法使用，請重新確認帳號設定。';
@@ -908,10 +921,12 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
     try {
       const response = await authFetch(`/api/projects/${projectId}/publish`, { method: 'POST' });
       const payload = await response.json();
-      if (!response.ok || !payload.success) throw new Error(payload.error || 'PUBLISH_FAILED');
+      if (!response.ok || !publishContractComplete(payload)) {
+        throw new Error(payload.error || payload.errorCode || 'PUBLISH_CONTRACT_INCOMPLETE');
+      }
       setProject(previous => ({ ...previous, status: payload.project?.status || previous.status }));
       setProjectDirty(false);
-      setPublishState({ status: 'success', message: '圖文選單已成功發布至 LINE 官方帳號。' });
+      setPublishState({ status: 'success', message: '圖文選單已成功發布並設為目前使用中的 LINE 選單。' });
       emitGuideEvent({
         type: 'guide-refresh',
         workflowId: 'rich-menu-project-setup',
@@ -1211,7 +1226,7 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
 
             {(publishState.status === 'confirming' || publishState.status === 'publishing') && (
               <>
-                <p className="mt-3 text-sm text-gray-600">確認要將目前專案發布至已連結的 LINE 官方帳號嗎？</p>
+                <p className="mt-3 text-sm text-gray-600">確認要將目前專案發布，並切換為該 LINE 官方帳號目前使用中的選單嗎？</p>
                 <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 rounded-xl bg-gray-50 p-4 text-sm">
                   <dt className="text-gray-500">專案名稱</dt><dd className="font-medium">{project.name}</dd>
                   <dt className="text-gray-500">圖片尺寸</dt><dd className="font-medium">{project.imageWidth} × {project.imageHeight}</dd>
@@ -1225,7 +1240,10 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
               <div className="mt-5 flex items-center gap-2 rounded-lg bg-blue-50 p-3 text-sm font-medium text-blue-800"><Loader2 size={17} className="animate-spin" />正在由後端發布至 LINE，請稍候...</div>
             )}
             {publishState.status === 'success' && (
-              <div className="mt-5 flex items-start gap-2 rounded-lg bg-emerald-50 p-4 text-sm font-medium text-emerald-800"><CheckCircle2 size={18} className="mt-0.5 shrink-0" />{publishState.message}</div>
+              <div className="mt-5 rounded-lg bg-emerald-50 p-4 text-sm text-emerald-800">
+                <div className="flex items-start gap-2 font-medium"><CheckCircle2 size={18} className="mt-0.5 shrink-0" />{publishState.message}</div>
+                <p className="mt-2 pl-6 text-xs">LINE 端可能需要重新開啟聊天室後才會更新。</p>
+              </div>
             )}
             {publishState.status === 'error' && (
               <div className="mt-5 rounded-lg bg-red-50 p-4 text-sm font-medium text-red-700">{publishState.message}</div>
@@ -1243,7 +1261,7 @@ const ProjectEditorView = ({ projectId, onBack, onStartNew, onGuideNavigate, use
               {publishState.status === 'error' && (
                 <>
                   <button type="button" onClick={() => setPublishState({ status: 'idle', message: '' })} className="rounded-md border border-gray-300 px-4 py-2 text-sm font-bold text-gray-700">關閉</button>
-                  {!publishBlockedReason && <button type="button" onClick={() => setPublishState({ status: 'confirming', message: '' })} className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-bold text-white">重新確認</button>}
+                  {!publishBlockedReason && <button type="button" onClick={() => setPublishState({ status: 'confirming', message: '' })} className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-bold text-white">重新嘗試發布</button>}
                 </>
               )}
             </div>

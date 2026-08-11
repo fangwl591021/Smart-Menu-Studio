@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   deleteRichMenuAlias,
+  getDefaultRichMenu,
   getRichMenuAlias,
   setDefaultRichMenu,
   upsertRichMenuAlias,
+  verifyDefaultRichMenu,
 } from '../src/line-rich-menu.mjs';
 
 const response = (status, body = '') => new Response(body, {
@@ -67,4 +69,34 @@ test('sets default homepage through the official LINE endpoint', async () => {
 
   assert.equal(request.url, 'https://api.line.me/v2/bot/user/all/richmenu/richmenu-home');
   assert.equal(request.options.method, 'POST');
+});
+
+test('reads and verifies the current default through the official LINE endpoint', async () => {
+  let request;
+  const fetcher = async (url, options = {}) => {
+    request = { url, options };
+    return response(200, JSON.stringify({ richMenuId: 'richmenu-home' }));
+  };
+
+  const current = await getDefaultRichMenu(fetcher, 'token');
+  assert.deepEqual(current, { richMenuId: 'richmenu-home' });
+  assert.equal(request.url, 'https://api.line.me/v2/bot/user/all/richmenu');
+  assert.equal(request.options.headers.Authorization, 'Bearer token');
+  assert.equal(await verifyDefaultRichMenu(fetcher, 'token', 'richmenu-home'), true);
+  assert.equal(await verifyDefaultRichMenu(fetcher, 'token', 'richmenu-other'), false);
+});
+
+test('LINE helper errors do not include raw provider response bodies', async () => {
+  await assert.rejects(
+    setDefaultRichMenu(
+      async () => response(403, JSON.stringify({ message: 'provider-secret-detail' })),
+      'token',
+      'richmenu-home',
+    ),
+    error => {
+      assert.equal(error.code, 'LINE_DEFAULT_ASSIGN_FAILED');
+      assert.doesNotMatch(error.message, /provider-secret-detail/);
+      return true;
+    },
+  );
 });

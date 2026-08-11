@@ -10,8 +10,9 @@ import {
 import {
   deleteRichMenuAlias,
   getRichMenuAlias,
+  publishRichMenuToLine,
   setDefaultRichMenu,
-  upsertRichMenuAlias,
+  verifyDefaultRichMenu,
 } from './line-rich-menu.mjs';
 import { resolveProjectLinePublishCredential } from './project-line-publish-credential';
 import { buildGuideContext, toPublicGuideContext } from './guide/context';
@@ -4295,45 +4296,26 @@ app.get('/api/system/line-intelligence/health', async (c) => {
 
 app.post('/api/projects/:projectId/publish', async (c) => {
   const projectId = c.req.param('projectId');
+  let publishProgress = { created: false, imageUploaded: false, aliasAssigned: false, defaultAssigned: false };
 
   try {
     requireRole(c, 'editor');
-
-
     const workspaceId = workspaceIdOf(c);
     const project: any = await getProjectForPublish(c.env, workspaceId, projectId);
 
-    if (!project) {
-      return c.json({ success: false, error: '找不到專案。' }, 404);
-    }
+    if (!project) return c.json({ success: false, ...publishProgress, errorCode: 'PROJECT_NOT_FOUND', error: '找不到專案。' }, 404);
 
-    const publishCredential = await resolveProjectLinePublishCredential(
-      c.env.smart_menu_db,
-      workspaceId,
-      projectId,
-    );
+    const publishCredential = await resolveProjectLinePublishCredential(c.env.smart_menu_db, workspaceId, projectId);
     if (!publishCredential.ok) {
-      if (publishCredential.code === 'PROJECT_NOT_FOUND') {
-        return c.json({ success: false, error: '找不到專案。' }, 404);
-      }
-      if (publishCredential.code === 'LINE_ACCOUNT_NOT_CONNECTED') {
-        return c.json({ success: false, error: '目前專案所屬 Workspace 尚未連結 LINE 官方帳號。' }, 409);
-      }
-      return c.json({ success: false, error: '目前連結的 LINE 官方帳號尚未設定 Messaging API Bot Token。' }, 409);
+      if (publishCredential.code === 'PROJECT_NOT_FOUND') return c.json({ success: false, ...publishProgress, errorCode: publishCredential.code, error: '找不到專案。' }, 404);
+      if (publishCredential.code === 'LINE_ACCOUNT_NOT_CONNECTED') return c.json({ success: false, ...publishProgress, errorCode: publishCredential.code, error: '目前專案所屬 Workspace 尚未連結 LINE 官方帳號。' }, 409);
+      return c.json({ success: false, ...publishProgress, errorCode: publishCredential.code, error: '目前連結的 LINE 官方帳號尚未設定 Messaging API Bot Token。' }, 409);
     }
     const channelAccessToken = publishCredential.credential.channelAccessToken;
 
-    if (project.status === 'disabled') {
-      return c.json({ success: false, error: '此專案已停用，請先啟用後再發布。' }, 409);
-    }
-
-    if (!project.asset_id) {
-      return c.json({ success: false, error: '專案尚未設定圖片。' }, 400);
-    }
-
-    if (!project.areas?.length) {
-      return c.json({ success: false, error: '專案沒有可發布的熱區。' }, 400);
-    }
+    if (project.status === 'disabled') return c.json({ success: false, ...publishProgress, errorCode: 'PROJECT_DISABLED', error: '此專案已停用，請先啟用後再發布。' }, 409);
+    if (!project.asset_id) return c.json({ success: false, ...publishProgress, errorCode: 'PROJECT_IMAGE_MISSING', error: '專案尚未設定圖片。' }, 400);
+    if (!project.areas?.length) return c.json({ success: false, ...publishProgress, errorCode: 'PROJECT_AREAS_MISSING', error: '專案沒有可發布的熱區。' }, 400);
 
     const switchTargetIds = [...new Set(
       project.areas
@@ -4341,25 +4323,15 @@ app.post('/api/projects/:projectId/publish', async (c) => {
         .map((area: any) => text(area.action?.targetPageId))
         .filter(Boolean)
     )] as string[];
-
-    if (switchTargetIds.includes(projectId)) {
-      return c.json({ success: false, error: '切換頁 Action 不可指向目前專案。' }, 400);
-    }
+    if (switchTargetIds.includes(projectId)) return c.json({ success: false, ...publishProgress, errorCode: 'PROJECT_SWITCH_SELF_REFERENCE', error: '切換頁 Action 不可指向目前專案。' }, 400);
 
     if (switchTargetIds.length) {
       const placeholders = switchTargetIds.map(() => '?').join(', ');
       const targetResult = await c.env.smart_menu_db.prepare(`
-        SELECT id
-        FROM projects
-        WHERE workspace_id = ?
-          AND deleted_at IS NULL
-          AND status <> 'disabled'
-          AND id IN (${placeholders})
+        SELECT id FROM projects
+        WHERE workspace_id = ? AND deleted_at IS NULL AND status <> 'disabled' AND id IN (${placeholders})
       `).bind(workspaceId, ...switchTargetIds).all();
-
-      if ((targetResult.results || []).length !== switchTargetIds.length) {
-        return c.json({ success: false, error: '切換目標不存在、已停用或不屬於目前 Workspace。' }, 400);
-      }
+      if ((targetResult.results || []).length !== switchTargetIds.length) return c.json({ success: false, ...publishProgress, errorCode: 'PROJECT_SWITCH_TARGET_INVALID', error: '切換目標不存在、已停用或不屬於目前 Workspace。' }, 400);
     }
 
     const dimensions = resolveRichMenuDimensions(project.image_width, project.image_height);
@@ -4368,7 +4340,7 @@ app.post('/api/projects/:projectId/publish', async (c) => {
       validateRichMenuImageDimensions(dimensions.width, dimensions.height);
       validatedAreas = validateRichMenuAreas(project.areas, dimensions.width, dimensions.height);
     } catch {
-      return c.json({ success: false, error: '專案圖片尺寸或熱區座標不符合 LINE Rich Menu 規格。' }, 400);
+      return c.json({ success: false, ...publishProgress, errorCode: 'PROJECT_LAYOUT_INVALID', error: '專案圖片尺寸或熱區座標不符合 LINE Rich Menu 規格。' }, 400);
     }
     const lineAreas = validatedAreas.map((area: any) => ({
       bounds: {
@@ -4379,116 +4351,64 @@ app.post('/api/projects/:projectId/publish', async (c) => {
       },
       action: buildLineAction(area.action),
     }));
-
     const richMenuObject = {
-      size: {
-        width: dimensions.width,
-        height: dimensions.height,
-      },
+      size: { width: dimensions.width, height: dimensions.height },
       selected: true,
       name: text(project.name).slice(0, 300) || 'Smart Menu',
       chatBarText: '選單',
       areas: lineAreas,
     };
 
-    // 1. Create a new immutable LINE Rich Menu version.
-    const createRes = await fetch(
-      'https://api.line.me/v2/bot/richmenu',
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${channelAccessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(richMenuObject),
-      }
-    );
-
-    if (!createRes.ok) {
-      throw new Error(createRes.status === 401 || createRes.status === 403
-        ? 'LINE_ACCOUNT_TOKEN_UNUSABLE'
-        : 'LINE_RICH_MENU_CREATE_FAILED');
-    }
-
-    const createData: any = await createRes.json();
-    const richMenuId = text(createData.richMenuId);
-
-    if (!richMenuId) {
-      throw new Error('LINE 未回傳 richMenuId');
-    }
-
-    // 2. Upload the image before creating or updating the alias.
     const { asset, object } = await getProjectImageObject(c.env, workspaceId, project.asset_id);
-    const imageContentType = asset.content_type === 'image/png' ? 'image/png' : 'image/jpeg';
-    const uploadRes = await fetch(
-      `https://api-data.line.me/v2/bot/richmenu/${richMenuId}/content`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${channelAccessToken}`,
-          'Content-Type': imageContentType,
-        },
-        body: object.body,
-      }
-    );
-
-    if (!uploadRes.ok) {
-      throw new Error(uploadRes.status === 401 || uploadRes.status === 403
-        ? 'LINE_ACCOUNT_TOKEN_UNUSABLE'
-        : 'LINE_RICH_MENU_UPLOAD_FAILED');
-    }
-
-    // 3. Point the stable Project alias to the newly published Rich Menu.
-    const richMenuAliasId = richMenuAliasIdForProject(projectId);
-    const alias = await upsertRichMenuAlias(
-      fetch,
+    const publishResult = await publishRichMenuToLine({
+      fetcher: fetch,
       channelAccessToken,
-      richMenuAliasId,
-      richMenuId,
-    );
+      richMenuObject,
+      imageBody: object.body,
+      imageContentType: asset.content_type === 'image/png' ? 'image/png' : 'image/jpeg',
+      richMenuAliasId: richMenuAliasIdForProject(projectId),
+    });
+    publishProgress = {
+      created: publishResult.created,
+      imageUploaded: publishResult.imageUploaded,
+      aliasAssigned: publishResult.aliasAssigned,
+      defaultAssigned: publishResult.defaultAssigned,
+    };
 
-    // 4. A republished home Project must remain the default; other Projects never replace it.
-    if (project.status === 'default') {
-      await setDefaultRichMenu(fetch, channelAccessToken, richMenuId);
-    }
-
-    // 5. Store only lifecycle state. LINE alias remains the source of the current richMenuId mapping.
-    await c.env.smart_menu_db.prepare(`
-      UPDATE projects
-      SET
-        status = CASE WHEN status = 'default' THEN 'default' ELSE 'published' END,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
-    `).bind(projectId, workspaceId).run();
+    // LINE is authoritative first; D1 lifecycle state is finalized only after default verification.
+    await c.env.smart_menu_db.batch([
+      c.env.smart_menu_db.prepare(`
+        UPDATE projects SET status = 'published', updated_at = CURRENT_TIMESTAMP
+        WHERE workspace_id = ? AND status = 'default' AND id <> ? AND deleted_at IS NULL
+      `).bind(workspaceId, projectId),
+      c.env.smart_menu_db.prepare(`
+        UPDATE projects SET status = 'default', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
+      `).bind(projectId, workspaceId),
+    ]);
 
     return c.json({
       success: true,
-      project: {
-        id: projectId,
-        name: project.name,
-        status: project.status === 'default' ? 'default' : 'published',
-        isDefault: project.status === 'default',
-        richMenuAliasId,
-        richMenuId,
-      },
-      alias,
-      richMenu: richMenuObject,
+      ...publishProgress,
+      status: 'published',
+      project: { id: projectId, name: project.name, status: 'default', isDefault: true },
     });
   } catch (e: any) {
-    const errorCode = text(e?.message);
+    const errorCode = text(e?.code || e?.message) || 'LINE_PUBLISH_FAILED';
+    if (e?.progress) publishProgress = {
+      created: Boolean(e.progress.created),
+      imageUploaded: Boolean(e.progress.imageUploaded),
+      aliasAssigned: Boolean(e.progress.aliasAssigned),
+      defaultAssigned: Boolean(e.progress.defaultAssigned),
+    };
     console.error(JSON.stringify({
       message: 'publish project failed',
-      code: ['FORBIDDEN_ROLE', 'LINE_ACCOUNT_TOKEN_UNUSABLE', 'LINE_RICH_MENU_CREATE_FAILED', 'LINE_RICH_MENU_UPLOAD_FAILED'].includes(errorCode)
-        ? errorCode
-        : 'LINE_PUBLISH_FAILED',
+      code: ['FORBIDDEN_ROLE', 'LINE_ACCOUNT_TOKEN_UNUSABLE', 'LINE_RICH_MENU_CREATE_FAILED', 'LINE_RICH_MENU_UPLOAD_FAILED', 'LINE_ALIAS_ASSIGN_FAILED', 'LINE_DEFAULT_ASSIGN_FAILED', 'LINE_DEFAULT_VERIFY_FAILED'].includes(errorCode) ? errorCode : 'LINE_PUBLISH_FAILED',
     }));
-    if (errorCode === 'FORBIDDEN_ROLE') {
-      return c.json({ success: false, error: '權限不足，需要 editor、admin 或 owner。' }, 403);
-    }
-    if (errorCode === 'LINE_ACCOUNT_TOKEN_UNUSABLE') {
-      return c.json({ success: false, error: 'LINE 官方帳號的 Messaging API 設定無法使用，請重新確認帳號設定。' }, 409);
-    }
-    return c.json({ success: false, error: '發布至 LINE 失敗，請稍後再試。' }, 502);
+    if (errorCode === 'FORBIDDEN_ROLE') return c.json({ success: false, ...publishProgress, errorCode, error: '權限不足，需要 editor、admin 或 owner。' }, 403);
+    if (errorCode === 'LINE_ACCOUNT_TOKEN_UNUSABLE') return c.json({ success: false, ...publishProgress, errorCode, error: 'LINE 官方帳號的 Messaging API 設定無法使用，請重新確認帳號設定。' }, 409);
+    if (errorCode === 'LINE_DEFAULT_ASSIGN_FAILED' || errorCode === 'LINE_DEFAULT_VERIFY_FAILED') return c.json({ success: false, ...publishProgress, errorCode, error: '圖文選單已建立，但設定為目前使用中的選單失敗，請稍後再試。' }, 502);
+    return c.json({ success: false, ...publishProgress, errorCode, error: '發布至 LINE 失敗，請稍後再試。' }, 502);
   }
 });
 
@@ -4497,60 +4417,53 @@ app.post('/api/projects/:projectId/set-default', async (c) => {
     requireRole(c, 'editor');
     const projectId = c.req.param('projectId');
     const workspaceId = workspaceIdOf(c);
-
-    if (!c.env.LINE_CHANNEL_ACCESS_TOKEN) {
-      return c.json({ success: false, error: 'LINE_CHANNEL_ACCESS_TOKEN 尚未設定。' }, 500);
-    }
-
     const project: any = await c.env.smart_menu_db.prepare(`
-      SELECT id, name, status
-      FROM projects
-      WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
-      LIMIT 1
+      SELECT id, name, status FROM projects
+      WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL LIMIT 1
     `).bind(projectId, workspaceId).first();
 
-    if (!project) return c.json({ success: false, error: '找不到專案。' }, 404);
-    if (project.status === 'disabled') {
-      return c.json({ success: false, error: '停用中的專案不可設為首頁。' }, 409);
-    }
+    if (!project) return c.json({ success: false, defaultAssigned: false, errorCode: 'PROJECT_NOT_FOUND', error: '找不到專案。' }, 404);
+    if (project.status === 'disabled') return c.json({ success: false, defaultAssigned: false, errorCode: 'PROJECT_DISABLED', error: '停用中的專案不可設為首頁。' }, 409);
 
-    const richMenuAliasId = richMenuAliasIdForProject(projectId);
-    const alias: any = await getRichMenuAlias(fetch, c.env.LINE_CHANNEL_ACCESS_TOKEN, richMenuAliasId);
+    const publishCredential = await resolveProjectLinePublishCredential(c.env.smart_menu_db, workspaceId, projectId);
+    if (!publishCredential.ok) {
+      if (publishCredential.code === 'LINE_ACCOUNT_NOT_CONNECTED') return c.json({ success: false, defaultAssigned: false, errorCode: publishCredential.code, error: '目前專案所屬 Workspace 尚未連結 LINE 官方帳號。' }, 409);
+      if (publishCredential.code === 'LINE_ACCOUNT_TOKEN_MISSING') return c.json({ success: false, defaultAssigned: false, errorCode: publishCredential.code, error: '目前連結的 LINE 官方帳號尚未設定 Messaging API Bot Token。' }, 409);
+      return c.json({ success: false, defaultAssigned: false, errorCode: publishCredential.code, error: '找不到專案。' }, 404);
+    }
+    const channelAccessToken = publishCredential.credential.channelAccessToken;
+    const alias: any = await getRichMenuAlias(fetch, channelAccessToken, richMenuAliasIdForProject(projectId));
     const richMenuId = text(alias?.richMenuId);
+    if (!richMenuId) return c.json({ success: false, defaultAssigned: false, errorCode: 'LINE_ALIAS_NOT_FOUND', error: '此專案尚未發布或 Alias 不存在，請先發布。' }, 409);
 
-    if (!richMenuId) {
-      return c.json({ success: false, error: '此專案尚未發布或 Alias 不存在，請先發布。' }, 409);
+    await setDefaultRichMenu(fetch, channelAccessToken, richMenuId);
+    if (!await verifyDefaultRichMenu(fetch, channelAccessToken, richMenuId)) {
+      const verifyError: any = new Error('LINE_DEFAULT_VERIFY_FAILED');
+      verifyError.code = 'LINE_DEFAULT_VERIFY_FAILED';
+      throw verifyError;
     }
-
-    await setDefaultRichMenu(fetch, c.env.LINE_CHANNEL_ACCESS_TOKEN, richMenuId);
     await c.env.smart_menu_db.batch([
       c.env.smart_menu_db.prepare(`
-        UPDATE projects
-        SET status = 'published', updated_at = CURRENT_TIMESTAMP
+        UPDATE projects SET status = 'published', updated_at = CURRENT_TIMESTAMP
         WHERE workspace_id = ? AND status = 'default' AND id <> ? AND deleted_at IS NULL
       `).bind(workspaceId, projectId),
       c.env.smart_menu_db.prepare(`
-        UPDATE projects
-        SET status = 'default', updated_at = CURRENT_TIMESTAMP
+        UPDATE projects SET status = 'default', updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
       `).bind(projectId, workspaceId),
     ]);
 
-    return c.json({
-      success: true,
-      project: { id: projectId, name: project.name, status: 'default', isDefault: true },
-      richMenuAliasId,
-      richMenuId,
-    });
+    return c.json({ success: true, defaultAssigned: true, status: 'default', project: { id: projectId, name: project.name, status: 'default', isDefault: true } });
   } catch (e: any) {
-    console.error('set-default-project:', e);
-    if (e?.message === 'FORBIDDEN_ROLE') {
-      return c.json({ success: false, error: '權限不足，需要 editor、admin 或 owner。' }, 403);
-    }
-    return c.json({ success: false, error: e?.message || '設定首頁失敗' }, 500);
+    const errorCode = text(e?.code || e?.message) || 'LINE_DEFAULT_ASSIGN_FAILED';
+    console.error(JSON.stringify({
+      message: 'set default project failed',
+      code: ['FORBIDDEN_ROLE', 'LINE_DEFAULT_ASSIGN_FAILED', 'LINE_DEFAULT_VERIFY_FAILED'].includes(errorCode) ? errorCode : 'LINE_DEFAULT_ASSIGN_FAILED',
+    }));
+    if (errorCode === 'FORBIDDEN_ROLE') return c.json({ success: false, defaultAssigned: false, errorCode, error: '權限不足，需要 editor、admin 或 owner。' }, 403);
+    return c.json({ success: false, defaultAssigned: false, errorCode, error: '設定目前使用中的 LINE 選單失敗，請稍後再試。' }, 502);
   }
 });
-
 app.post('/api/projects/:projectId/disable', async (c) => {
   try {
     requireRole(c, 'editor');

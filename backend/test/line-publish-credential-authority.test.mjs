@@ -10,6 +10,10 @@ const publishRoute = backend.slice(
   backend.indexOf("app.post('/api/projects/:projectId/publish'"),
   backend.indexOf("app.post('/api/projects/:projectId/set-default'"),
 );
+const setDefaultRoute = backend.slice(
+  backend.indexOf("app.post('/api/projects/:projectId/set-default'"),
+  backend.indexOf("app.post('/api/projects/:projectId/disable'"),
+);
 const lineHubReadRoute = backend.slice(
   backend.indexOf("app.get('/api/line-hub'"),
   backend.indexOf("app.patch('/api/line-hub/account'"),
@@ -87,15 +91,36 @@ test('connected LINE account without a stored token is blocked', async () => {
   assert.deepEqual(result, { ok: false, code: 'LINE_ACCOUNT_TOKEN_MISSING' });
 });
 
-test('stored account token reaches every LINE publish client call', () => {
-  assert.equal((publishRoute.match(/Bearer \$\{channelAccessToken\}/g) || []).length, 2);
-  assert.match(publishRoute, /upsertRichMenuAlias\([\s\S]*?channelAccessToken/);
-  assert.match(publishRoute, /setDefaultRichMenu\(fetch, channelAccessToken, richMenuId\)/);
+test('stored account token reaches the complete LINE publish orchestration', () => {
+  assert.match(publishRoute, /publishRichMenuToLine\(\{[\s\S]*?channelAccessToken/);
+  assert.doesNotMatch(publishRoute, /env\.LINE_CHANNEL_ACCESS_TOKEN/);
+});
+
+test('standalone set-default resolves and uses only the project workspace token', () => {
+  assert.match(setDefaultRoute, /resolveProjectLinePublishCredential\(c\.env\.smart_menu_db, workspaceId, projectId\)/);
+  assert.match(setDefaultRoute, /getRichMenuAlias\(fetch, channelAccessToken/);
+  assert.match(setDefaultRoute, /setDefaultRichMenu\(fetch, channelAccessToken, richMenuId\)/);
+  assert.match(setDefaultRoute, /verifyDefaultRichMenu\(fetch, channelAccessToken, richMenuId\)/);
+  assert.doesNotMatch(setDefaultRoute, /env\.LINE_CHANNEL_ACCESS_TOKEN/);
 });
 
 test('Tenant Project publish does not require the global token binding', () => {
   assert.doesNotMatch(publishRoute, /LINE_CHANNEL_ACCESS_TOKEN/);
   assert.match(publishRoute, /resolveProjectLinePublishCredential/);
+});
+test('D1 final default state occurs only after the verified LINE publish contract', () => {
+  const linePublish = publishRoute.indexOf('const publishResult = await publishRichMenuToLine');
+  const finalPersistence = publishRoute.indexOf('await c.env.smart_menu_db.batch');
+  const successResponse = publishRoute.indexOf('return c.json({\n      success: true');
+  assert.ok(linePublish >= 0 && finalPersistence > linePublish && successResponse > finalPersistence);
+  assert.match(publishRoute, /UPDATE projects SET status = 'published'[\s\S]*UPDATE projects SET status = 'default'/);
+  assert.match(publishRoute, /defaultAssigned: publishResult\.defaultAssigned/);
+});
+
+test('default partial failures return safe stage flags without final success', () => {
+  assert.match(publishRoute, /LINE_DEFAULT_ASSIGN_FAILED'[\s\S]*LINE_DEFAULT_VERIFY_FAILED'/);
+  assert.match(publishRoute, /success: false, \.\.\.publishProgress, errorCode/);
+  assert.match(publishRoute, /圖文選單已建立，但設定為目前使用中的選單失敗/);
 });
 
 test('frontend and LINE Hub read projection never receive the stored token', () => {
@@ -116,11 +141,14 @@ test('account-scoped missing and unusable credential messages expose no env name
   assert.doesNotMatch(publishRoute, /LINE_CHANNEL_ACCESS_TOKEN/);
 });
 
-test('provider response bodies and raw exception messages are absent from publish errors and logs', () => {
-  assert.doesNotMatch(publishRoute, /createRes\.text\(\)|uploadRes\.text\(\)/);
+test('provider response bodies, raw IDs, and raw exception messages are absent from tenant publish responses', () => {
+  assert.doesNotMatch(publishRoute, /\.text\(\)/);
   assert.doesNotMatch(publishRoute, /console\.error\([^)]*\be\b/);
   assert.doesNotMatch(publishRoute, /error:\s*e\?\.message/);
-  assert.match(publishRoute, /code: \['FORBIDDEN_ROLE'/);
+  const successResponse = publishRoute.slice(publishRoute.indexOf('return c.json({\n      success: true'));
+  assert.doesNotMatch(successResponse, /richMenuId|richMenuAliasId|alias,|richMenu:/);
+  assert.match(publishRoute, /LINE_DEFAULT_ASSIGN_FAILED/);
+  assert.match(publishRoute, /LINE_DEFAULT_VERIFY_FAILED/);
 });
 
 test('existing LINE account setup remains workspace-scoped and stores only server-side', () => {
