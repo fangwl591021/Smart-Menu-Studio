@@ -5,6 +5,7 @@ import { applyReferralFlowTerminalResult, getReferralFlowToken, setReferralFlowT
 import DealerSettlementPayoutPanel from './DealerSettlementPayoutPanel';
 import MemberRewardRedemptionPanel from './MemberRewardRedemptionPanel';
 import MemberContributionTierPanel from './MemberContributionTierPanel';
+import { commissionSourceKey, commissionSourceLabel } from '../commission-source-presentation';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_PRODUCTION_WORKER_BASE_URL || (import.meta.env.PROD ? 'https://smart-menu-backend.fangwl591021.workers.dev' : 'http://127.0.0.1:8788');
 const api = (path, options) => fetch(`${API_BASE_URL}${path}`, options);
@@ -35,7 +36,6 @@ function SelfAttributionPanel({ data, loading, error, period, onPeriodChange }) 
   const programs = Array.isArray(data?.programs) ? data.programs : [];
   const sources = Array.isArray(data?.sources) ? data.sources : [];
   const count = value => Number(value || 0).toLocaleString('zh-TW');
-  const sourceLabel = value => value === 'REFERRAL_EVIDENCE' ? '推薦證據' : '已驗證歸因來源';
   if (loading) return <section className="mt-5 rounded-xl border border-slate-200 p-4" aria-label="我的已歸因轉換"><h2 className="text-lg font-bold">我的已歸因轉換</h2><p className="mt-3 text-sm text-slate-500">正在讀取歸因資料…</p></section>;
   if (error) return <section className="mt-5 rounded-xl border border-slate-200 p-4" aria-label="我的已歸因轉換"><h2 className="text-lg font-bold">我的已歸因轉換</h2><p className="mt-3 text-sm text-slate-600">目前無法讀取已歸因轉換資料。</p></section>;
   if (!data || data.status === 'NOT_ENROLLED') return <section className="mt-5 rounded-xl border border-slate-200 p-4" aria-label="我的已歸因轉換"><h2 className="text-lg font-bold">我的已歸因轉換</h2><p className="mt-2 text-sm text-slate-600">目前尚未加入經銷商方案。</p></section>;
@@ -43,7 +43,7 @@ function SelfAttributionPanel({ data, loading, error, period, onPeriodChange }) 
   return <section className="mt-5 rounded-xl border border-slate-200 p-4" aria-label="我的已歸因轉換">
     <div className="flex items-center justify-between gap-3"><div><h2 className="text-lg font-bold">我的已歸因轉換</h2><p className="mt-1 text-xs text-slate-500">顯示依確定性規則歸屬至你的轉換紀錄。</p></div><div className="flex gap-2">{['7d', '30d'].map(value => <button key={value} type="button" onClick={() => onPeriodChange(value)} className={period === value ? 'rounded bg-slate-900 px-3 py-1 text-xs font-bold text-white' : 'rounded border border-slate-300 px-3 py-1 text-xs font-bold'}>{value}</button>)}</div></div>
     <div className="mt-4 rounded-lg bg-slate-50 p-3"><div className="text-xs text-slate-500">已歸因轉換數</div><div className="mt-1 text-xl font-bold">{count(data.summary?.attributedConversions)}</div></div>
-    {empty ? <p className="mt-4 rounded-lg bg-slate-50 p-3 text-sm text-slate-600">目前尚無已歸因轉換。符合可信推薦證據、經銷資格與有效方案條件的新轉換，才會建立歸因。</p> : <><div className="mt-4"><h3 className="font-bold">歸因趨勢</h3><div className="mt-2 flex flex-wrap gap-2 text-xs">{trend.map(point => <span key={point.day} className="rounded bg-slate-100 px-2 py-1">{point.day}：{count(point.attributedConversions)}</span>)}</div></div><div className="mt-4"><h3 className="font-bold">方案歸因</h3><div className="mt-2 space-y-2">{programs.map((program, index) => <div key={`${program.programName}-${index}`} className="flex justify-between rounded border border-slate-100 p-3 text-sm"><span>{program.programName}</span><b>{count(program.attributedConversions)}</b></div>)}</div></div><div className="mt-4"><h3 className="font-bold">歸因來源</h3><div className="mt-2 space-y-2">{sources.map(source => <div key={source.attributionSource} className="flex justify-between rounded border border-slate-100 p-3 text-sm"><span>{sourceLabel(source.attributionSource)}</span><b>{count(source.attributedConversions)}</b></div>)}</div></div></>}
+    {empty ? <p className="mt-4 rounded-lg bg-slate-50 p-3 text-sm text-slate-600">目前尚無已歸因轉換。符合可信推薦證據、經銷資格與有效方案條件的新轉換，才會建立歸因。</p> : <><div className="mt-4"><h3 className="font-bold">歸因趨勢</h3><div className="mt-2 flex flex-wrap gap-2 text-xs">{trend.map(point => <span key={point.day} className="rounded bg-slate-100 px-2 py-1">{point.day}：{count(point.attributedConversions)}</span>)}</div></div><div className="mt-4"><h3 className="font-bold">方案歸因</h3><div className="mt-2 space-y-2">{programs.map((program, index) => <div key={`${program.programName}-${index}`} className="flex justify-between rounded border border-slate-100 p-3 text-sm"><span>{program.programName}</span><b>{count(program.attributedConversions)}</b></div>)}</div></div><div className="mt-4"><h3 className="font-bold">歸因來源</h3><div className="mt-2 space-y-2">{sources.map(source => <div key={commissionSourceKey(source)} className="flex justify-between rounded border border-slate-100 p-3 text-sm"><span>{commissionSourceLabel(source)}</span><b>{count(source.attributedConversions)}</b></div>)}</div></div></>}
   </section>;
 }
 

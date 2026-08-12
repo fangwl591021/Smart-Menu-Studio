@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import CommissionLedgerPanel from './CommissionLedgerPanel';
 import TenantSettlementPayoutPanel from './TenantSettlementPayoutPanel';
+import { commissionSourceKey, commissionSourceLabel } from '../commission-source-presentation';
 
 const number = value => Number(value || 0).toLocaleString('zh-TW');
-const sourceLabel = value => value === 'REFERRAL_EVIDENCE' ? '推薦證據' : '已驗證歸因來源';
 
 export default function CommissionAttributionPanel({ request, userRole }) {
   const [period, setPeriod] = useState('30d');
@@ -46,7 +46,7 @@ export default function CommissionAttributionPanel({ request, userRole }) {
           <section className="mt-5" aria-label="歸因趨勢"><h3 className="font-bold text-gray-900">歸因趨勢</h3><div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{(data.trend || []).map(item => <div key={item.day} className="rounded border border-gray-100 p-3 text-sm"><div className="text-xs text-gray-500">{item.day}</div><b>{number(item.attributedConversions)}</b></div>)}</div></section>
           <section className="mt-5" aria-label="方案歸因"><h3 className="font-bold text-gray-900">方案歸因</h3><div className="mt-2 space-y-2">{programs.map(program => <div key={program.programId} className="flex justify-between rounded border border-gray-100 p-3 text-sm"><span>{program.programName}</span><b>{number(program.attributedConversions)}</b></div>)}</div></section>
           <section className="mt-5" aria-label="經銷商歸因"><h3 className="font-bold text-gray-900">經銷商歸因</h3><div className="mt-2 space-y-2">{(data.dealers || []).map(dealer => <div key={dealer.publicSafeLabel} className="flex justify-between rounded border border-gray-100 p-3 text-sm"><span>{dealer.publicSafeLabel}</span><b>{number(dealer.attributedConversions)}</b></div>)}</div></section>
-          <section className="mt-5" aria-label="歸因來源"><h3 className="font-bold text-gray-900">歸因來源</h3><div className="mt-2 space-y-2">{(data.sources || []).map(source => <div key={source.attributionSource} className="flex justify-between rounded border border-gray-100 p-3 text-sm"><span>{sourceLabel(source.attributionSource)}</span><b>{number(source.attributedConversions)}</b></div>)}</div></section>
+          <section className="mt-5" aria-label="歸因來源"><h3 className="font-bold text-gray-900">歸因來源</h3><div className="mt-2 space-y-2">{(data.sources || []).map(source => <div key={commissionSourceKey(source)} className="flex justify-between rounded border border-gray-100 p-3 text-sm"><span>{commissionSourceLabel(source)}</span><b>{number(source.attributedConversions)}</b></div>)}</div></section>
         </>}
       </>}
     </section>
