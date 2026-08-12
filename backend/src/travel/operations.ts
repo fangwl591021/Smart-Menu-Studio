@@ -1,3 +1,5 @@
+import { readOperationalState } from './milestones.ts';
+
 const clean = (value: unknown, max = 160) => String(value ?? '').trim().slice(0, max);
 
 export const travelOperationsLimit = (value: unknown) => {
@@ -79,7 +81,8 @@ export async function readDepartureOperations(db: D1Database, input: { workspace
     unpaidBookings: Number(summary?.unpaid_bookings || 0), depositCompletedBookings: Number(summary?.deposit_completed_bookings || 0),
     fullyPaidBookings: Number(summary?.fully_paid_bookings || 0), cancelledBookings: Number(summary?.cancelled_bookings || 0),
   };
-  return { ...facts, readiness: projectDepartureReadiness({ ...facts, now: input.now }) };
+  const operationalState = await readOperationalState(db, input.workspaceId, String(departure.id));
+  return { ...facts, readiness: projectDepartureReadiness({ ...facts, now: input.now }), operationalState };
 }
 
 export async function listDepartureOperationBookings(db: D1Database, input: { workspaceId: string; safeDepartureReference: string; limit?: unknown; page?: unknown }) {
@@ -111,11 +114,17 @@ const eventLabels: Record<string, string> = {
   DEPARTURE_CANCELLED: '出發日已取消', DEPARTURE_ARCHIVED: '出發日已封存', BOOKING_CREATED: '報名訂單已建立',
   DEPOSIT_PAID: '訂金已付款', BALANCE_PAID: '尾款已付款', FULL_PAYMENT_PAID: '全額已付款',
   BOOKING_CONFIRMED: '報名訂單已確認', BOOKING_CANCELLED: '報名訂單已取消',
+  OPERATION_CONFIRMED: '出發日作業已確認', SERVICE_COMPLETED: '旅遊服務已完成',
 };
 export async function listDepartureOperationEvents(db: D1Database, input: { workspaceId: string; safeDepartureReference: string; limit?: unknown }) {
   const departure = await departureRow(db, input.workspaceId, input.safeDepartureReference), limit = travelOperationsLimit(input.limit);
-  const rows = (await db.prepare(`SELECT event_type,occurred_at FROM travel_events
-    WHERE workspace_id=? AND departure_id=? ORDER BY occurred_at ASC,id ASC LIMIT ?`)
-    .bind(input.workspaceId, departure.id, limit).all<any>()).results || [];
+  const rows = (await db.prepare(`SELECT event_type,occurred_at FROM (
+      SELECT event_type,occurred_at,0 source_order,id tie_break FROM travel_events
+      WHERE workspace_id=? AND departure_id=?
+      UNION ALL
+      SELECT event_type,occurred_at,1 source_order,id tie_break FROM travel_operation_events
+      WHERE workspace_id=? AND departure_id=?
+    ) ORDER BY occurred_at ASC,source_order ASC,tie_break ASC LIMIT ?`)
+    .bind(input.workspaceId, departure.id, input.workspaceId, departure.id, limit).all<any>()).results || [];
   return { limit, events: rows.map(row => ({ eventType: clean(row.event_type, 60), safeEventLabel: eventLabels[String(row.event_type)] || '旅遊狀態更新', occurredAt: row.occurred_at || null })) };
 }

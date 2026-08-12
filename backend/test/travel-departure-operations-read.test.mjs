@@ -28,7 +28,7 @@ const contracts = [
   ['seller label reuses immutable safe snapshot', source, /seller_label_snapshot/],
   ['booking pagination is bounded', source, /ORDER BY b\.created_at ASC,b\.id ASC LIMIT \? OFFSET \?/],
   ['traveler pagination is bounded', source, /ORDER BY b\.created_at ASC,b\.id ASC,t\.sequence_no ASC LIMIT \? OFFSET \?/],
-  ['timeline is safe and server tie-broken', source, /SELECT event_type,occurred_at FROM travel_events[^]*ORDER BY occurred_at ASC,id ASC LIMIT \?/],
+  ['timeline merges domain and operation events with deterministic ordering', source, /FROM travel_events[^]*UNION ALL[^]*FROM travel_operation_events[^]*ORDER BY occurred_at ASC,source_order ASC,tie_break ASC LIMIT \?/],
   ['operations are read only', source, /^(?![^]*(?:INSERT INTO|UPDATE |DELETE FROM))/i],
   ['no export endpoint exists', routes, /^(?![^]*departures\/:safeDepartureReference\/(?:export|roster-export))/],
   ['no mutation endpoint is added for operations', routes, /^(?![^]*app\.(?:post|put|patch|delete)\('\/api\/travel\/departures\/:safeDepartureReference\/(?:operations|bookings|travelers|events))/],
@@ -71,7 +71,8 @@ class Statement {
   async all() {
     if (this.sql.startsWith('SELECT b.public_ref,COALESCE')) return { results: this.db.bookings.slice(this.values[3], this.values[3] + this.values[2]) };
     if (this.sql.startsWith('SELECT b.public_ref booking_ref')) return { results: this.db.travelers.slice(this.values[3], this.values[3] + this.values[2]) };
-    if (this.sql.startsWith('SELECT event_type,occurred_at')) return { results: this.db.events.slice(0, this.values[2]) };
+    if (this.sql.startsWith('SELECT event_type,occurred_at FROM travel_operation_events')) return { results: this.db.operationEvents };
+    if (this.sql.startsWith('SELECT event_type,occurred_at FROM (')) return { results: [...this.db.events, ...this.db.operationEvents].sort((a,b) => a.occurred_at.localeCompare(b.occurred_at)).slice(0, this.values[4]) };
     throw new Error(`Unexpected all: ${this.sql}`);
   }
 }
@@ -86,6 +87,7 @@ class Db {
     ];
     this.travelers = [{ booking_ref: 'bkg_safe_1', sequence_no: 1, display_name: '旅客甲', traveler_type: 'ADULT', phone: '0900000000', note: '低風險備註' }];
     this.events = [{ event_type: 'BOOKING_CREATED', occurred_at: '2026-08-02T00:00:00.000Z' }];
+    this.operationEvents = [];
   }
   prepare(sql) { return new Statement(this, sql); }
 }
@@ -94,7 +96,7 @@ test('operations summary derives seats, counts, payment partitions and readiness
   const result = await readDepartureOperations(new Db(), { workspaceId: 'workspace-a', safeDepartureReference: 'dep_safe', now: new Date('2026-08-12T00:00:00.000Z') });
   assert.equal(result.reservedSeats, 12); assert.equal(result.remainingSeats, 8); assert.equal(result.bookingCount, 4); assert.equal(result.travelerCount, 12);
   assert.equal(result.unpaidBookings, 1); assert.equal(result.depositCompletedBookings, 1); assert.equal(result.fullyPaidBookings, 1); assert.equal(result.cancelledBookings, 1);
-  assert.equal(result.readiness.state, 'ATTENTION');
+  assert.equal(result.readiness.state, 'ATTENTION'); assert.deepEqual(result.operationalState, { confirmed: false, confirmedAt: null, completed: false, completedAt: null });
   assert.deepEqual(Object.keys(result).some(key => /(^id$|internal|workspace|member|dealer|crm|commission)/i.test(key)), false);
 });
 
@@ -114,7 +116,11 @@ test('traveler roster is bounded and returns only approved low-risk snapshots', 
   assert.equal(JSON.stringify(result).includes('departure-internal'), false);
 });
 
-test('departure timeline is bounded, safe, and contains no internal event id', async () => {
-  const result = await listDepartureOperationEvents(new Db(), { workspaceId: 'workspace-a', safeDepartureReference: 'dep_safe', limit: 1 });
-  assert.deepEqual(result, { limit: 1, events: [{ eventType: 'BOOKING_CREATED', safeEventLabel: '報名訂單已建立', occurredAt: '2026-08-02T00:00:00.000Z' }] });
+test('departure timeline merges legacy and operation milestones without internal event ids', async () => {
+  const db = new Db(); db.operationEvents.push({ event_type: 'OPERATION_CONFIRMED', occurred_at: '2026-08-03T00:00:00.000Z' });
+  const result = await listDepartureOperationEvents(db, { workspaceId: 'workspace-a', safeDepartureReference: 'dep_safe', limit: 2 });
+  assert.deepEqual(result, { limit: 2, events: [
+    { eventType: 'BOOKING_CREATED', safeEventLabel: '報名訂單已建立', occurredAt: '2026-08-02T00:00:00.000Z' },
+    { eventType: 'OPERATION_CONFIRMED', safeEventLabel: '出發日作業已確認', occurredAt: '2026-08-03T00:00:00.000Z' },
+  ] });
 });
