@@ -9,6 +9,7 @@ export const AI_FEATURE_CODES = Object.freeze([
   'operation_plan_assist',
   'line_oa_intelligence',
   'content_generation',
+  'travel_promotion_extract',
   'unknown_ai_feature',
 ] as const);
 

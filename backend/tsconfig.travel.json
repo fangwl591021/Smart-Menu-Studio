@@ -12,6 +12,8 @@
     "src/commerce/commerce.ts",
     "src/travel/payment-projection.ts",
     "src/travel/travel.ts",
+    "src/travel/promotion.ts",
+    "src/travel/promotion-routes.ts",
     "src/travel/routes.ts",
     "src/travel/member-routes.ts"
   ]
