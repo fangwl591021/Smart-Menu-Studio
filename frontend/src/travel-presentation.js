@@ -12,7 +12,8 @@ export const travelEventLabel = event => event?.safeEventLabel || ({
   FULL_PAYMENT_PAID: '全額已付款', BOOKING_CONFIRMED: '訂位已確認', BOOKING_CANCELLED: '訂位已取消',
   DEPARTURE_OPENED: '出發日開放報名', DEPARTURE_CLOSED: '出發日停止報名',
   DEPARTURE_CANCELLED: '出發日已取消', DEPARTURE_ARCHIVED: '出發日已封存',
-}[event?.eventType] || '行程狀態更新');
+  OPERATION_CONFIRMED: '營運已確認', SERVICE_COMPLETED: '服務已完成',
+}[event?.eventType] || '旅遊狀態已更新');
 
 export const money = (amount, currency = 'TWD') => currency === 'TWD'
   ? `NT$ ${Number(amount || 0).toLocaleString('zh-TW')}`

@@ -80,7 +80,7 @@ const acceptance = [
   ['member booking list wording is exact', member, /aria-label="我的旅遊訂單"[^]*>我的旅遊訂單<\/h2>/],
   ['fully settled wording is exact', member, /isBookingFullyPaid\(state\.booking\)[^]*款項已付清/],
   ['deposit alone cannot satisfy fully-paid display', presentation, /every\(item => item\.status === 'PAID'\)/],
-  ['unknown event has safe zh-TW fallback', presentation, /行程狀態更新/],
+  ['unknown event has safe zh-TW fallback', presentation, /旅遊狀態已更新/],
   ['raw event enum is not rendered as primary text', `${tenant}\n${member}`, /\{event\.eventType\}/, false],
   ['Travel UI does not render raw Commerce references', `${tenant}\n${member}`, /safeOrderReference|paymentObligation|providerTransaction/, false],
   ['Travel UI contains no high-risk identity fields', all, /passport|national.?id|healthData|身分證|護照|病歷/i, false],
@@ -100,6 +100,6 @@ for (const [name, source, pattern, expected = true] of acceptance) test(`8C-UI a
 test('8C-UI behavior: Travel view requires TRAVEL entitlement', () => assert.equal(moduleKeyForView('travel'), 'TRAVEL'));
 test('8C-UI behavior: deposit alone is not fully paid', () => assert.equal(isBookingFullyPaid({ paymentSchedule: [{ paymentLeg: 'DEPOSIT', status: 'PAID' }, { paymentLeg: 'BALANCE', status: 'PENDING' }] }), false));
 test('8C-UI behavior: all required legs paid is fully paid', () => assert.equal(isBookingFullyPaid({ paymentSchedule: [{ paymentLeg: 'DEPOSIT', status: 'PAID' }, { paymentLeg: 'BALANCE', status: 'PAID' }] }), true));
-test('8C-UI behavior: unknown event fallback is safe zh-TW', () => assert.equal(travelEventLabel({ eventType: 'FUTURE_EVENT' }), '行程狀態更新'));
+test('8C-UI behavior: unknown event fallback is safe zh-TW', () => assert.equal(travelEventLabel({ eventType: 'FUTURE_EVENT' }), '旅遊狀態已更新'));
 test('8C-UI behavior: unknown status fallback is not a raw enum', () => assert.equal(travelStatusLabel('FUTURE_STATUS'), '狀態更新'));
 test('8C-UI focused suite contains at least 65 named acceptance checks', () => assert.ok(acceptance.length >= 65, `expected at least 65 checks, received ${acceptance.length}`));
