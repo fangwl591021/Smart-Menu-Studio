@@ -121,6 +121,83 @@ test('reply keeps reviewed DM snapshot separate from current formal Travel facts
   assert.doesNotMatch(reply, /目前可報名/);
 });
 
+class LinkDb {
+  constructor({ itineraryRow = null, departureRow = null, current = null } = {}) {
+    this.itineraryRow = itineraryRow;
+    this.departureRow = departureRow;
+    this.current = current;
+    this.statements = [];
+    this.batches = [];
+  }
+  prepare(sql) {
+    const statement = {
+      sql, bindings: [],
+      bind: (...bindings) => { statement.bindings = bindings; return statement; },
+      first: async () => {
+        if (sql.includes('FROM travel_promotion_documents d')) return { id: 'promotion-internal', active_version_no: 1 };
+        if (sql.includes('FROM travel_departures d JOIN')) return this.departureRow;
+        if (sql.includes('FROM travel_itineraries WHERE')) return this.itineraryRow;
+        if (sql.includes('FROM travel_promotion_formal_links l')) return this.current;
+        return null;
+      },
+    };
+    this.statements.push(statement);
+    return statement;
+  }
+  async batch(statements) {
+    this.batches.push(statements);
+    const insert = statements.find(statement => statement.sql.includes('INSERT INTO travel_promotion_formal_links'));
+    if (insert) this.current = {
+      id: insert.bindings[0], promotion_version_no: 1, itinerary_id: insert.bindings[4], departure_id: insert.bindings[5],
+      itinerary_ref: this.itineraryRow?.public_ref || this.departureRow?.itinerary_ref,
+      itinerary_title: '北海道五日', itinerary_status: 'PUBLISHED',
+      departure_ref: insert.bindings[5] ? 'dep_22222222-2222-2222-8222-222222222222' : null,
+      departure_date: insert.bindings[5] ? '2026-10-10' : null, departure_status: insert.bindings[5] ? 'OPEN' : null,
+    };
+    return statements.map(() => ({ success: true, meta: { changes: 1 } }));
+  }
+}
+
+const linkInput = body => ({ workspaceId: 'workspace-a',
+  promotionReference: 'promotion_33333333-3333-3333-8333-333333333333', userId: 'user-private', body });
+
+test('itinerary-only and departure links resolve safe references and never accept a mismatched parent', async () => {
+  const itineraryDb = new LinkDb({ itineraryRow: { id: 'itinerary-internal', public_ref: 'iti_11111111-1111-1111-8111-111111111111' } });
+  const itineraryLink = await setPromotionFormalLink(itineraryDb, linkInput({ safeItineraryReference: 'iti_11111111-1111-1111-8111-111111111111', safeDepartureReference: null }));
+  assert.equal(itineraryLink.safeItineraryReference, 'iti_11111111-1111-1111-8111-111111111111');
+  assert.equal(itineraryLink.safeDepartureReference, null);
+
+  const departureDb = new LinkDb({ departureRow: { id: 'departure-internal', itinerary_id: 'itinerary-internal', itinerary_ref: 'iti_11111111-1111-1111-8111-111111111111' } });
+  const departureLink = await setPromotionFormalLink(departureDb, linkInput({ safeDepartureReference: 'dep_22222222-2222-2222-8222-222222222222' }));
+  assert.equal(departureLink.safeDepartureReference, 'dep_22222222-2222-2222-8222-222222222222');
+
+  const mismatchDb = new LinkDb({
+    itineraryRow: { id: 'other-itinerary', public_ref: 'iti_44444444-4444-4444-8444-444444444444' },
+    departureRow: { id: 'departure-internal', itinerary_id: 'itinerary-internal', itinerary_ref: 'iti_11111111-1111-1111-8111-111111111111' },
+  });
+  await assert.rejects(() => setPromotionFormalLink(mismatchDb, linkInput({
+    safeItineraryReference: 'iti_44444444-4444-4444-8444-444444444444',
+    safeDepartureReference: 'dep_22222222-2222-2222-8222-222222222222',
+  })), /TRAVEL_PROMOTION_FORMAL_LINK_TARGET_MISMATCH/);
+});
+
+test('invalid or cross-workspace departure is hidden as not found and unlink removes only the link row', async () => {
+  const missingDb = new LinkDb();
+  await assert.rejects(() => setPromotionFormalLink(missingDb, linkInput({
+    safeDepartureReference: 'dep_22222222-2222-2222-8222-222222222222',
+  })), /TRAVEL_PROMOTION_FORMAL_LINK_TARGET_NOT_FOUND/);
+  const departureLookup = missingDb.statements.find(statement => statement.sql.includes('FROM travel_departures d JOIN'));
+  assert.deepEqual(departureLookup.bindings, ['workspace-a', 'dep_22222222-2222-2222-8222-222222222222']);
+
+  const unlinkDb = new LinkDb({ current: { id: 'link-internal', promotion_version_no: 1,
+    itinerary_id: 'itinerary-internal', departure_id: null, itinerary_ref: 'iti_11111111-1111-1111-8111-111111111111',
+    itinerary_title: '北海道五日', itinerary_status: 'PUBLISHED', departure_ref: null } });
+  assert.equal(await setPromotionFormalLink(unlinkDb, linkInput({ safeItineraryReference: null, safeDepartureReference: null })), null);
+  assert.equal(unlinkDb.batches.length, 1);
+  assert.equal(unlinkDb.batches[0].length, 1);
+  assert.match(unlinkDb.batches[0][0].sql, /UPDATE travel_promotion_formal_links/);
+  assert.doesNotMatch(unlinkDb.batches[0][0].sql, /travel_itineraries|travel_departures|commerce_|booking/);
+});
 test('B1 read path reuses Travel services and adds no inferred or mutating domain authority', () => {
   assert.match(service, /readItinerary\(db,/);
   assert.match(service, /readDeparture\(db,/);
