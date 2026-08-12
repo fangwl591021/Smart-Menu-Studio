@@ -38,23 +38,49 @@ test('8F-UI stays inside Travel with the approved three subflows', () => {
   assert.doesNotMatch(app, /id: 'travel-promotions'|id: 'knowledge'/);
 });
 
-test('8F-UI ingest uses existing safe image upload and bounded transient text', () => {
-  for (const value of ['新增宣傳 DM', '上傳 DM 圖片', '貼上 DM 文字', 'image/jpeg,image/png', 'maxLength={20000}', '/ 20,000', '請勿上傳含身分證、護照、健康或金融個資的文件。', '/api/templates/upload-image', 'safeAssetReferences']) assert.ok(promotion.includes(value), `missing ${value}`);
+test('8F-UI ingest is image-first with safe upload and optional bounded supplemental text', () => {
+  for (const value of [
+    '新增宣傳 DM',
+    '上傳 DM 圖片',
+    '補充文字（選填）',
+    'AI 會以圖片內容為主要來源',
+    '上傳 DM → AI 分析 → 自動寫入欄位 → 人工校正 → 核准啟用',
+    'image/jpeg,image/png',
+    'maxLength={20000}',
+    '/ 20,000',
+    '請勿上傳含身分證、護照、健康或金融個資的文件。',
+    '/api/templates/upload-image',
+    'safeAssetReferences',
+  ]) assert.ok(promotion.includes(value), `missing ${value}`);
+  assert.doesNotMatch(promotion, /貼上 DM 文字/);
   assert.doesNotMatch(promotion, /PDF|application\/pdf|storage_key|bucket|Wasabi|base64|localStorage|sessionStorage|indexedDB/i);
-  assert.match(promotion, /DM 是推廣素材，不是正式行程/);
   assert.doesNotMatch(promotion, />新增行程</);
 });
 
-test('8F-UI AI is optional, platform-authoritative, review-only, and never auto-activates', () => {
-  for (const value of ['AI 解析 DM', '正在解析 DM…', 'AI 草稿已產生，請確認內容。', '此工作區尚未啟用 AI 功能。', 'AI 解析內容僅供草稿使用', '/extract']) assert.ok(promotion.includes(value));
+test('8F-UI AI auto-analyzes after ingest, remains review-only, and never auto-activates', () => {
+  for (const value of [
+    '建立並 AI 分析',
+    'AI 正在分析並寫入…',
+    'AI 已完成分析並寫入草稿',
+    '重新 AI 分析',
+    'AI 分析結果僅為草稿',
+    '此工作區尚未啟用 AI',
+    '/extract',
+  ]) assert.ok(promotion.includes(value), `missing ${value}`);
   assert.doesNotMatch(promotion, /GEMINI_API_KEY|OPENAI_API_KEY|apiKey|secret/i);
+  assert.match(promotion, /if \(aiEnabled\) \{[^]*\/extract/);
   assert.match(promotion, /if \(kind === 'ai'\) body = [^;]*\/extract/);
   assert.match(promotion, /if \(kind === 'activate'\) body = [^;]*\/activate/);
   assert.doesNotMatch(promotion, /if \(kind === 'ai'\)[^;]*\/activate/);
 });
 
-test('8F-UI review mirrors exact backend fields, explicit activation, archive, and versions', () => {
-  for (const label of ['標題','摘要','目的地','地區','天數','出發地','日期資訊','價格資訊','優惠／注意事項','行程亮點','關鍵字','FAQ','客服回覆模板','社群宣傳文案','有效期限','核准並啟用','封存素材','目前版本','目前啟用版本','草稿版本']) assert.ok(promotion.includes(label), `missing ${label}`);
+test('8F-UI review mirrors backend fields with original-DM comparison and explicit activation and archive', () => {
+  for (const label of [
+    '原始 DM',
+    'AI 分析結果／人工校正',
+    '標題','摘要','目的地','地區','天數','出發地','日期資訊','價格資訊','優惠／注意事項','行程亮點','關鍵字','FAQ','客服回覆模板','社群宣傳文案','有效期限',
+    '儲存人工校正草稿','核准並啟用','封存素材',
+  ]) assert.ok(promotion.includes(label), `missing ${label}`);
   assert.match(promotion, /confirm\?\.\('確定要啟用這份推廣素材嗎/);
   assert.match(promotion, /confirm\?\.\('封存後將不再提供新的推廣搜尋使用/);
   assert.doesNotMatch(promotion, />刪除|method:\s*'DELETE'/);
