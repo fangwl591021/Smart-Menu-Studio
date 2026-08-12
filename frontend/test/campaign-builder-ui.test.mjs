@@ -17,7 +17,7 @@ const acceptance = [
   ['tenant navigation contains campaign entry', app, /id: 'campaigns', label: '行銷活動'/],
   ['tenant navigation permits campaign view', app, /'crm', 'campaigns', 'commerce', 'travel', 'ai-usage'/],
   ['application imports campaign workspace', app, /import CampaignWorkspace from '\.\/components\/CampaignWorkspace'/],
-  ['application renders campaign workspace', app, /currentView === 'campaigns'[\s\S]*<CampaignWorkspace request=\{authFetch\} userRole=\{activeRole\}/],
+  ['application renders campaign workspace', app, /currentView === 'campaigns'[\s\S]*<CampaignWorkspace[\s\S]*request=\{authFetch\}[\s\S]*userRole=\{activeRole\}/],
   ['campaign workspace exposes stable test landmark', workspace, /data-testid="campaign-workspace"/],
   ['campaign list uses actual list contract', workspace, /requestJson\(request, '\/api\/campaigns'\)/],
   ['campaign list has loading state', workspace, /載入行銷活動中/],

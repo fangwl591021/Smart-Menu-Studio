@@ -13,7 +13,7 @@ const formatTime = (value) => value
   ? new Intl.DateTimeFormat('zh-TW', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
   : '—';
 
-export default function CampaignWorkspace({ request, userRole = 'viewer' }) {
+export default function CampaignWorkspace({ request, userRole = 'viewer', initialCampaign = null, onInitialCampaignConsumed }) {
   const role = String(userRole).toLowerCase();
   const canManage = role === 'owner' || role === 'admin';
   const [campaigns, setCampaigns] = useState([]);
@@ -55,6 +55,13 @@ export default function CampaignWorkspace({ request, userRole = 'viewer' }) {
     void loadCampaigns();
     void loadSegments();
   }, [loadCampaigns, loadSegments]);
+
+  useEffect(() => {
+    if (!initialCampaign?.safeCampaignReference) return;
+    setSelectedCampaign(initialCampaign);
+    setCreating(false);
+    onInitialCampaignConsumed?.();
+  }, [initialCampaign, onInitialCampaignConsumed]);
 
   const openCampaign = async (campaign) => {
     setDetailLoading(true);

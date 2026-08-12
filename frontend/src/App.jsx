@@ -5052,6 +5052,7 @@ function AppShell() {
   const [authReady, setAuthReady] = useState(false);
   const [session, setSession] = useState(null);
   const [moduleNotice, setModuleNotice] = useState('');
+  const [campaignHandoff, setCampaignHandoff] = useState(null);
 
   const isSystemAdmin = Boolean(session?.user?.is_system_admin);
   const isPlatformAdminMode =
@@ -5377,13 +5378,28 @@ function AppShell() {
               <CrmWorkspace request={authFetch} userRole={activeRole} />
             )}
             {currentView === 'campaigns' && !isPlatformAdminMode && tenantViewAccessible && (
-              <CampaignWorkspace request={authFetch} userRole={activeRole} />
+              <CampaignWorkspace
+                request={authFetch}
+                userRole={activeRole}
+                initialCampaign={campaignHandoff}
+                onInitialCampaignConsumed={() => setCampaignHandoff(null)}
+              />
             )}
             {currentView === 'commerce' && !isPlatformAdminMode && tenantViewAccessible && (
               <CommerceAdminWorkspace request={authFetch} userRole={activeRole} />
             )}
             {currentView === 'travel' && !isPlatformAdminMode && tenantViewAccessible && (
-              <TravelWorkspace request={authFetch} userRole={activeRole} />
+              <TravelWorkspace
+                request={authFetch}
+                userRole={activeRole}
+                travelEnabled={moduleAuthority.isEnabled('TRAVEL') === true}
+                campaignEnabled={moduleAuthority.isEnabled('CAMPAIGN') === true}
+                aiEnabled={moduleAuthority.isEnabled('AI') === true}
+                onCampaignCreated={(campaign) => {
+                  setCampaignHandoff(campaign);
+                  setCurrentView('campaigns');
+                }}
+              />
             )}
             {currentView === 'settings' && !isPlatformAdminMode && (
               <>
