@@ -1,3 +1,5 @@
+import { type PromotionLiveTravel, readPromotionLiveTravel } from './promotion-formal-link.ts';
+
 type Row = Record<string, unknown>;
 
 export type PromotionQuery = {
@@ -34,7 +36,7 @@ export type PromotionSearchMatch = {
   matchedFields: string[];
   matchedKeywords: string[];
   promotionSnapshot: Omit<PromotionSearchCandidate, 'safePromotionReference' | 'approvedAt' | 'knowledgeSearchTexts'>;
-  liveTravel: null;
+  liveTravel: PromotionLiveTravel | null;
 };
 
 const MAX_QUERY_LENGTH = 300;
@@ -118,9 +120,24 @@ function candidateFromRow(row: Row, knowledgeSearchTexts: string[]): PromotionSe
   };
 }
 
-function safeMatch(candidate: PromotionSearchCandidate, scored: ReturnType<typeof scorePromotionCandidate>): PromotionSearchMatch {
+function safeMatch(candidate: PromotionSearchCandidate, scored: ReturnType<typeof scorePromotionCandidate>, liveTravel: PromotionLiveTravel | null): PromotionSearchMatch {
   const { safePromotionReference, approvedAt: _approvedAt, knowledgeSearchTexts: _knowledge, ...promotionSnapshot } = candidate;
-  return { safePromotionReference, ...scored, promotionSnapshot, liveTravel: null };
+  return { safePromotionReference, ...scored, promotionSnapshot, liveTravel };
+}
+
+const money = (amountMinor: number, currencyCode: string) => currencyCode === 'TWD'
+  ? `NT$${amountMinor.toLocaleString('en-US')}`
+  : `${currencyCode} ${amountMinor.toLocaleString('en-US')}`;
+
+function liveTravelLines(live: PromotionLiveTravel | null) {
+  if (!live) return [];
+  if (!live.departure) return [`正式行程：${live.itinerary.title}（尚未指定出發日）`];
+  const state = live.departure.status === 'CANCELLED' ? '目前狀態：已取消'
+    : live.soldOut ? '目前狀態：已售罄'
+      : live.currentBookability ? `目前可報名：剩餘 ${live.remainingSeats} 位`
+        : '目前狀態：暫不可報名';
+  return [`正式出發日：${live.departure.departureDate}`, state,
+    live.authoritativePrice ? `目前價格：${money(live.authoritativePrice.amountMinor, live.authoritativePrice.currencyCode)}` : ''];
 }
 
 export function buildDeterministicPromotionReply(query: string, matches: PromotionSearchMatch[]) {
@@ -129,17 +146,21 @@ export function buildDeterministicPromotionReply(query: string, matches: Promoti
     const item = match.promotionSnapshot;
     const details = [item.summary, item.dateTexts.length ? `DM 日期：${item.dateTexts.join('、')}` : '',
       item.pricingTexts.length ? `DM 宣傳價格：${item.pricingTexts.join('、')}` : '',
-      item.departureLocation ? `出發地點：${item.departureLocation}` : ''].filter(Boolean);
+      item.departureLocation ? `出發地點：${item.departureLocation}` : '', ...liveTravelLines(match.liveTravel)].filter(Boolean);
     return `${index + 1}. ${item.title}${details.length ? `\n${details.join('\n')}` : ''}`;
   });
-  return `找到以下現行宣傳內容：\n${lines.join('\n')}\n目前名額與價格仍以最新出發日及行程資料為準，可協助確認。`;
+  const note = matches.some(match => match.liveTravel)
+    ? 'DM 內容保留為審核快照；目前狀態、名額與價格以正式行程資料為準，送出前請再次確認。'
+    : '目前名額與價格仍以最新出發日及行程資料為準，可協助確認。';
+  return `找到以下現行宣傳內容：\n${lines.join('\n')}\n${note}`;
 }
 
 export async function searchTravelPromotionKnowledge(db: D1Database, input: { workspaceId: string; query: unknown; limit?: unknown; now?: Date }) {
   const query = normalizePromotionQuery(input.query);
   const requested = input.limit === undefined ? 5 : Number(input.limit);
   if (!Number.isInteger(requested) || requested < 1 || requested > 10) throw new Error('TRAVEL_PROMOTION_QUERY_INVALID');
-  const now = (input.now || new Date()).toISOString();
+  const nowValue = input.now || new Date();
+  const now = nowValue.toISOString();
   const candidates = (await db.prepare(`SELECT d.public_ref,d.id AS document_id,d.active_version_no,
       v.approved_at,v.title,v.summary,v.destination,v.region,v.days,v.departure_location,
       v.date_texts_json,v.pricing_texts_json,v.promotion_terms_json,v.highlights_json,v.keywords_json,v.faq_json,v.reply_template
@@ -162,12 +183,16 @@ export async function searchTravelPromotionKnowledge(db: D1Database, input: { wo
     .bind(input.workspaceId, now, MAX_KNOWLEDGE_ROWS).all<Row>()).results || [];
   const knowledge = new Map<string, string[]>();
   for (const row of knowledgeRows) knowledge.set(String(row.document_id), [...(knowledge.get(String(row.document_id)) || []), String(row.search_text || '')]);
-  const ranked = candidates.map(row => {
+  const selected = candidates.map(row => {
     const candidate = candidateFromRow(row, knowledge.get(String(row.document_id)) || []);
-    return { candidate, scored: scorePromotionCandidate(query, candidate) };
+    return { documentId: String(row.document_id), activeVersionNo: Number(row.active_version_no), candidate,
+      scored: scorePromotionCandidate(query, candidate) };
   }).filter(item => item.scored.score > 0)
     .sort((a, b) => b.scored.score - a.scored.score || b.candidate.approvedAt.localeCompare(a.candidate.approvedAt)
       || a.candidate.safePromotionReference.localeCompare(b.candidate.safePromotionReference))
-    .slice(0, requested).map(item => safeMatch(item.candidate, item.scored));
+    .slice(0, requested);
+  const ranked = await Promise.all(selected.map(async item => safeMatch(item.candidate, item.scored,
+    await readPromotionLiveTravel(db, { workspaceId: input.workspaceId, documentId: item.documentId,
+      activeVersionNo: item.activeVersionNo, now: nowValue }))));
   return { query: query.original, matches: ranked, replySuggestion: buildDeterministicPromotionReply(query.original, ranked) };
 }

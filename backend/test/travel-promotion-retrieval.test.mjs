@@ -24,7 +24,10 @@ class FakeDb {
   constructor(documents, knowledge) { this.documents = documents; this.knowledge = knowledge; this.sql = []; }
   prepare(sql) {
     this.sql.push(sql);
-    return { bind: (...bindings) => ({ all: async () => ({ results: sql.includes('k.search_text') ? this.knowledge : this.documents, bindings }) }) };
+    return { bind: (...bindings) => ({
+      all: async () => ({ results: sql.includes('k.search_text') ? this.knowledge : this.documents, bindings }),
+      first: async () => null,
+    }) };
   }
 }
 
@@ -111,16 +114,17 @@ test('viewer search route is exact, uses server workspace context, and requires 
   assert.doesNotMatch(route, /executeMeteredAiCall|requestGeminiContent|moduleKey:'AI'/);
 });
 
-test('formal Travel association is not inferred and live enrichment remains stopped at the contract gap', () => {
-  assert.doesNotMatch(source, /travel_itineraries|travel_departures|commerce_products|safeItineraryReference|safeDepartureReference/);
-  assert.match(source, /liveTravel: null/);
+test('formal Travel enrichment is explicit and never inferred from promotion text', () => {
+  assert.match(source, /readPromotionLiveTravel/);
+  assert.match(source, /documentId: String\(row\.document_id\)/);
   assert.doesNotMatch(source, /title.*(?:JOIN|LIKE).*travel_/i);
+  assert.doesNotMatch(source, /destination.*(?:JOIN|LIKE).*travel_/i);
 });
 
 test('retrieval has no writes, LINE/Campaign surface, analytics, vectors, or internal identity projection', () => {
   assert.doesNotMatch(source, /\b(?:INSERT\s+INTO|UPDATE\s+[a-z_]|DELETE\s+FROM|REPLACE\s+INTO)\b/i);
   assert.doesNotMatch(source, /executeMeteredAiCall|requestGemini|fetch\(|\/v2\/bot|webhook|campaign|crm_|referral|dealer|commission|payment|booking|embedding|vector/i);
-  assert.doesNotMatch(source, /lineUser|uid|memberId|workspaceId:\s*input\.workspaceId[,}]/);
+  assert.doesNotMatch(source, /lineUser|uid|memberId/);
   const publicType = source.slice(source.indexOf('export type PromotionSearchMatch'), source.indexOf('const MAX_QUERY_LENGTH'));
   assert.doesNotMatch(publicType, /documentId|versionId|knowledgeEntryId|storageKey|workspaceId/);
 });

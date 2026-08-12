@@ -1,3 +1,5 @@
+import { readPromotionFormalLink } from './promotion-formal-link.ts';
+
 export const TRAVEL_PROMOTION_EXTRACT_SCHEMA = Object.freeze({
   type: 'OBJECT',
   additionalProperties: false,
@@ -187,12 +189,20 @@ async function sourceRows(db: Db, workspaceId: string, documentId: string, versi
     .bind(workspaceId, documentId, versionNo, sourceRevision).all<Row>()).results || [];
 }
 
-async function publicPromotion(db: Db, document: Row): Promise<Record<string, unknown>> {
+async function formalTravelLinkForDocument(db: Db, document: Row) {
+  return readPromotionFormalLink(db, {
+    workspaceId: document.workspace_id,
+    documentId: document.id,
+    activeVersionNo: document.active_version_no ? Number(document.active_version_no) : null,
+  });
+}
+
+async function publicPromotion(db: Db, document: Row, includeFormalLink = false): Promise<Record<string, unknown>> {
   const current = await versionRow(db, document.workspace_id, document.id, Number(document.current_draft_version_no));
   const assets = await sourceRows(db, document.workspace_id, document.id, Number(current.version_no), Number(current.source_revision));
   let active: Row | null = null;
   if (document.active_version_no) active = await versionRow(db, document.workspace_id, document.id, Number(document.active_version_no));
-  return {
+  const result: Record<string, unknown> = {
     safePromotionReference: document.public_ref, status: document.status, displayLabel: document.display_label,
     sourceType: document.source_type, sourceText: current.source_text_snapshot,
     sourceAssets: assets.map(row => ({ safeAssetReference: row.asset_id, assetUrl: `/api/assets/${encodeURIComponent(row.asset_id)}` })),
@@ -203,6 +213,8 @@ async function publicPromotion(db: Db, document: Row): Promise<Record<string, un
     isExpired: Boolean(document.expires_at && Date.parse(document.expires_at) < Date.now()),
     createdAt: document.created_at, updatedAt: document.updated_at,
   };
+  if (includeFormalLink) result.formalTravelLink = await formalTravelLinkForDocument(db, document);
+  return result;
 }
 
 export async function createPromotion(db: Db, input: { workspaceId: string; userId: string | null; body: unknown }) {
@@ -238,7 +250,7 @@ export async function listPromotions(db: Db, workspaceId: string) {
 }
 
 export async function readPromotion(db: Db, workspaceId: string, reference: string) {
-  return publicPromotion(db, await documentRow(db, workspaceId, reference));
+  return publicPromotion(db, await documentRow(db, workspaceId, reference), true);
 }
 
 async function ensureDraft(db: Db, input: { workspaceId: string; reference: string; userId: string | null }) {
