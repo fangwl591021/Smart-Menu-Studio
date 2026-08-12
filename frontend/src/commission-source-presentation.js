@@ -1,5 +1,5 @@
 export const commissionSourceLabel = source => source?.sourceDomain === 'TRAVEL'
-  ? '來源：旅遊報名'
+  ? '來源：旅遊訂單'
   : source?.attributionSource === 'REFERRAL_EVIDENCE'
     ? '推薦證據'
     : '已驗證歸因來源';

@@ -49,9 +49,9 @@ test('8D-UI booking detail renders only the safe immutable seller snapshot or no
 test('8D-UI Commission labels Travel only from sourceDomain and preserves attributionSource labels', () => {
   const travelSource = { attributionSource: 'REFERRAL_EVIDENCE', sourceDomain: 'TRAVEL' };
   const referralSource = { attributionSource: 'REFERRAL_EVIDENCE', sourceDomain: null };
-  assert.equal(commissionSourceLabel(travelSource), '來源：旅遊報名');
+  assert.equal(commissionSourceLabel(travelSource), '來源：旅遊訂單');
   assert.equal(commissionSourceLabel(referralSource), '推薦證據');
-  assert.notEqual(commissionSourceLabel(referralSource), '來源：旅遊報名');
+  assert.notEqual(commissionSourceLabel(referralSource), '來源：旅遊訂單');
   for (const source of [tenantCommission, dealerCommission]) {
     assert.match(source, /commissionSourceLabel\(source\)/);
     assert.match(source, /commissionSourceKey\(source\)/);

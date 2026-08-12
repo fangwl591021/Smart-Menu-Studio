@@ -10,7 +10,7 @@ test('member self attribution uses only the existing LIFF-scoped API and backend
   const pageSource = await page();
   for (const value of ['我的已歸因轉換', '/api/member/dealer/commission-attributions?period=', "['7d', '30d']", 'attributedConversions', 'trend', 'programs', 'sources', 'commissionSourceLabel(source)']) assert.ok(pageSource.includes(value));
   const labels = await readFile(new URL('../src/commission-source-presentation.js', import.meta.url), 'utf8');
-  for (const value of ['REFERRAL_EVIDENCE', '推薦證據', 'sourceDomain', 'TRAVEL', '來源：旅遊報名']) assert.ok(labels.includes(value));
+  for (const value of ['REFERRAL_EVIDENCE', '推薦證據', 'sourceDomain', 'TRAVEL', '來源：旅遊訂單']) assert.ok(labels.includes(value));
   assert.match(source, /data\.status === 'NOT_ENROLLED'/);
   assert.match(source, /目前尚未加入經銷商方案/);
   assert.match(source, /目前尚無已歸因轉換/);
