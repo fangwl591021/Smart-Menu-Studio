@@ -85,14 +85,17 @@ export function classifyLinePushStatus(status: number, acceptedRequestId = ''): 
   return { accepted: false, providerStatusCode: status, safeErrorCode: 'LINE_PROVIDER_REJECTED', retryable: false, alreadyAccepted: false };
 }
 
-export async function sendLineTextPush(input: {
+export async function sendLineMessagesPush(input: {
   channelAccessToken: string;
   providerRecipientId: string;
-  text: string;
+  messages: readonly Record<string, unknown>[];
   retryKey: string;
   fetcher?: typeof fetch;
   timeoutMs?: number;
 }): Promise<LinePushResult> {
+  if (!Array.isArray(input.messages) || input.messages.length < 1 || input.messages.length > 5) {
+    throw new Error('CAMPAIGN_EXECUTION_CONTENT_INVALID');
+  }
   const fetcher = input.fetcher || fetch;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort('LINE_TIMEOUT'), input.timeoutMs || LINE_PUSH_TIMEOUT_MS);
@@ -104,22 +107,31 @@ export async function sendLineTextPush(input: {
         'Content-Type': 'application/json',
         'X-Line-Retry-Key': input.retryKey,
       },
-      body: JSON.stringify({
-        to: input.providerRecipientId,
-        messages: [{ type: 'text', text: input.text }],
-      }),
+      body: JSON.stringify({ to: input.providerRecipientId, messages: input.messages }),
       signal: controller.signal,
     });
     return classifyLinePushStatus(response.status, response.headers.get('x-line-accepted-request-id') || '');
   } catch {
-    return {
-      accepted: false,
-      providerStatusCode: null,
-      safeErrorCode: 'LINE_TIMEOUT',
-      retryable: true,
-      alreadyAccepted: false,
-    };
+    return { accepted: false, providerStatusCode: null, safeErrorCode: 'LINE_TIMEOUT', retryable: true, alreadyAccepted: false };
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function sendLineTextPush(input: {
+  channelAccessToken: string;
+  providerRecipientId: string;
+  text: string;
+  retryKey: string;
+  fetcher?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<LinePushResult> {
+  return sendLineMessagesPush({
+    channelAccessToken: input.channelAccessToken,
+    providerRecipientId: input.providerRecipientId,
+    messages: [{ type: 'text', text: input.text }],
+    retryKey: input.retryKey,
+    fetcher: input.fetcher,
+    timeoutMs: input.timeoutMs,
+  });
 }

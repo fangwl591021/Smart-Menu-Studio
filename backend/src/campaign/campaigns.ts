@@ -4,6 +4,7 @@ import {
   evaluateCampaignAudience,
   type CampaignAudienceSource,
 } from './audiences';
+import { composeTravelPromotions } from '../travel/promotion-composer.ts';
 
 export const CAMPAIGN_TEXT_MAX_LENGTH = 5000;
 const clean = (value: unknown, maximum = 160) => typeof value === 'string' ? value.trim().slice(0, maximum) : '';
@@ -40,6 +41,10 @@ type ContentVersionRow = Record<string, unknown> & {
   content_type: string;
   payload_json: string;
   created_at: string;
+};
+
+type ResolvedCampaignContent = ReturnType<typeof validateCampaignContent> & {
+  structured?: { format: string; payloadJson: string };
 };
 
 type PrepareActionRow = Record<string, unknown> & {
@@ -109,7 +114,25 @@ function parseContent(row: ContentVersionRow) {
     contentType: 'TEXT',
     text,
     createdAt: row.created_at || null,
+    structuredContent: row.structured_payload_json ? {
+      schemaVersion: Number(row.structured_schema_version || 0),
+      messageType: String(row.structured_message_type || ''),
+      format: String(row.structured_format || ''),
+      payload: (() => { try { return JSON.parse(String(row.structured_payload_json)); } catch { return null; } })(),
+    } : null,
   };
+}
+
+async function resolveCampaignContent(db: D1Database, input: { workspaceId: string; content: unknown; publicBaseUrl: string }): Promise<ResolvedCampaignContent> {
+  if (input.content && typeof input.content === 'object' && !Array.isArray(input.content)
+    && (input.content as Record<string, unknown>).contentType === 'TRAVEL_PROMOTION') {
+    const record = input.content as Record<string, unknown>;
+    if (!exactKeys(record, ['contentType', 'composition'])) throw new Error('CAMPAIGN_CONTENT_INVALID');
+    const composed = await composeTravelPromotions(db, { workspaceId: input.workspaceId, body: record.composition, publicBaseUrl: input.publicBaseUrl || 'https://invalid.local' });
+    const fallback = validateCampaignContent({ contentType: 'TEXT', text: composed.fallbackText });
+    return { ...fallback, structured: { format: composed.format, payloadJson: composed.payloadJson } };
+  }
+  return validateCampaignContent(input.content);
 }
 
 function publicCampaign(row: CampaignRow) {
@@ -151,8 +174,12 @@ async function campaignRowByReference(db: D1Database, workspaceId: string, safeC
 }
 
 async function contentHistory(db: D1Database, workspaceId: string, campaignId: string) {
-  const versions = await db.prepare(`SELECT version_no,content_type,payload_json,created_at
-    FROM campaign_content_versions WHERE workspace_id=? AND campaign_id=?
+  const versions = await db.prepare(`SELECT v.version_no,v.content_type,v.payload_json,v.created_at,
+      x.schema_version structured_schema_version,x.message_type structured_message_type,
+      x.presentation_format structured_format,x.payload_json structured_payload_json
+    FROM campaign_content_versions v LEFT JOIN campaign_structured_content_extensions x
+      ON x.workspace_id=v.workspace_id AND x.campaign_id=v.campaign_id AND x.content_version_no=v.version_no
+    WHERE v.workspace_id=? AND v.campaign_id=?
     ORDER BY version_no DESC LIMIT 100`).bind(workspaceId, campaignId).all<ContentVersionRow>();
   return (versions.results || []).map(parseContent);
 }
@@ -181,6 +208,7 @@ export async function createCampaign(db: D1Database, input: {
   name: unknown;
   description?: unknown;
   content: unknown;
+  publicBaseUrl?: string;
   userId?: string | null;
 }) {
   const name = clean(input.name, 120);
@@ -188,12 +216,12 @@ export async function createCampaign(db: D1Database, input: {
   const conflict = await db.prepare('SELECT id FROM campaigns WHERE workspace_id=? AND lower(name)=lower(?) LIMIT 1')
     .bind(input.workspaceId, name).first();
   if (conflict) throw new Error('CAMPAIGN_NAME_CONFLICT');
-  const content = validateCampaignContent(input.content);
+  const content = await resolveCampaignContent(db, { workspaceId: input.workspaceId, content: input.content, publicBaseUrl: input.publicBaseUrl || 'https://invalid.local' });
   const description = clean(input.description, 1000) || null;
   const campaignId = internalId('camp');
   const campaignRef = publicReference();
   const contentId = internalId('campcv');
-  const results = await db.batch([
+  const statements: D1PreparedStatement[] = [
     db.prepare(`INSERT INTO campaigns(
       id,public_ref,workspace_id,name,description,status,current_content_version_no,created_by_user_id
     ) VALUES(?,?,?,?,?,'DRAFT',0,?)`).bind(
@@ -204,11 +232,18 @@ export async function createCampaign(db: D1Database, input: {
     ) VALUES(?,?,?,1,'TEXT',?,?,?)`).bind(
       contentId, input.workspaceId, campaignId, content.payloadJson, content.textLength, input.userId || null,
     ),
-    db.prepare(`UPDATE campaigns SET current_content_version_no=1,updated_at=CURRENT_TIMESTAMP
+  ];
+  if (content.structured) statements.push(db.prepare(`INSERT INTO campaign_structured_content_extensions(
+      id,workspace_id,campaign_id,content_version_no,schema_version,message_type,presentation_format,payload_json,fallback_text,created_by_user_id
+    ) VALUES(?,?,?,?,1,'TRAVEL_PROMOTION',?,?,?,?)`).bind(
+      internalId('campstr'), input.workspaceId, campaignId, 1, content.structured.format,
+      content.structured.payloadJson, content.text, input.userId || null,
+    ));
+  statements.push(db.prepare(`UPDATE campaigns SET current_content_version_no=1,updated_at=CURRENT_TIMESTAMP
       WHERE id=? AND workspace_id=? AND public_ref=? AND status='DRAFT' AND current_content_version_no=0`)
-      .bind(campaignId, input.workspaceId, campaignRef),
-  ]);
-  if (Number(results[2]?.meta?.changes || 0) !== 1) throw new Error('CAMPAIGN_CREATE_CONFLICT');
+      .bind(campaignId, input.workspaceId, campaignRef));
+  const results = await db.batch(statements);
+  if (Number(results[results.length - 1]?.meta?.changes || 0) !== 1) throw new Error('CAMPAIGN_CREATE_CONFLICT');
   return campaignByReference(db, input.workspaceId, campaignRef);
 }
 
@@ -216,6 +251,7 @@ export async function updateCampaign(db: D1Database, input: {
   workspaceId: string;
   safeCampaignReference: string;
   patch: unknown;
+  publicBaseUrl?: string;
   userId?: string | null;
 }) {
   if (!input.patch || typeof input.patch !== 'object' || Array.isArray(input.patch)) throw new Error('CAMPAIGN_PATCH_INVALID');
@@ -233,18 +269,25 @@ export async function updateCampaign(db: D1Database, input: {
   const statements: D1PreparedStatement[] = [];
   let nextVersion = Number(current.current_content_version_no);
   if (Object.prototype.hasOwnProperty.call(patch, 'content')) {
-    const content = validateCampaignContent(patch.content);
-    const latest = await db.prepare(`SELECT payload_json FROM campaign_content_versions
-      WHERE workspace_id=? AND campaign_id=? AND version_no=? LIMIT 1`)
+    const content = await resolveCampaignContent(db, { workspaceId: input.workspaceId, content: patch.content, publicBaseUrl: input.publicBaseUrl || 'https://invalid.local' });
+    const latest = await db.prepare(`SELECT v.payload_json,x.payload_json structured_payload_json FROM campaign_content_versions v
+      LEFT JOIN campaign_structured_content_extensions x ON x.workspace_id=v.workspace_id AND x.campaign_id=v.campaign_id AND x.content_version_no=v.version_no
+      WHERE v.workspace_id=? AND v.campaign_id=? AND v.version_no=? LIMIT 1`)
       .bind(input.workspaceId, current.id, current.current_content_version_no).first<Record<string, unknown>>();
     if (!latest) throw new Error('CAMPAIGN_CONTENT_NOT_FOUND');
-    if (String(latest.payload_json) !== content.payloadJson) {
+    if (String(latest.payload_json) !== content.payloadJson || String(latest.structured_payload_json || '') !== String(content.structured?.payloadJson || '')) {
       nextVersion += 1;
       statements.push(db.prepare(`INSERT INTO campaign_content_versions(
         id,workspace_id,campaign_id,version_no,content_type,payload_json,text_length,created_by_user_id
       ) VALUES(?,?,?,?, 'TEXT',?,?,?)`).bind(
         internalId('campcv'), input.workspaceId, current.id, nextVersion,
         content.payloadJson, content.textLength, input.userId || null,
+      ));
+      if (content.structured) statements.push(db.prepare(`INSERT INTO campaign_structured_content_extensions(
+        id,workspace_id,campaign_id,content_version_no,schema_version,message_type,presentation_format,payload_json,fallback_text,created_by_user_id
+      ) VALUES(?,?,?,?,1,'TRAVEL_PROMOTION',?,?,?,?)`).bind(
+        internalId('campstr'), input.workspaceId, current.id, nextVersion, content.structured.format,
+        content.structured.payloadJson, content.text, input.userId || null,
       ));
     }
   }

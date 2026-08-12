@@ -11,8 +11,16 @@ import {
   updateCampaign,
 } from './campaigns';
 import { resolveSegmentReferences } from '../crm/segment-routes';
+import { requireWorkspaceModule } from '../modules/entitlements.ts';
 
 const KNOWN_ERROR = /^CAMPAIGN_[A-Z0-9_]+$/;
+
+async function requireStructuredTravelModules(c: any, content: unknown, workspaceId: string) {
+  if (!content || typeof content !== 'object' || Array.isArray(content)
+    || (content as Record<string, unknown>).contentType !== 'TRAVEL_PROMOTION') return;
+  await requireWorkspaceModule({ db: c.env.smart_menu_db, workspaceId, moduleKey: 'CAMPAIGN' });
+  await requireWorkspaceModule({ db: c.env.smart_menu_db, workspaceId, moduleKey: 'TRAVEL' });
+}
 
 function fail(c: any, error: unknown, fallback: string) {
   const raw = error instanceof Error ? error.message : '';
@@ -50,11 +58,14 @@ export function registerCampaignRoutes(app: any, deps: any) {
     try {
       deps.requireRole(c, 'admin');
       const body: any = await c.req.json().catch(() => ({}));
+      const workspaceId = deps.workspaceIdOf(c);
+      await requireStructuredTravelModules(c, body.content, workspaceId);
       const campaign = await createCampaign(c.env.smart_menu_db, {
-        workspaceId: deps.workspaceIdOf(c),
+        workspaceId,
         name: body.name,
         description: body.description,
         content: body.content,
+        publicBaseUrl: new URL(c.req.url).origin,
         userId: deps.text(c.get('userId')) || null,
       });
       return c.json({ success: true, campaign }, 201);
@@ -81,10 +92,13 @@ export function registerCampaignRoutes(app: any, deps: any) {
     try {
       deps.requireRole(c, 'admin');
       const patch: any = await c.req.json().catch(() => ({}));
+      const workspaceId = deps.workspaceIdOf(c);
+      await requireStructuredTravelModules(c, patch.content, workspaceId);
       const campaign = await updateCampaign(c.env.smart_menu_db, {
-        workspaceId: deps.workspaceIdOf(c),
+        workspaceId,
         safeCampaignReference: deps.text(c.req.param('safeCampaignReference'), 100),
         patch,
+        publicBaseUrl: new URL(c.req.url).origin,
         userId: deps.text(c.get('userId')) || null,
       });
       return c.json({ success: true, campaign });

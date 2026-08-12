@@ -1,4 +1,5 @@
-import { preflightLineCampaignSend, sendLineTextPush, type LinePushResult } from './line-push.ts';
+import { preflightLineCampaignSend, sendLineMessagesPush, sendLineTextPush, type LinePushResult } from './line-push.ts';
+import { validateStructuredTravelEnvelope } from '../travel/promotion-composer.ts';
 
 export const CAMPAIGN_EXECUTION_MAX_RECIPIENTS = 100;
 export const CAMPAIGN_DELIVERY_MAX_ATTEMPTS = 3;
@@ -47,6 +48,8 @@ type CampaignExecutionContext = {
   snapshotId: string;
   contentVersionNo: number;
   text: string;
+  messages: Record<string, unknown>[];
+  selectedPromotions: Array<{ safeDepartureReference: string | null; bookableAtCompose: boolean }>;
   totalRecipientCount: number;
   eligibleRecipientCount: number;
   lineAccountId: string;
@@ -112,8 +115,11 @@ export async function campaignProviderRequestHash(input: {
   lineMemberId: string | null;
   providerRecipientId: string | null;
   contentVersionNo: number;
-  text: string;
+  text?: string;
+  messages?: readonly Record<string, unknown>[];
 }) {
+  const fallback = { messages: [{ type: 'text', text: input.text }] };
+  const messages = input.messages || fallback.messages;
   return sha256Hex(JSON.stringify({
     version: 1,
     workspaceId: input.workspaceId,
@@ -122,7 +128,7 @@ export async function campaignProviderRequestHash(input: {
     lineMemberId: input.lineMemberId,
     providerRecipientId: input.providerRecipientId,
     contentVersionNo: input.contentVersionNo,
-    messages: [{ type: 'text', text: input.text }],
+    messages,
   }));
 }
 
@@ -142,6 +148,36 @@ function frozenText(contentType: unknown, payloadJson: unknown) {
   const text = record.text;
   if (!text.trim() || Array.from(text).length > 5000) throw new Error('CAMPAIGN_EXECUTION_CONTENT_INVALID');
   return text;
+}
+
+function frozenMessages(text: string, payloadJson: unknown) {
+  if (!payloadJson) return { messages: [{ type: 'text', text }] as Record<string, unknown>[], selectedPromotions: [] };
+  let parsed: unknown;
+  try { parsed = JSON.parse(String(payloadJson)); } catch { throw new Error('CAMPAIGN_STRUCTURED_CONTENT_INVALID'); }
+  const { envelope } = validateStructuredTravelEnvelope(parsed);
+  const selectedPromotions = (envelope.selectedPromotions as Array<Record<string, unknown>>).map(item => ({
+    safeDepartureReference: typeof item.safeDepartureReference === 'string' ? item.safeDepartureReference : null,
+    bookableAtCompose: item.bookableAtCompose === true,
+  }));
+  return { messages: envelope.messages as Record<string, unknown>[], selectedPromotions };
+}
+
+async function assertCurrentTravelSafety(db: D1Database, workspaceId: string, selections: CampaignExecutionContext['selectedPromotions']) {
+  for (const selection of selections) {
+    if (!selection.bookableAtCompose || !selection.safeDepartureReference) continue;
+    const row = await db.prepare(`SELECT d.status,d.booking_opens_at,d.booking_closes_at,d.seat_limit,i.status itinerary_status,
+        COALESCE((SELECT SUM(b.traveler_count) FROM travel_booking_extensions b
+          WHERE b.workspace_id=d.workspace_id AND b.departure_id=d.id AND b.booking_status<>'CANCELLED'),0) reserved_count
+      FROM travel_departures d JOIN travel_itineraries i ON i.workspace_id=d.workspace_id AND i.id=d.itinerary_id
+      WHERE d.workspace_id=? AND d.public_ref=? LIMIT 1`)
+      .bind(workspaceId, selection.safeDepartureReference).first<Record<string, unknown>>();
+    const current = new Date().toISOString();
+    if (!row || String(row.itinerary_status) !== 'PUBLISHED' || String(row.status) !== 'OPEN'
+      || current < String(row.booking_opens_at) || current > String(row.booking_closes_at)
+      || Number(row.seat_limit) - Number(row.reserved_count || 0) <= 0) {
+      throw new Error('CAMPAIGN_STRUCTURED_TRAVEL_NOT_AVAILABLE');
+    }
+  }
 }
 
 async function replayExecutionByAction(db: D1Database, input: {
@@ -179,12 +215,15 @@ async function preparedContext(db: D1Database, workspaceId: string, safeCampaign
   const contentVersionNo = Number(campaign.prepared_content_version_no || 0);
   if (!audienceId || audienceVersionNo < 1 || contentVersionNo < 1) throw new Error('CAMPAIGN_EXECUTION_PREPARED_BINDING_INVALID');
 
-  const [snapshot, content, account] = await Promise.all([
+  const [snapshot, content, extension, account] = await Promise.all([
     db.prepare(`SELECT id,matched_count,eligible_count FROM campaign_audience_snapshots
       WHERE workspace_id=? AND audience_id=? AND snapshot_no=? LIMIT 1`)
       .bind(workspaceId, audienceId, audienceVersionNo).first<Record<string, unknown>>(),
     db.prepare(`SELECT content_type,payload_json FROM campaign_content_versions
       WHERE workspace_id=? AND campaign_id=? AND version_no=? LIMIT 1`)
+      .bind(workspaceId, campaignId, contentVersionNo).first<Record<string, unknown>>(),
+    db.prepare(`SELECT payload_json,fallback_text FROM campaign_structured_content_extensions
+      WHERE workspace_id=? AND campaign_id=? AND content_version_no=? LIMIT 1`)
       .bind(workspaceId, campaignId, contentVersionNo).first<Record<string, unknown>>(),
     db.prepare(`SELECT id,line_bot_channel_access_token FROM workspace_line_accounts
       WHERE workspace_id=? ORDER BY created_at ASC,id ASC LIMIT 1`)
@@ -203,6 +242,9 @@ async function preparedContext(db: D1Database, workspaceId: string, safeCampaign
   }
   if (eligible > CAMPAIGN_EXECUTION_MAX_RECIPIENTS) throw new Error('CAMPAIGN_EXECUTION_TOO_LARGE');
 
+  const text = frozenText(content.content_type, content.payload_json);
+  if (extension && String(extension.fallback_text) !== text) throw new Error('CAMPAIGN_STRUCTURED_CONTENT_INVALID');
+  const frozen = frozenMessages(text, extension?.payload_json);
   return {
     campaignId,
     campaignReference: clean(campaign.public_ref, 100),
@@ -210,7 +252,9 @@ async function preparedContext(db: D1Database, workspaceId: string, safeCampaign
     audienceVersionNo,
     snapshotId: clean(snapshot.id),
     contentVersionNo,
-    text: frozenText(content.content_type, content.payload_json),
+    text,
+    messages: frozen.messages,
+    selectedPromotions: frozen.selectedPromotions,
     totalRecipientCount: matched,
     eligibleRecipientCount: eligible,
     lineAccountId: clean(account.id),
@@ -344,7 +388,7 @@ async function createExecution(db: D1Database, input: {
       lineMemberId: recipient.lineMemberId,
       providerRecipientId: recipient.providerRecipientId,
       contentVersionNo: input.context.contentVersionNo,
-      text: input.context.text,
+      messages: input.context.messages,
     });
     statements.push(db.prepare(`INSERT INTO campaign_deliveries(
       id,public_ref,execution_id,workspace_id,campaign_id,audience_id,audience_version_no,crm_person_id,
@@ -537,7 +581,7 @@ async function runExecution(db: D1Database, input: {
       lineMemberId: clean(row.line_member_id) || null,
       providerRecipientId: recipient,
       contentVersionNo: input.context.contentVersionNo,
-      text: input.context.text,
+      messages: input.context.messages,
     });
     if (currentRequestHash !== row.provider_request_hash) {
       await recordUnsendable(db, input.workspaceId, row.id);
@@ -557,13 +601,9 @@ async function runExecution(db: D1Database, input: {
         AND NOT EXISTS(SELECT 1 FROM campaign_executions e WHERE e.id=execution_id AND e.workspace_id=workspace_id AND e.status='CANCELLED')`)
       .bind(continuingUncertainAttempt ? 0 : 1, input.workspaceId, row.id, row.attempt_count).run();
     if (Number(claimed.meta.changes || 0) !== 1) continue;
-    const result = await sendLineTextPush({
-      channelAccessToken: input.context.channelAccessToken,
-      providerRecipientId: recipient,
-      text: input.context.text,
-      retryKey: row.provider_retry_key,
-      fetcher: input.fetcher,
-    });
+    const result = input.context.messages.length === 1 && input.context.messages[0].type === 'text'
+      ? await sendLineTextPush({ channelAccessToken: input.context.channelAccessToken, providerRecipientId: recipient, text: input.context.text, retryKey: row.provider_retry_key, fetcher: input.fetcher })
+      : await sendLineMessagesPush({ channelAccessToken: input.context.channelAccessToken, providerRecipientId: recipient, messages: input.context.messages, retryKey: row.provider_retry_key, fetcher: input.fetcher });
     await recordProviderResult(db, input.workspaceId, row, attemptNo, result);
     if (result.safeErrorCode === 'LINE_RATE_LIMITED' || result.safeErrorCode === 'LINE_INVALID_CREDENTIAL') break;
   }
@@ -580,6 +620,7 @@ export async function executePreparedCampaign(db: D1Database, input: {
   const replay = await replayExecutionByAction(db, input);
   if (replay) return projectExecution(db, input.workspaceId, replay, true);
   const context = await preparedContext(db, input.workspaceId, input.safeCampaignReference);
+  await assertCurrentTravelSafety(db, input.workspaceId, context.selectedPromotions);
   const preflight = await preflightLineCampaignSend({
     channelAccessToken: context.channelAccessToken,
     recipientCount: context.eligibleRecipientCount,
@@ -621,6 +662,7 @@ export async function resumeCampaignExecution(db: D1Database, input: {
   const context = await contextForExecution(db, input.workspaceId, input.safeCampaignReference, execution);
   const work = await resumeWorkRows(db, { workspaceId: input.workspaceId, execution, lineAccountId: context.lineAccountId });
   if (!work.length) throw new Error('CAMPAIGN_EXECUTION_NOT_RESUMABLE');
+  await assertCurrentTravelSafety(db, input.workspaceId, context.selectedPromotions);
   const preflight = await preflightLineCampaignSend({
     channelAccessToken: context.channelAccessToken,
     recipientCount: work.length,
