@@ -1,4 +1,5 @@
 import type { CommercePaymentLeg } from '../commerce/payment-obligations';
+import { projectTravelCommissionEligibility } from './seller-commission.ts';
 
 const eventId = () => `tre_${crypto.randomUUID().replace(/-/g, '')}`;
 
@@ -12,6 +13,7 @@ export async function projectTravelPaymentMilestone(db: D1Database, input: {
   orderId: string;
   paymentLeg: CommercePaymentLeg;
   occurredAt: string;
+  secret?: string;
 }) {
   const booking = await db.prepare(`
     SELECT id,departure_id,booking_status
@@ -53,5 +55,8 @@ export async function projectTravelPaymentMilestone(db: D1Database, input: {
     `).bind(targetStatus, input.occurredAt, input.workspaceId, booking.id));
   }
   if (statements.length) await db.batch(statements);
-  return { projected: statements.length > 0, bookingStatus: targetStatus };
+  const commission = fullyPaid ? await projectTravelCommissionEligibility(db, {
+    secret: input.secret || '', workspaceId: input.workspaceId, orderId: input.orderId, occurredAt: input.occurredAt,
+  }) : { projected: false, reason: 'ORDER_NOT_FULLY_SETTLED' as const };
+  return { projected: statements.length > 0, bookingStatus: targetStatus, commission };
 }

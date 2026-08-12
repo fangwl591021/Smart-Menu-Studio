@@ -97,7 +97,7 @@ test('0028 is additive, immutable-ledger-only, and calculation hook is fail-safe
   assert.doesNotMatch(migration, /(?:^|;)\s*(?:ALTER TABLE|UPDATE|DELETE FROM|DROP TABLE)\b/im);
   for (const forbidden of ['percentage', 'tier', 'payout', 'settlement', 'payable', 'paid', 'points', 'reward', 'line_identity_hash', 'access_token', 'referral_code', 'flow_token']) assert.equal(migration.toLowerCase().includes(forbidden), false);
   assert.match(attribution, /INSERT INTO commission_attributions[\s\S]*calculateCommissionForAttribution[\s\S]*\.catch\(\(\) => \{\}\)/);
-  assert.match(attribution, /if \(Number\(result\?\.meta\?\.changes \|\| 0\) !== 1\) return \{ reason: 'ALREADY_ATTRIBUTED'/);
+  assert.match(attribution, /if \(Number\(result\?\.meta\?\.changes \|\| 0\) !== 1\) \{[^]*SELECT id FROM commission_attributions[^]*calculateCommissionForAttribution[^]*return \{ reason: 'ALREADY_ATTRIBUTED'/);
   const rules = index.slice(index.indexOf("app.get('/api/commission-programs/:programId/rules'"), index.indexOf("app.post('/api/commission-programs/:programId/status'"));
   assert.match(rules, /requireRole\(c,'viewer'\)/);
   assert.match(rules, /requireRole\(c,'admin'\)/);

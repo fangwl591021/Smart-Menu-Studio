@@ -54,11 +54,20 @@ export async function evaluateCommissionAttribution(db: D1Database, input: { wor
 }
 
 export async function establishCommissionAttribution(db: D1Database, input: { workspaceId: string; lineAccountId: string; conversionReferralEvidenceId: string }) {
+  const existing: any = await db.prepare('SELECT id FROM commission_attributions WHERE workspace_id=? AND line_account_id=? AND conversion_referral_evidence_id=? LIMIT 1').bind(input.workspaceId, input.lineAccountId, input.conversionReferralEvidenceId).first();
+  if (existing) {
+    await calculateCommissionForAttribution(db, { workspaceId: input.workspaceId, lineAccountId: input.lineAccountId, commissionAttributionId: String(existing.id) }).catch(() => {});
+    return { reason: 'ALREADY_ATTRIBUTED' as const };
+  }
   const decision = await evaluateCommissionAttribution(db, input);
   if (decision.reason !== 'ATTRIBUTED') return decision;
   const attributionId = `cat_${crypto.randomUUID()}`;
   const result: any = await db.prepare("INSERT INTO commission_attributions(id,workspace_id,line_account_id,conversion_event_id,conversion_referral_evidence_id,member_referral_attribution_id,program_id,dealer_id,attribution_source,attributed_at) VALUES(?,?,?,?,?,?,?,?, 'REFERRAL_EVIDENCE',?) ON CONFLICT DO NOTHING").bind(attributionId, input.workspaceId, input.lineAccountId, decision.conversionEventId, input.conversionReferralEvidenceId, decision.memberReferralAttributionId, decision.programId, decision.dealerId, decision.attributedAt).run();
-  if (Number(result?.meta?.changes || 0) !== 1) return { reason: 'ALREADY_ATTRIBUTED' as const };
+  if (Number(result?.meta?.changes || 0) !== 1) {
+    const existing: any = await db.prepare('SELECT id FROM commission_attributions WHERE workspace_id=? AND line_account_id=? AND conversion_referral_evidence_id=? LIMIT 1').bind(input.workspaceId, input.lineAccountId, input.conversionReferralEvidenceId).first();
+    if (existing) await calculateCommissionForAttribution(db, { workspaceId: input.workspaceId, lineAccountId: input.lineAccountId, commissionAttributionId: String(existing.id) }).catch(() => {});
+    return { reason: 'ALREADY_ATTRIBUTED' as const };
+  }
   await calculateCommissionForAttribution(db, { workspaceId: input.workspaceId, lineAccountId: input.lineAccountId, commissionAttributionId: attributionId }).catch(() => {});
   return decision;
 }

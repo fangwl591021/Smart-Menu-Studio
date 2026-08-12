@@ -79,7 +79,7 @@ for (const [name, source, pattern] of contracts) test(name, () => assert.match(s
 class Statement {
   constructor(db, sql) { this.db=db; this.sql=sql.replace(/\s+/g,' ').trim(); this.values=[]; }
   bind(...values){this.values=values;return this;}
-  async first(){if(this.sql.startsWith('SELECT id,departure_id,booking_status'))return this.db.booking;throw new Error(`Unexpected first: ${this.sql}`);}
+  async first(){if(this.sql.startsWith('SELECT id,departure_id,booking_status'))return this.db.booking;if(this.sql.startsWith('SELECT s.booking_id'))return null;throw new Error(`Unexpected first: ${this.sql}`);}
   async all(){if(this.sql.startsWith('SELECT payment_leg,status'))return {results:this.db.obligations};throw new Error(`Unexpected all: ${this.sql}`);}
   async run(){if(this.sql.startsWith('UPDATE travel_booking_extensions')){this.db.booking.booking_status=this.values[0];return;}if(this.sql.startsWith('INSERT INTO travel_events')){const key=this.values[5];if(!this.db.events.has(key))this.db.events.add(key);return;}throw new Error(`Unexpected run: ${this.sql}`);}
 }
