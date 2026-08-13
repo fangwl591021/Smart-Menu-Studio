@@ -22,10 +22,11 @@ test('card actions preserve review reanalysis and archive without hard delete', 
   for (const label of ['查看素材確認', '重算／封存', '重新 AI 解析', '封存素材']) assert.ok(source.includes(label), `missing ${label}`);
   assert.doesNotMatch(source, /method:\s*'DELETE'|原始 Flex JSON|立即群發|直接推播|直接發送 LINE/);
 });
-test('promotion composer mirrors the image-selection workbench without adding send authority', () => {
-  for (const label of ['Promotion Composer', '選擇推廣素材', '全選可用素材', '清除勾選', '設定呈現格式', 'Server Preview', 'Campaign Handoff']) assert.ok(source.includes(label), `missing ${label}`);
-  assert.match(source, /grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-6/);
-  assert.match(source, /active\.slice\(0, 10\)\.map\(item => item\.safePromotionReference\)/);
-  assert.match(source, /state\.composition && <section/);
+test('promotion composer is a simple select preview share flow without send authority', () => {
+  for (const label of ['快速製作', '1 選擇素材', '2 產生預覽', '3 分享內容', '系統建議', '更多版型選項', '分享推廣內容', '複製文字']) assert.ok(source.includes(label), `missing ${label}`);
+  assert.match(source, /selected\.length === 1 \? 'SINGLE' : 'CAROUSEL'/);
+  assert.match(source, /navigator\.share\(\{ title: headline\.trim\(\) \|\| '旅遊推廣內容', text \}\)/);
+  assert.match(source, /navigator\.clipboard\.writeText\(text\)/);
+  assert.match(source, /state\.composition\?\.fallbackText/);
   assert.doesNotMatch(source, /method:\s*'POST'[^]*\/v2\/bot|立即群發|直接推播|直接發送 LINE/);
 });

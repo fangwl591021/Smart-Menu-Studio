@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Archive, CheckCircle2, Clipboard, Loader2, Plus, RefreshCw, Search, Sparkles, UploadCloud } from 'lucide-react';
+import { Archive, CheckCircle2, Clipboard, Loader2, Plus, RefreshCw, Search, Share2, Sparkles, UploadCloud } from 'lucide-react';
 import TravelPromotionExtractionEditor from './TravelPromotionExtractionEditor';
 import {
   TRAVEL_PROMOTION_FORMATS,
@@ -9,7 +9,6 @@ import {
   parsePromotionListText,
   promotionListText,
   travelPromotionErrorMessage,
-  travelPromotionFormat,
   travelPromotionFormatCountHint,
   travelPromotionStatusLabel,
   travelPromotionUiAuthority,
@@ -156,21 +155,51 @@ function Retrieval({ request }) { const [query, setQuery] = useState(''); const 
 function Composer({ request, promotions, campaignEnabled, userRole, onCampaignCreated }) {
   const active = promotions.filter(item => item.status === 'ACTIVE' && item.isExpired !== true);
   const [selected, setSelected] = useState([]);
-  const [format, setFormat] = useState('SINGLE');
+  const [format, setFormat] = useState('CAROUSEL');
+  const [advanced, setAdvanced] = useState(false);
   const [headline, setHeadline] = useState('');
   const [campaignName, setCampaignName] = useState('');
-  const [state, setState] = useState({ busy: '', composition: null, error: '' });
-  const valid = isTravelPromotionFormatCountValid(format, selected.length);
-  const compositionBody = { format, safePromotionReferences: selected, options: { ...(headline.trim() ? { headline: headline.trim() } : {}), ctaLabel: '查看旅遊內容' } };
-  const toggle = reference => setSelected(value => value.includes(reference) ? value.filter(item => item !== reference) : [...value, reference]);
+  const [state, setState] = useState({ busy: '', composition: null, error: '', notice: '' });
+  const automaticFormat = selected.length === 1 ? 'SINGLE' : 'CAROUSEL';
+  const effectiveFormat = advanced ? format : automaticFormat;
+  const valid = isTravelPromotionFormatCountValid(effectiveFormat, selected.length);
+  const compositionBody = { format: effectiveFormat, safePromotionReferences: selected, options: { ...(headline.trim() ? { headline: headline.trim() } : {}), ctaLabel: '查看旅遊內容' } };
+  const toggle = reference => {
+    setSelected(value => value.includes(reference) ? value.filter(item => item !== reference) : [...value, reference]);
+    setState(value => ({ ...value, composition: null, error: '', notice: '' }));
+  };
   const preview = async () => {
     if (!valid) return;
-    setState({ busy: 'preview', composition: null, error: '' });
+    setState({ busy: 'preview', composition: null, error: '', notice: '' });
     try {
       const body = await requestJson(request, '/api/travel/promotions/compose', { method: 'POST', ...json(compositionBody) });
-      setState({ busy: '', composition: body.composition, error: '' });
+      setState({ busy: '', composition: body.composition, error: '', notice: '' });
     } catch (cause) {
-      setState({ busy: '', composition: null, error: travelPromotionErrorMessage(cause.message) });
+      setState({ busy: '', composition: null, error: travelPromotionErrorMessage(cause.message), notice: '' });
+    }
+  };
+  const copyPromotion = async () => {
+    const text = state.composition?.fallbackText || '';
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setState(value => ({ ...value, notice: '推廣文字已複製。', error: '' }));
+    } catch {
+      setState(value => ({ ...value, notice: '', error: '瀏覽器無法複製，請手動選取下方文字。' }));
+    }
+  };
+  const sharePromotion = async () => {
+    const text = state.composition?.fallbackText || '';
+    if (!text) return;
+    if (typeof navigator.share !== 'function') {
+      await copyPromotion();
+      return;
+    }
+    try {
+      await navigator.share({ title: headline.trim() || '旅遊推廣內容', text });
+      setState(value => ({ ...value, notice: '已開啟分享選單。', error: '' }));
+    } catch (cause) {
+      if (cause?.name !== 'AbortError') await copyPromotion();
     }
   };
   const handoff = async () => {
@@ -179,7 +208,7 @@ function Composer({ request, promotions, campaignEnabled, userRole, onCampaignCr
       return;
     }
     if (!valid || !campaignEnabled) return;
-    setState(value => ({ ...value, busy: 'campaign', error: '' }));
+    setState(value => ({ ...value, busy: 'campaign', error: '', notice: '' }));
     try {
       const body = await requestJson(request, '/api/campaigns', { method: 'POST', ...json({ name: campaignName.trim(), description: '由旅遊推廣素材建立', content: { contentType: 'TRAVEL_PROMOTION', composition: compositionBody } }) });
       onCampaignCreated?.(body.campaign);
@@ -188,32 +217,16 @@ function Composer({ request, promotions, campaignEnabled, userRole, onCampaignCr
     }
   };
   return <section className="space-y-5" data-testid="travel-promotion-composer">
-    <header className="flex flex-col gap-3 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:flex-row md:items-start md:justify-between">
-      <div><p className="text-xs font-black uppercase tracking-[0.24em] text-emerald-600">Promotion Composer</p><h2 className="mt-1 text-2xl font-black">製作推廣內容</h2><p className="mt-2 text-sm leading-6 text-slate-500">勾選使用中的 DM 圖片，選擇呈現格式，再由伺服器建立安全預覽。</p></div>
-      <span className="w-fit rounded-full bg-slate-100 px-4 py-2 text-sm font-black text-slate-600">已選 {selected.length} 筆</span>
-    </header>
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="text-lg font-black">選擇推廣素材</h3><p className="mt-1 text-sm text-slate-500">僅顯示使用中且尚未過期的素材。</p></div><div className="flex flex-wrap gap-2"><button type="button" onClick={() => setSelected(active.slice(0, 10).map(item => item.safePromotionReference))} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-700 hover:bg-slate-50">全選可用素材</button><button type="button" onClick={() => setSelected([])} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-700 hover:bg-slate-50">清除勾選</button></div></div>
-        {!active.length ? <p className="mt-5 rounded-2xl border border-dashed border-slate-200 p-10 text-center text-sm text-slate-500">目前沒有可製作推廣內容的使用中素材。</p> : <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-6">{active.map(item => {
-          const checked = selected.includes(item.safePromotionReference);
-          const content = item.activeVersion?.content || item.draft || {};
-          const asset = item.sourceAssets?.[0];
-          return <label key={item.safePromotionReference} className={`group relative cursor-pointer overflow-hidden rounded-2xl border bg-white transition ${checked ? 'border-emerald-500 ring-2 ring-emerald-100 shadow-sm' : 'border-slate-200 hover:border-emerald-300'}`}>
-            <input type="checkbox" checked={checked} onChange={() => toggle(item.safePromotionReference)} className="absolute right-3 top-3 z-10 h-5 w-5 rounded border-slate-300 accent-emerald-600" />
-            {asset?.assetUrl ? <SafeAssetImage request={request} source={asset.assetUrl} alt={content.title || item.displayLabel} className="h-36 w-full bg-slate-100 object-cover" /> : <div className="flex h-36 items-center justify-center bg-slate-100 text-xs font-black text-slate-400">DM 圖片</div>}
-            <div className="p-3"><div className="flex items-center justify-between gap-2"><span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-black text-emerald-700">可用</span>{checked && <CheckCircle2 size={17} className="text-emerald-600" />}</div><h4 className="mt-2 line-clamp-2 min-h-10 text-sm font-black leading-5 text-slate-900">{content.title || item.displayLabel}</h4><p className="mt-2 line-clamp-2 min-h-10 text-xs font-bold leading-5 text-slate-500">{[content.destination, content.days ? `${content.days} 天` : '', content.pricingTexts?.[0]].filter(Boolean).join(' · ') || '推廣素材'}</p></div>
-          </label>;
-        })}</div>}
+    <header className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs font-black uppercase tracking-[0.24em] text-emerald-600">快速製作</p><h2 className="mt-1 text-2xl font-black">選素材，立即預覽與分享</h2><p className="mt-2 text-sm leading-6 text-slate-500">不用先理解版型規則。選 1 張自動使用單張，選 2–10 張自動使用輪播。</p><div className="mt-4 grid gap-2 sm:grid-cols-3">{['1 選擇素材','2 產生預覽','3 分享內容'].map((label, index) => <div key={label} className={`rounded-2xl px-4 py-3 text-sm font-black ${index === 0 && !state.composition ? 'bg-emerald-600 text-white' : index === 1 && selected.length > 0 && !state.composition ? 'bg-blue-50 text-blue-700' : index === 2 && state.composition ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{label}</div>)}</div></header>
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="text-lg font-black">1. 點選要分享的 DM</h3><p className="mt-1 text-sm text-slate-500">目前已選 {selected.length} 張，最多 10 張。</p></div><button type="button" onClick={() => { setSelected([]); setState(value => ({ ...value, composition: null, notice: '' })); }} className="w-fit rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-700 hover:bg-slate-50">清除勾選</button></div>
+        {!active.length ? <p className="mt-5 rounded-2xl border border-dashed border-slate-200 p-10 text-center text-sm text-slate-500">目前沒有可分享的使用中素材。</p> : <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-6">{active.map(item => { const checked = selected.includes(item.safePromotionReference); const content = item.activeVersion?.content || item.draft || {}; const asset = item.sourceAssets?.[0]; return <label key={item.safePromotionReference} className={`group relative cursor-pointer overflow-hidden rounded-2xl border bg-white transition ${checked ? 'border-emerald-500 ring-2 ring-emerald-100 shadow-sm' : 'border-slate-200 hover:border-emerald-300'} ${!checked && selected.length >= 10 ? 'pointer-events-none opacity-40' : ''}`}><input type="checkbox" checked={checked} onChange={() => toggle(item.safePromotionReference)} className="absolute right-3 top-3 z-10 h-6 w-6 rounded border-slate-300 accent-emerald-600" />{asset?.assetUrl ? <SafeAssetImage request={request} source={asset.assetUrl} alt={content.title || item.displayLabel} className="h-40 w-full bg-slate-100 object-cover" /> : <div className="flex h-40 items-center justify-center bg-slate-100 text-xs font-black text-slate-400">DM 圖片</div>}<div className="p-3">{checked && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-black text-emerald-700"><CheckCircle2 size={14} />已選取</span>}<h4 className="mt-2 line-clamp-2 min-h-10 text-sm font-black leading-5 text-slate-900">{content.title || item.displayLabel}</h4><p className="mt-2 line-clamp-2 min-h-10 text-xs font-bold leading-5 text-slate-500">{[content.destination, content.days ? `${content.days} 天` : '', content.pricingTexts?.[0]].filter(Boolean).join(' · ') || '推廣素材'}</p></div></label>; })}</div>}
       </section>
-      <aside className="space-y-4 xl:sticky xl:top-5 xl:self-start">
-        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><h3 className="text-lg font-black">設定呈現格式</h3><div className="mt-4 grid grid-cols-2 gap-2">{TRAVEL_PROMOTION_FORMATS.map(item => <button key={item.value} type="button" onClick={() => setFormat(item.value)} className={`rounded-2xl border px-3 py-3 text-sm font-black ${format === item.value ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>{item.label}</button>)}</div><p className={`mt-4 rounded-2xl p-3 text-sm font-bold leading-6 ${valid ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>{travelPromotionFormatCountHint(format)}目前已選 {selected.length} 份。</p><label className="mt-4 block text-sm font-black text-slate-800">預覽標題（選填）<input value={headline} onChange={event => setHeadline(event.target.value)} maxLength={80} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 font-medium outline-none focus:border-emerald-500" placeholder="例如：本月精選旅遊" /></label><button type="button" onClick={preview} disabled={!valid || Boolean(state.busy)} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-black text-white hover:bg-emerald-700 disabled:opacity-50"><Sparkles size={17} />{state.busy === 'preview' ? '正在建立推廣預覽…' : '預覽推廣內容'}</button></section>
-        <section className="rounded-3xl border border-blue-100 bg-blue-50 p-5"><h3 className="font-black text-blue-950">安全邊界</h3><p className="mt-2 text-sm leading-7 text-blue-900">此處只建立預覽，不會直接發送訊息。建立行銷活動草稿後，仍須依 Campaign 流程準備與確認。</p></section>
-      </aside>
+      <aside className="space-y-4 xl:sticky xl:top-5 xl:self-start"><section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><h3 className="text-lg font-black">2. 產生分享預覽</h3><div className="mt-4 rounded-2xl bg-emerald-50 p-4"><p className="text-xs font-black text-emerald-600">系統建議</p><p className="mt-1 text-lg font-black text-emerald-900">{selected.length === 1 ? '單張推廣' : selected.length > 1 ? `輪播推廣 · ${selected.length} 張` : '請先選擇素材'}</p></div><label className="mt-4 block text-sm font-black text-slate-800">分享標題（選填）<input value={headline} onChange={event => setHeadline(event.target.value)} maxLength={80} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 font-medium outline-none focus:border-emerald-500" placeholder="例如：本月精選旅遊" /></label><button type="button" onClick={() => setAdvanced(value => !value)} className="mt-3 text-sm font-black text-slate-500 underline">{advanced ? '使用系統建議版型' : '更多版型選項'}</button>{advanced && <div className="mt-3 grid grid-cols-2 gap-2">{TRAVEL_PROMOTION_FORMATS.map(item => <button key={item.value} type="button" onClick={() => setFormat(item.value)} className={`rounded-xl border px-3 py-2 text-sm font-black ${format === item.value ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-700'}`}>{item.label}</button>)}</div>}<p className={`mt-4 rounded-2xl p-3 text-sm font-bold leading-6 ${valid ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-800'}`}>{advanced ? travelPromotionFormatCountHint(effectiveFormat) : selected.length ? '版型已自動設定，可以直接預覽。' : '請先選擇至少 1 張素材。'}</p><button type="button" onClick={preview} disabled={!valid || Boolean(state.busy)} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 py-3 text-base font-black text-white hover:bg-emerald-700 disabled:opacity-50"><Sparkles size={18} />{state.busy === 'preview' ? '正在建立推廣預覽…' : '預覽推廣內容'}</button></section></aside>
     </div>
-    {state.error && <p role="alert" className="rounded-2xl bg-red-50 p-3 text-sm font-medium text-red-700">{state.error}</p>}
-    {state.composition && <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex flex-col gap-2 border-b border-slate-100 pb-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-black uppercase tracking-[0.24em] text-slate-400">Server Preview</p><h3 className="mt-1 text-xl font-black">預覽 · {travelPromotionFormat(state.composition.format).label}</h3></div><span className="rounded-full bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">{state.composition.preview?.items?.length || 0} 張素材</span></div><div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{state.composition.preview?.items?.map(item => <article key={item.safePromotionReference} className="overflow-hidden rounded-2xl border border-slate-200 bg-white"><div className="p-4"><h4 className="font-black">{item.title}</h4><p className="mt-2 text-sm leading-6 text-slate-600">{item.summary}</p><div className="mt-4 grid gap-3"><section className="rounded-2xl bg-blue-50 p-3"><b>DM 快照</b>{item.snapshotLines?.map(line => <p key={line} className="mt-1 text-sm">{line}</p>)}</section><LiveFacts liveLines={item.liveLines} /></div></div></article>)}</div><h4 className="mt-5 font-black">備援文字</h4><p className="mt-2 whitespace-pre-wrap rounded-2xl bg-slate-50 p-4 text-sm leading-7">{state.composition.fallbackText}</p></section>}
-    <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]"><div><p className="text-xs font-black uppercase tracking-[0.24em] text-blue-600">Campaign Handoff</p><h3 className="mt-1 text-xl font-black">建立行銷活動草稿</h3><p className="mt-2 text-sm leading-7 text-slate-600">建立行銷活動後，該版本的推廣內容會被固定；後續修改 DM 素材不會自動改變已建立的行銷內容。</p></div>{campaignEnabled ? <div><label className="block text-sm font-black text-slate-800">活動名稱<input value={campaignName} onChange={event => setCampaignName(event.target.value)} maxLength={120} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 font-medium outline-none focus:border-blue-500" /></label>{canManageTravelPromotions(userRole) && <button type="button" onClick={handoff} disabled={!valid || Boolean(state.busy)} className="mt-3 w-full rounded-2xl bg-blue-700 px-5 py-3 text-sm font-black text-white hover:bg-blue-800 disabled:opacity-50">{state.busy === 'campaign' ? '正在建立行銷活動草稿…' : '建立行銷活動草稿'}</button>}</div> : <p className="rounded-2xl bg-amber-50 p-4 text-sm leading-7 text-amber-900">此工作區尚未啟用行銷活動模組。推廣預覽仍可使用。</p>}</div></section>
+    {state.error && <p role="alert" className="rounded-2xl bg-red-50 p-3 text-sm font-medium text-red-700">{state.error}</p>}{state.notice && <p role="status" className="rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{state.notice}</p>}
+    {state.composition && <section className="rounded-3xl border border-emerald-200 bg-white p-5 shadow-sm"><div className="flex flex-col gap-3 border-b border-slate-100 pb-4 md:flex-row md:items-center md:justify-between"><div><p className="text-xs font-black uppercase tracking-[0.24em] text-emerald-600">準備完成</p><h3 className="mt-1 text-xl font-black">3. 預覽並分享</h3></div><div className="flex flex-wrap gap-2"><button type="button" onClick={sharePromotion} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-black text-white"><Share2 size={17} />分享推廣內容</button><button type="button" onClick={copyPromotion} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-black text-slate-700"><Clipboard size={17} />複製文字</button></div></div><div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{state.composition.preview?.items?.map(item => <article key={item.safePromotionReference} className="rounded-2xl border border-slate-200 p-4"><h4 className="font-black">{item.title}</h4><p className="mt-2 text-sm leading-6 text-slate-600">{item.summary}</p><div className="mt-4 grid gap-3"><section className="rounded-2xl bg-blue-50 p-3"><b>DM 快照</b>{item.snapshotLines?.map(line => <p key={line} className="mt-1 text-sm">{line}</p>)}</section><LiveFacts liveLines={item.liveLines} /></div></article>)}</div><h4 className="mt-5 font-black">分享文字</h4><p className="mt-2 whitespace-pre-wrap rounded-2xl bg-slate-50 p-4 text-sm leading-7">{state.composition.fallbackText}</p></section>}
+    <details className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><summary className="cursor-pointer font-black text-slate-700">需要建立行銷活動草稿？</summary><div className="mt-4 grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]"><div><h3 className="text-xl font-black">建立行銷活動草稿</h3><p className="mt-2 text-sm leading-7 text-slate-600">該版本的推廣內容會被固定；後續修改 DM 素材不會自動改變已建立的行銷內容。</p></div>{campaignEnabled ? <div><label className="block text-sm font-black text-slate-800">活動名稱<input value={campaignName} onChange={event => setCampaignName(event.target.value)} maxLength={120} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 font-medium" /></label>{canManageTravelPromotions(userRole) && <button type="button" onClick={handoff} disabled={!valid || Boolean(state.busy)} className="mt-3 w-full rounded-2xl bg-blue-700 px-5 py-3 text-sm font-black text-white disabled:opacity-50">{state.busy === 'campaign' ? '正在建立行銷活動草稿…' : '建立行銷活動草稿'}</button>}</div> : <p className="rounded-2xl bg-amber-50 p-4 text-sm leading-7 text-amber-900">此工作區尚未啟用行銷活動模組。推廣預覽仍可使用。</p>}</div></details>
   </section>;
 }
 
