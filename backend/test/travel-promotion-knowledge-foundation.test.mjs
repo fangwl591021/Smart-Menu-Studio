@@ -120,23 +120,23 @@ test('Tenant routes require viewer reads and admin mutations, with AI entitlemen
   assert.doesNotMatch(routes.slice(0, routes.indexOf("app.post('/api/travel/promotions/:safePromotionReference/extract'")), /moduleKey:'AI'/);
 });
 
-test('AI extraction uses the platform provider and canonical metering without auto activation', () => {
+test('AI extraction uses the internal-first dual provider and canonical metering without auto activation', () => {
   assert.match(aiUsage, /'travel_promotion_extract'/);
   assert.match(routes, /executeMeteredAiCall\(/);
   assert.match(routes, /featureCode:'travel_promotion_extract'/);
-  assert.match(routes, /provider:'google',model:GEMINI_MODEL/);
-  assert.match(routes, /requestGeminiContent\(/);
-  assert.match(routes, /extractGeminiUsageMetadata\(payload\)/);
+  assert.match(routes, /provider:'openai',model:OPENAI_TRAVEL_PROMOTION_MODEL/);
+  assert.match(routes, /requestOpenAiResponses\(/);
+  assert.match(routes, /openAiUsage\(payload\)/);
   const extract = routes.slice(routes.indexOf("app.post('/api/travel/promotions/:safePromotionReference/extract'"), routes.indexOf("app.post('/api/travel/promotions/:safePromotionReference/activate'"));
   assert.doesNotMatch(extract, /activatePromotion|travel_promotion_knowledge_entries/);
-  assert.match(extract, /inline_data/);
-  assert.ok(extract.indexOf('inline_data') < extract.indexOf('Supplemental untrusted source text'));
+  assert.match(extract, /type:'input_image'/);
+  assert.ok(extract.indexOf("type:'input_image'") < extract.indexOf("{type:'input_text',text:supplemental}"));
   assert.match(extract, /saveExtractedDraft[\s\S]*draft,extraction/);
   assert.match(promotion, /saveExtractedDraft[\s\S]*version_status='DRAFT'/);
   assert.doesNotMatch(routes, /tenant.*(?:api.?key|gemini)/i);
 });
 
-test('Gemini provider schema and failures preserve safe, actionable diagnostics', () => {
+test('provider schemas and failures preserve safe, actionable diagnostics', () => {
   const providerSchema = travelPromotionGeminiSchema(TRAVEL_PROMOTION_EXTRACT_SCHEMA);
   assert.equal(providerSchema.properties.title.maxLength, undefined);
   assert.equal(TRAVEL_PROMOTION_EXTRACT_SCHEMA.properties.title.maxLength, 120);
@@ -152,10 +152,8 @@ test('Gemini provider schema and failures preserve safe, actionable diagnostics'
   assert.equal(classifyTravelPromotionProviderFailure(500, null).errorCode, 'TRAVEL_PROMOTION_AI_PROVIDER_FAILED');
   assert.match(routes, /upstreamMessage: input\.failure\.upstreamMessage/);
   assert.doesNotMatch(routes, /console\.(?:log|error)[^\n]*(?:GEMINI_API_KEY|OPENAI_API_KEY|apiKey)/);
-  assert.match(routes, /if\(c\.env\.GEMINI_API_KEY\)/);
-  assert.match(routes, /if\(!extraction&&c\.env\.OPENAI_API_KEY\)/);
-  assert.ok(routes.indexOf('if(c.env.GEMINI_API_KEY)') < routes.indexOf('if(!extraction&&c.env.OPENAI_API_KEY)'));
-  assert.match(routes, /https:\/\/api\.openai\.com\/v1\/responses/);
+  assert.match(routes, /if\(c\.env\.MLM_WORKER\|\|c\.env\.OPENAI_API_KEY\)/);
+  assert.match(routes, /requestOpenAiResponses\(\{service:c\.env\.MLM_WORKER,apiKey:c\.env\.OPENAI_API_KEY/);
   assert.match(routes, /type:'input_image'/);
   assert.match(routes, /provider:'openai',model:OPENAI_TRAVEL_PROMOTION_MODEL/);
 });

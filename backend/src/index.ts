@@ -104,6 +104,7 @@ import {
 import type { OperationPlanStep } from './guide/proposals/composite-plan';
 import { syncLineRichMenuInsights, recordLineActionEvent } from './line-intelligence/service';
 import { GEMINI_MODEL, geminiProviderNotConfiguredResponse, requestGeminiContent } from './gemini';
+import { OPENAI_RESPONSES_MODEL, openAiOutputText, openAiUsage, requestOpenAiResponses } from './openai-responses';
 import {
   classifyRichMenuLayout,
   normalizeDetectedRichMenuAreas,
@@ -167,6 +168,8 @@ import { cors } from 'hono/cors';
 
 type Bindings = {
   GEMINI_API_KEY: string;
+  OPENAI_API_KEY?: string;
+  MLM_WORKER?: Fetcher;
   LINE_CHANNEL_ACCESS_TOKEN: string;
   TENANT_MODE?: string;
   DEV_WORKSPACE_ID?: string;
@@ -1637,18 +1640,10 @@ app.post('/api/detect-layout', async (c) => {
   try {
     const body = await c.req.parseBody();
     const image = body.image;
-    if (!image || typeof image === 'string' || !(image instanceof File)) {
-      return c.json({ success: false, error: '請提供有效的圖片檔案。' }, 400);
-    }
-    if (!['image/png', 'image/jpeg'].includes(image.type)) {
-      return c.json({ success: false, error: 'LINE Rich Menu 圖片只支援 PNG、JPG。' }, 400);
-    }
-    if (image.size > 1024 * 1024) {
-      return c.json({ success: false, error: 'LINE Rich Menu 圖片不可超過 1MB。' }, 400);
-    }
-    if (!c.env.GEMINI_API_KEY) {
-      return c.json(geminiProviderNotConfiguredResponse(), 503);
-    }
+    if (!image || typeof image === 'string' || !(image instanceof File)) return c.json({ success: false, error: '請提供有效的圖片檔案。' }, 400);
+    if (!['image/png', 'image/jpeg'].includes(image.type)) return c.json({ success: false, error: 'LINE Rich Menu 圖片只支援 PNG、JPG。' }, 400);
+    if (image.size > 1024 * 1024) return c.json({ success: false, error: 'LINE Rich Menu 圖片不可超過 1MB。' }, 400);
+    if (!c.env.MLM_WORKER && !c.env.OPENAI_API_KEY) return c.json(geminiProviderNotConfiguredResponse(), 503);
 
     const imageBuffer = await image.arrayBuffer();
     let dimensions;
@@ -1667,75 +1662,57 @@ app.post('/api/detect-layout', async (c) => {
       + (imageWidth - 1) + '，y 範圍 0..' + (imageHeight - 1)
       + '。每個區塊回傳 id,label,x,y,width,height。座標使用整數，區塊不得超出圖片邊界或互相重疊，最多 20 個區塊，label 使用繁體中文。'
       + '不要推測、縮放或改用其他畫布尺寸。只輸出符合 JSON Schema 的資料。';
+    const richMenuSchema = {
+      type: 'object', additionalProperties: false, required: ['areas'],
+      properties: { areas: { type: 'array', maxItems: 20, items: {
+        type: 'object', additionalProperties: false,
+        properties: {
+          id: { type: 'integer' }, label: { type: 'string' }, x: { type: 'integer' },
+          y: { type: 'integer' }, width: { type: 'integer' }, height: { type: 'integer' },
+        },
+        required: ['id', 'label', 'x', 'y', 'width', 'height'],
+      } } },
+    };
 
-    const geminiCall = await executeMeteredAiCall({
-      db: c.env.smart_menu_db,
-      workspaceId: workspaceIdOf(c),
-      userId: text(c.get('userId')),
-      featureCode: 'rich_menu_image_analysis',
-      operationCode: 'detect_layout',
-      provider: 'google',
-      model: GEMINI_MODEL,
+    const aiCall = await executeMeteredAiCall({
+      db: c.env.smart_menu_db, workspaceId: workspaceIdOf(c), userId: text(c.get('userId')),
+      featureCode: 'rich_menu_image_analysis', operationCode: 'detect_layout',
+      provider: 'openai', model: OPENAI_RESPONSES_MODEL,
       execute: async () => {
-        const response = await requestGeminiContent({
-          apiKey: c.env.GEMINI_API_KEY,
+        const response = await requestOpenAiResponses({
+          service: c.env.MLM_WORKER, apiKey: c.env.OPENAI_API_KEY,
           body: {
-            contents: [{ role: 'user', parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: base64Image } }] }],
-            generationConfig: {
-              responseMimeType: 'application/json',
-              responseSchema: {
-                type: 'OBJECT',
-                properties: {
-                  areas: {
-                    type: 'ARRAY',
-                    maxItems: 20,
-                    items: {
-                      type: 'OBJECT',
-                      properties: {
-                        id: { type: 'INTEGER' }, label: { type: 'STRING' },
-                        x: { type: 'INTEGER' }, y: { type: 'INTEGER' },
-                        width: { type: 'INTEGER' }, height: { type: 'INTEGER' },
-                      },
-                      required: ['id', 'label', 'x', 'y', 'width', 'height'],
-                    },
-                  },
-                },
-                required: ['areas'],
-              },
-            },
+            model: OPENAI_RESPONSES_MODEL, reasoning: { effort: 'low' }, max_output_tokens: 2000,
+            input: [{ role: 'user', content: [
+              { type: 'input_text', text: prompt },
+              { type: 'input_image', image_url: `data:${mimeType};base64,${base64Image}`, detail: 'high' },
+            ] }],
+            text: { format: { type: 'json_schema', name: 'rich_menu_layout', strict: true, schema: richMenuSchema } },
           },
         });
-        const result: any = await response.json();
+        const result: any = await response.json().catch(() => null);
         return {
-          value: { ok: response.ok, result },
-          status: response.ok ? 'success' as const : 'failed' as const,
-          usage: extractGeminiUsageMetadata(result),
-          providerRequestId: text(response.headers.get('x-request-id')) || null,
-          errorCode: response.ok ? null : text(result?.error?.status || 'GEMINI_REQUEST_FAILED'),
+          value: { ok: response.ok, result }, status: response.ok ? 'success' as const : 'failed' as const,
+          usage: openAiUsage(result), providerRequestId: text(response.headers.get('x-request-id')) || null,
+          errorCode: response.ok ? null : text(result?.error?.code || result?.error?.status || 'OPENAI_REQUEST_FAILED'),
         };
       },
     });
-    const result: any = geminiCall.result;
-    if (!geminiCall.ok) return c.json({ success: false, error: result?.error?.message || 'Gemini API 呼叫失敗' }, 500);
-
-    const outputText = result?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!outputText) throw new Error('Gemini 沒有回傳辨識結果');
+    const result: any = aiCall.result;
+    if (!aiCall.ok) {
+      const upstreamMessage = text(result?.error?.message || result?.error);
+      console.error(JSON.stringify({ message: 'rich menu AI provider failed', provider: 'openai', model: OPENAI_RESPONSES_MODEL, upstreamMessage }));
+      return c.json({ success: false, error: upstreamMessage || 'AI 圖片辨識服務暫時無法使用' }, 502);
+    }
+    const outputText = openAiOutputText(result);
+    if (!outputText) throw new Error('AI 沒有回傳辨識結果');
     const parsed = JSON.parse(outputText);
-    if (!Array.isArray(parsed.areas)) throw new Error('Gemini 回傳資料缺少 areas');
-
+    if (!Array.isArray(parsed.areas)) throw new Error('AI 回傳資料缺少 areas');
     const areas = normalizeDetectedRichMenuAreas(parsed.areas, imageWidth, imageHeight);
-    return c.json({
-      success: true,
-      provider: 'gemini',
-      model: GEMINI_MODEL,
-      imageWidth,
-      imageHeight,
-      layoutType,
-      areas,
-    });
+    return c.json({ success: true, provider: c.env.MLM_WORKER ? 'mlm-service' : 'openai', model: OPENAI_RESPONSES_MODEL, imageWidth, imageHeight, layoutType, areas });
   } catch (e: any) {
     console.error('detect-layout:', e);
-    return c.json({ success: false, error: e?.message || 'Gemini 圖片辨識失敗' }, 500);
+    return c.json({ success: false, error: e?.message || 'AI 圖片辨識失敗' }, 500);
   }
 });
 app.post('/api/templates/upload-image', async (c) => {

@@ -1,5 +1,5 @@
-import { executeMeteredAiCall, extractGeminiUsageMetadata } from '../ai/usage.ts';
-import { GEMINI_MODEL, requestGeminiContent } from '../gemini.ts';
+import { executeMeteredAiCall } from '../ai/usage.ts';
+import { OPENAI_RESPONSES_MODEL, requestOpenAiResponses } from '../openai-responses.ts';
 import { requireWorkspaceModule } from '../modules/entitlements.ts';
 import { TRAVEL_PROMOTION_EXTRACT_SCHEMA, TRAVEL_PROMOTION_EXTRACTION_INSTRUCTION, activatePromotion, archivePromotion, createPromotion, extractionSource, listPromotions, extractionToPromotionDraft, parsePromotionAiPayload, readPromotion, saveExtractedDraft, updatePromotionDraft } from './promotion.ts';
 import { searchTravelPromotionKnowledge } from './promotion-retrieval.ts';
@@ -45,7 +45,7 @@ export function classifyTravelPromotionProviderFailure(status: number, payload: 
   return { errorCode: 'TRAVEL_PROMOTION_AI_PROVIDER_FAILED', error: 'AI 服務暫時無法完成分析，請稍後再試。', responseStatus: 502, upstreamCode, upstreamStatus, upstreamMessage };
 }
 
-export const OPENAI_TRAVEL_PROMOTION_MODEL = 'gpt-5.6-terra';
+export const OPENAI_TRAVEL_PROMOTION_MODEL = OPENAI_RESPONSES_MODEL;
 
 export function travelPromotionOpenAiSchema(value: unknown): any {
   if (Array.isArray(value)) return value.map(travelPromotionOpenAiSchema);
@@ -130,14 +130,13 @@ export function registerTravelPromotionRoutes(app:any,deps:any,fail:(c:any,error
       if(e instanceof Error&&['MODULE_NOT_ENABLED','MODULE_DEPENDENCY_NOT_ENABLED'].includes(e.message))throw new Error('TRAVEL_PROMOTION_AI_DISABLED');
       throw e;
     }
-    if(!c.env.GEMINI_API_KEY&&!c.env.OPENAI_API_KEY)return c.json({success:false,errorCode:'TRAVEL_PROMOTION_AI_UNAVAILABLE',error:'AI 尚未設定，請聯絡系統管理員。'},503);
+    if(!c.env.MLM_WORKER&&!c.env.OPENAI_API_KEY)return c.json({success:false,errorCode:'TRAVEL_PROMOTION_AI_UNAVAILABLE',error:'AI 尚未設定，請聯絡系統管理員。'},503);
     const body=exactAction(await c.req.json().catch(()=>({})),['expectedVersionNo','expectedSourceRevision']);
     const expectedVersionNo=Number(body.expectedVersionNo),expectedSourceRevision=Number(body.expectedSourceRevision);
     if(!Number.isInteger(expectedVersionNo)||expectedVersionNo<1||!Number.isInteger(expectedSourceRevision)||expectedSourceRevision<1)throw new Error('TRAVEL_PROMOTION_INPUT_INVALID');
     const reference=deps.text(c.req.param('safePromotionReference'),100);
     const userId=deps.text(c.get('userId'))||null;
     const source=await extractionSource(c.env.smart_menu_db,{workspaceId,reference,userId,expectedVersionNo,expectedSourceRevision});
-    const parts:Array<Record<string,unknown>>=[{text:TRAVEL_PROMOTION_EXTRACTION_INSTRUCTION}];
     const images:Array<{mimeType:string;data:string}>=[];
     let total=0;
     for(const asset of source.assets){
@@ -148,53 +147,24 @@ export function registerTravelPromotionRoutes(app:any,deps:any,fail:(c:any,error
       if(!object)throw new Error('TRAVEL_PROMOTION_ASSET_INVALID');
       const data=arrayBufferToBase64(await object.arrayBuffer());
       images.push({mimeType:asset.content_type,data});
-      parts.push({inline_data:{mime_type:asset.content_type,data}});
     }
     const supplemental='Supplemental untrusted source text begins:\n<source>'+source.sourceText+'</source>\nSupplemental source text ends.';
-    parts.push({text:supplemental});
     const operationCode='promotion_v'+source.versionNo+'_r'+source.sourceRevision;
     let extraction:any=null;
     let providerFailure:TravelPromotionProviderFailure|null=null;
 
-    if(c.env.GEMINI_API_KEY){
-      let providerRequestId:string|null=null;
-      extraction=await executeMeteredAiCall({db:c.env.smart_menu_db,workspaceId,userId,featureCode:'travel_promotion_extract',operationCode,provider:'google',model:GEMINI_MODEL,execute:async()=>{
-        const response=await requestGeminiContent({apiKey:c.env.GEMINI_API_KEY,body:{contents:[{role:'user',parts}],generationConfig:{responseMimeType:'application/json',responseSchema:travelPromotionGeminiSchema(TRAVEL_PROMOTION_EXTRACT_SCHEMA)}}});
-        providerRequestId=response.headers.get('x-request-id')||response.headers.get('x-goog-request-id');
-        const payload=await response.json().catch(()=>null);
-        if(!response.ok){
-          providerFailure=classifyTravelPromotionProviderFailure(response.status,payload);
-          logProviderFailure({provider:'google',model:GEMINI_MODEL,httpStatus:response.status,providerRequestId,failure:providerFailure});
-          return{value:null as never,status:'failed' as const,usage:extractGeminiUsageMetadata(payload),providerRequestId,errorCode:providerFailure.errorCode};
-        }
-        try{
-          return{value:parsePromotionAiPayload(payload),status:'success' as const,usage:extractGeminiUsageMetadata(payload),providerRequestId};
-        }catch{
-          providerFailure=invalidProviderOutput();
-          logProviderFailure({provider:'google',model:GEMINI_MODEL,httpStatus:200,providerRequestId,failure:providerFailure});
-          return{value:null as never,status:'failed' as const,usage:extractGeminiUsageMetadata(payload),providerRequestId,errorCode:providerFailure.errorCode};
-        }
-      }});
-    }
-
-    if(!extraction&&c.env.OPENAI_API_KEY){
+    if(c.env.MLM_WORKER||c.env.OPENAI_API_KEY){
       let providerRequestId:string|null=null;
       extraction=await executeMeteredAiCall({db:c.env.smart_menu_db,workspaceId,userId,featureCode:'travel_promotion_extract',operationCode,provider:'openai',model:OPENAI_TRAVEL_PROMOTION_MODEL,execute:async()=>{
-        const response=await fetch('https://api.openai.com/v1/responses',{
-          method:'POST',
-          headers:{Authorization:'Bearer '+c.env.OPENAI_API_KEY,'Content-Type':'application/json'},
-          body:JSON.stringify({
-            model:OPENAI_TRAVEL_PROMOTION_MODEL,
-            reasoning:{effort:'low'},
-            max_output_tokens:4000,
-            input:[{role:'user',content:[
-              {type:'input_text',text:TRAVEL_PROMOTION_EXTRACTION_INSTRUCTION},
-              ...images.map(image=>({type:'input_image',image_url:'data:'+image.mimeType+';base64,'+image.data,detail:'high'})),
-              {type:'input_text',text:supplemental},
-            ]}],
-            text:{format:{type:'json_schema',name:'travel_promotion_extract',strict:true,schema:travelPromotionOpenAiSchema(TRAVEL_PROMOTION_EXTRACT_SCHEMA)}},
-          }),
-        });
+        const response=await requestOpenAiResponses({service:c.env.MLM_WORKER,apiKey:c.env.OPENAI_API_KEY,body:{
+          model:OPENAI_TRAVEL_PROMOTION_MODEL,reasoning:{effort:'low'},max_output_tokens:4000,
+          input:[{role:'user',content:[
+            {type:'input_text',text:TRAVEL_PROMOTION_EXTRACTION_INSTRUCTION},
+            ...images.map(image=>({type:'input_image',image_url:'data:'+image.mimeType+';base64,'+image.data,detail:'high'})),
+            {type:'input_text',text:supplemental},
+          ]}],
+          text:{format:{type:'json_schema',name:'travel_promotion_extract',strict:true,schema:travelPromotionOpenAiSchema(TRAVEL_PROMOTION_EXTRACT_SCHEMA)}},
+        }});
         providerRequestId=response.headers.get('x-request-id');
         const payload=await response.json().catch(()=>null);
         if(!response.ok){
@@ -212,7 +182,6 @@ export function registerTravelPromotionRoutes(app:any,deps:any,fail:(c:any,error
         }
       }});
     }
-
     if(!extraction){
       const failure=providerFailure||classifyTravelPromotionProviderFailure(502,null);
       return c.json({success:false,errorCode:failure.errorCode,error:failure.error},failure.responseStatus as any);

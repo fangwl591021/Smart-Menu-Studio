@@ -18,6 +18,12 @@
 			"remote": true
 		}
 	],
+	"services": [
+		{
+			"binding": "MLM_WORKER",
+			"service": "mlm"
+		}
+	],
 	"compatibility_flags": [
 		"nodejs_compat"
 	]
