@@ -22,3 +22,10 @@ test('card actions preserve review reanalysis and archive without hard delete', 
   for (const label of ['查看素材確認', '重算／封存', '重新 AI 解析', '封存素材']) assert.ok(source.includes(label), `missing ${label}`);
   assert.doesNotMatch(source, /method:\s*'DELETE'|原始 Flex JSON|立即群發|直接推播|直接發送 LINE/);
 });
+test('promotion composer mirrors the image-selection workbench without adding send authority', () => {
+  for (const label of ['Promotion Composer', '選擇推廣素材', '全選可用素材', '清除勾選', '設定呈現格式', 'Server Preview', 'Campaign Handoff']) assert.ok(source.includes(label), `missing ${label}`);
+  assert.match(source, /grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-6/);
+  assert.match(source, /active\.slice\(0, 10\)\.map\(item => item\.safePromotionReference\)/);
+  assert.match(source, /state\.composition && <section/);
+  assert.doesNotMatch(source, /method:\s*'POST'[^]*\/v2\/bot|立即群發|直接推播|直接發送 LINE/);
+});
