@@ -124,7 +124,9 @@ test('AI extraction uses the internal-first dual provider and canonical metering
   assert.match(aiUsage, /'travel_promotion_extract'/);
   assert.match(routes, /executeMeteredAiCall\(/);
   assert.match(routes, /featureCode:'travel_promotion_extract'/);
-  assert.match(routes, /provider:'openai',model:OPENAI_TRAVEL_PROMOTION_MODEL/);
+  assert.match(routes, /model:OPENAI_MEDIA_CLASSIFIER_MODEL/);
+  assert.match(routes, /const extractionModel=promotionExtractionModel\(mediaType\)/);
+  assert.match(routes, /provider:'openai',model:extractionModel/);
   assert.match(routes, /requestOpenAiResponses\(/);
   assert.match(routes, /openAiUsage\(payload\)/);
   const extract = routes.slice(routes.indexOf("app.post('/api/travel/promotions/:safePromotionReference/extract'"), routes.indexOf("app.post('/api/travel/promotions/:safePromotionReference/activate'"));
@@ -155,7 +157,9 @@ test('provider schemas and failures preserve safe, actionable diagnostics', () =
   assert.match(routes, /if\(c\.env\.MLM_WORKER\|\|c\.env\.OPENAI_API_KEY\)/);
   assert.match(routes, /requestOpenAiResponses\(\{service:c\.env\.MLM_WORKER,apiKey:c\.env\.OPENAI_API_KEY/);
   assert.match(routes, /type:'input_image'/);
-  assert.match(routes, /provider:'openai',model:OPENAI_TRAVEL_PROMOTION_MODEL/);
+  assert.match(routes, /model:OPENAI_MEDIA_CLASSIFIER_MODEL/);
+  assert.match(routes, /const extractionModel=promotionExtractionModel\(mediaType\)/);
+  assert.match(routes, /provider:'openai',model:extractionModel/);
 });
 
 test('manual draft, source revision guard, next draft, activation batch, and deterministic entries are explicit', () => {

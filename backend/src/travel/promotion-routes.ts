@@ -1,4 +1,5 @@
 import { executeMeteredAiCall } from '../ai/usage.ts';
+import { OPENAI_MEDIA_CLASSIFIER_MODEL, PROMOTION_MEDIA_CLASSIFICATION_INSTRUCTION, PROMOTION_MEDIA_CLASSIFICATION_SCHEMA, parsePromotionMediaClassification, promotionExtractionInstruction, promotionExtractionModel } from '../ai/media-model-routing.ts';
 import { OPENAI_RESPONSES_MODEL, requestOpenAiResponses } from '../openai-responses.ts';
 import { requireWorkspaceModule } from '../modules/entitlements.ts';
 import { TRAVEL_PROMOTION_EXTRACT_SCHEMA, TRAVEL_PROMOTION_EXTRACTION_INSTRUCTION, activatePromotion, archivePromotion, createPromotion, extractionSource, listPromotions, extractionToPromotionDraft, parsePromotionAiPayload, readPromotion, saveExtractedDraft, updatePromotionDraft } from './promotion.ts';
@@ -155,11 +156,34 @@ export function registerTravelPromotionRoutes(app:any,deps:any,fail:(c:any,error
 
     if(c.env.MLM_WORKER||c.env.OPENAI_API_KEY){
       let providerRequestId:string|null=null;
-      extraction=await executeMeteredAiCall({db:c.env.smart_menu_db,workspaceId,userId,featureCode:'travel_promotion_extract',operationCode,provider:'openai',model:OPENAI_TRAVEL_PROMOTION_MODEL,execute:async()=>{
+      const mediaType=images.length ? await executeMeteredAiCall({db:c.env.smart_menu_db,workspaceId,userId,featureCode:'travel_promotion_extract',operationCode:operationCode+'_classify',provider:'openai',model:OPENAI_MEDIA_CLASSIFIER_MODEL,execute:async()=>{
         const response=await requestOpenAiResponses({service:c.env.MLM_WORKER,apiKey:c.env.OPENAI_API_KEY,body:{
-          model:OPENAI_TRAVEL_PROMOTION_MODEL,reasoning:{effort:'low'},max_output_tokens:4000,
+          model:OPENAI_MEDIA_CLASSIFIER_MODEL,reasoning:{effort:'low'},max_output_tokens:100,
           input:[{role:'user',content:[
-            {type:'input_text',text:TRAVEL_PROMOTION_EXTRACTION_INSTRUCTION},
+            {type:'input_text',text:PROMOTION_MEDIA_CLASSIFICATION_INSTRUCTION},
+            {type:'input_image',image_url:'data:'+images[0].mimeType+';base64,'+images[0].data,detail:'low'},
+          ]}],
+          text:{format:{type:'json_schema',name:'promotion_media_classification',strict:true,schema:PROMOTION_MEDIA_CLASSIFICATION_SCHEMA}},
+        }});
+        providerRequestId=response.headers.get('x-request-id');
+        const payload=await response.json().catch(()=>null);
+        if(!response.ok){
+          providerFailure=classifyTravelPromotionProviderFailure(response.status,payload);
+          logProviderFailure({provider:'openai',model:OPENAI_MEDIA_CLASSIFIER_MODEL,httpStatus:response.status,providerRequestId,failure:providerFailure});
+          return{value:null as never,status:'failed' as const,usage:openAiUsage(payload),providerRequestId,errorCode:providerFailure.errorCode};
+        }
+        return{value:parsePromotionMediaClassification(openAiOutputText(payload)),status:'success' as const,usage:openAiUsage(payload),providerRequestId};
+      }}):'TRAVEL_POSTER' as const;
+      if(!mediaType){
+        const failure=providerFailure||classifyTravelPromotionProviderFailure(502,null);
+        return c.json({success:false,errorCode:failure.errorCode,error:failure.error},failure.responseStatus as any);
+      }
+      const extractionModel=promotionExtractionModel(mediaType);
+      extraction=await executeMeteredAiCall({db:c.env.smart_menu_db,workspaceId,userId,featureCode:'travel_promotion_extract',operationCode:operationCode+'_extract',provider:'openai',model:extractionModel,execute:async()=>{
+        const response=await requestOpenAiResponses({service:c.env.MLM_WORKER,apiKey:c.env.OPENAI_API_KEY,body:{
+          model:extractionModel,reasoning:{effort:'low'},max_output_tokens:4000,
+          input:[{role:'user',content:[
+            {type:'input_text',text:promotionExtractionInstruction(mediaType,TRAVEL_PROMOTION_EXTRACTION_INSTRUCTION)},
             ...images.map(image=>({type:'input_image',image_url:'data:'+image.mimeType+';base64,'+image.data,detail:'high'})),
             {type:'input_text',text:supplemental},
           ]}],
@@ -169,7 +193,7 @@ export function registerTravelPromotionRoutes(app:any,deps:any,fail:(c:any,error
         const payload=await response.json().catch(()=>null);
         if(!response.ok){
           providerFailure=classifyTravelPromotionProviderFailure(response.status,payload);
-          logProviderFailure({provider:'openai',model:OPENAI_TRAVEL_PROMOTION_MODEL,httpStatus:response.status,providerRequestId,failure:providerFailure});
+          logProviderFailure({provider:'openai',model:extractionModel,httpStatus:response.status,providerRequestId,failure:providerFailure});
           return{value:null as never,status:'failed' as const,usage:openAiUsage(payload),providerRequestId,errorCode:providerFailure.errorCode};
         }
         try{
@@ -177,7 +201,7 @@ export function registerTravelPromotionRoutes(app:any,deps:any,fail:(c:any,error
           return{value:parsePromotionAiPayload({candidates:[{content:{parts:[{text:output}]}}]}),status:'success' as const,usage:openAiUsage(payload),providerRequestId};
         }catch{
           providerFailure=invalidProviderOutput();
-          logProviderFailure({provider:'openai',model:OPENAI_TRAVEL_PROMOTION_MODEL,httpStatus:200,providerRequestId,failure:providerFailure});
+          logProviderFailure({provider:'openai',model:extractionModel,httpStatus:200,providerRequestId,failure:providerFailure});
           return{value:null as never,status:'failed' as const,usage:openAiUsage(payload),providerRequestId,errorCode:providerFailure.errorCode};
         }
       }});
