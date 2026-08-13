@@ -5295,7 +5295,7 @@ function AppShell() {
         </header>
 
         <div className="flex-1 overflow-auto p-8">
-          <div className={currentView === 'project-editor' ? 'h-full' : 'max-w-6xl mx-auto'}>
+          <div className={currentView === 'project-editor' ? 'h-full' : currentView === 'travel' ? 'w-full' : 'max-w-6xl mx-auto'}>
             {!isPlatformAdminMode && moduleAuthority.status === 'loading' && <div className="mb-5 flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-700"><Loader2 size={16} className="animate-spin" />正在載入工作區模組...</div>}
             {!isPlatformAdminMode && moduleAuthority.status === 'error' && <div className="mb-5 flex items-center justify-between gap-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"><span>{moduleAuthority.error}</span><button type="button" onClick={moduleAuthority.retry} className="shrink-0 rounded-md border border-amber-300 bg-white px-3 py-1.5 font-medium">重新載入</button></div>}
             {moduleNotice && !isPlatformAdminMode && <div role="status" className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{moduleNotice}</div>}

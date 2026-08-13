@@ -15,6 +15,7 @@ const acceptance = [
   ['Travel navigation is present', app, /id: 'travel', label: '旅遊管理'/],
   ['Travel appears in tenant navigation contract', app, /'commerce', 'travel', 'ai-usage'/],
   ['Travel workspace is entitlement guarded', app, /currentView === 'travel'[^]*tenantViewAccessible[^]*<TravelWorkspace/],
+  ['Travel workspace uses the full available content width', app, /currentView === 'travel' \? 'w-full' : 'max-w-6xl mx-auto'/],
   ['member Travel route is mounted', app, /pathname === '\/liff\/travel'[^]*<LiffTravelPage/],
   ['tenant has itinerary tab', tenant, /\['itineraries','行程'\]/],
   ['tenant has departure tab', tenant, /\['departures','出發日'\]/],
