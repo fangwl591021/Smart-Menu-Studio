@@ -46,7 +46,7 @@ test('8F-UI ingest uses existing safe image upload and bounded transient text', 
 });
 
 test('8F-UI AI is optional, platform-authoritative, review-only, and never auto-activates', () => {
-  for (const value of ['AI 解析 DM', '正在解析 DM…', 'AI 草稿已產生，請確認內容。', '此工作區尚未啟用 AI 功能。', 'AI 解析內容僅供草稿使用', '/extract']) assert.ok(promotion.includes(value));
+  for (const value of ['重新 AI 解析', '正在重新解析 DM…', 'AI 草稿已產生，請確認內容。', '此工作區尚未啟用 AI 功能。', 'AI 解析內容僅供草稿使用', '/extract']) assert.ok(promotion.includes(value));
   assert.doesNotMatch(promotion, /GEMINI_API_KEY|OPENAI_API_KEY|apiKey|secret/i);
   assert.match(promotion, /if \(kind === 'ai'\) body = [^;]*\/extract/);
   assert.match(promotion, /if \(kind === 'activate'\) body = [^;]*\/activate/);
@@ -65,7 +65,8 @@ test('8F-UI review mirrors exact backend fields, explicit activation, archive, a
 });
 
 test('8F-UI library provides safe filters and no internal identifiers', () => {
-  for (const label of ['搜尋標題或目的地','全部狀態','全部目的地','全部有效期','正式行程連結','更新時間','目前沒有推廣素材。']) assert.ok(promotion.includes(label));
+  for (const label of ['搜尋標題或目的地','全部狀態','全部目的地','全部有效期','正式行程連結','更新時間','操作','重算／封存','目前沒有推廣素材。']) assert.ok(promotion.includes(label));
+  assert.match(promotion, /item\.status !== 'ARCHIVED' \? <button[^>]*onClick=\{\(\) => open\(item\.safePromotionReference\)\}[^>]*>重算／封存<\/button> : '—'/);
   assert.match(promotion, /safePromotionReference/);
   assert.doesNotMatch(promotion, /promotionId|versionId|knowledgeEntryId|workspaceId|crmPersonId|memberId|dealerId|campaignId|r2Key|storageKey/);
 });
