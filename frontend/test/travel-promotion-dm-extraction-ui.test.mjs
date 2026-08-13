@@ -22,6 +22,21 @@ test('new DM requires an image, creates without a manual label, and immediately 
   assert.ok(createFlow.includes('const created = createdBody.promotion'));
   assert.ok(createFlow.includes('onCreated(extractedBody.promotion)'));
 });
+test('DM image upload uses the backend contract, updates the selected count, and exposes backend errors', () => {
+  const start = workspace.indexOf('function CreateDm');
+  const end = workspace.indexOf('function FormalLink', start);
+  const createFlow = workspace.slice(start, end);
+  for (const expected of [
+    "data.append('image', file)",
+    "data.append('purpose', 'travel-promotion-dm')",
+    "['image/jpeg', 'image/png'].includes(file.type)",
+    'file.size < 1 || file.size > 1024 * 1024',
+    'body.asset.id].slice(0, 8)',
+    'body?.errorCode',
+    'setError(cause instanceof Error ? cause.message',
+  ]) assert.ok(createFlow.includes(expected), `missing ${expected}`);
+  assert.doesNotMatch(createFlow, /travelPromotionErrorMessage(cause.message)/);
+});
 test('DM extraction review keeps original image beside structured manual correction', () => {
   assert.match(workspace, /alt="原始 DM"/);
   assert.match(workspace, /max-h-\[70vh\][^"']*object-contain/);

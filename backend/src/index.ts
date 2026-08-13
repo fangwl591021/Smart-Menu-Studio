@@ -1739,24 +1739,32 @@ app.post('/api/detect-layout', async (c) => {
   }
 });
 app.post('/api/templates/upload-image', async (c) => {
+  let isPromotionDm = false;
   try {
     const body = await c.req.parseBody();
+    isPromotionDm = body.purpose === 'travel-promotion-dm';
     const image = body.image;
     if (!image || typeof image === 'string' || !(image instanceof File)) {
-      return c.json({ success: false, error: '請提供圖片檔案。' }, 400);
+      return c.json({ success: false, ...(isPromotionDm ? { errorCode: 'TRAVEL_PROMOTION_DM_IMAGE_REQUIRED' } : {}), error: '請提供圖片檔案。' }, 400);
     }
     if (!['image/png', 'image/jpeg'].includes(image.type)) {
-      return c.json({ success: false, error: 'LINE Rich Menu 圖片只支援 PNG、JPG。' }, 400);
+      return c.json({ success: false, ...(isPromotionDm ? { errorCode: 'TRAVEL_PROMOTION_DM_IMAGE_TYPE_INVALID' } : {}), error: isPromotionDm ? 'DM 圖片只支援 PNG、JPG。' : 'LINE Rich Menu 圖片只支援 PNG、JPG。' }, 400);
     }
-    if (image.size > 1024 * 1024) return c.json({ success: false, error: 'LINE Rich Menu 圖片不可超過 1MB。' }, 400);
+    if (image.size < 1 || image.size > 1024 * 1024) {
+      return c.json({ success: false, ...(isPromotionDm ? { errorCode: 'TRAVEL_PROMOTION_DM_IMAGE_SIZE_INVALID' } : {}), error: isPromotionDm ? 'DM 圖片大小必須介於 1 byte 與 1MB。' : 'LINE Rich Menu 圖片不可超過 1MB。' }, 400);
+    }
 
     const imageBuffer = await image.arrayBuffer();
     let dimensions;
     try {
       dimensions = readImageDimensions(imageBuffer, image.type);
-      validateRichMenuImageDimensions(dimensions.width, dimensions.height);
+      if (!isPromotionDm) validateRichMenuImageDimensions(dimensions.width, dimensions.height);
     } catch {
-      return c.json({ success: false, error: '圖片尺寸不符合 LINE Rich Menu 規格，或無法讀取圖片尺寸。' }, 400);
+      return c.json({
+        success: false,
+        ...(isPromotionDm ? { errorCode: 'TRAVEL_PROMOTION_DM_IMAGE_INVALID' } : {}),
+        error: isPromotionDm ? '無法讀取 DM 圖片尺寸。' : '圖片尺寸不符合 LINE Rich Menu 規格，或無法讀取圖片尺寸。',
+      }, 400);
     }
 
     const assetId = id('asset');
@@ -1791,7 +1799,11 @@ app.post('/api/templates/upload-image', async (c) => {
     });
   } catch (e: any) {
     console.error('upload-image:', e);
-    return c.json({ success: false, error: e?.message || '圖片上傳失敗' }, 500);
+    return c.json({
+      success: false,
+      ...(isPromotionDm ? { errorCode: 'TRAVEL_PROMOTION_DM_IMAGE_UPLOAD_FAILED' } : {}),
+      error: isPromotionDm ? 'DM 圖片無法寫入素材庫，請稍後再試。' : e?.message || '圖片上傳失敗',
+    }, 500);
   }
 });
 app.get('/api/assets/:assetId', async (c) => {

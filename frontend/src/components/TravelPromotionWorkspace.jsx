@@ -41,15 +41,26 @@ function CreateDm({ request, onCreated, aiEnabled }) {
       setError('僅支援 JPG 與 PNG 圖片。');
       return;
     }
+    if (file.size < 1 || file.size > 1024 * 1024) {
+      setError('TRAVEL_PROMOTION_DM_IMAGE_SIZE_INVALID：DM 圖片大小必須介於 1 byte 與 1MB。');
+      return;
+    }
     setUploading(true);
     setError('');
     try {
       const data = new FormData();
       data.append('image', file);
-      const body = await requestJson(request, '/api/templates/upload-image', { method: 'POST', body: data });
+      data.append('purpose', 'travel-promotion-dm');
+      const response = await request('/api/templates/upload-image', { method: 'POST', body: data });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !body?.success) {
+        const detail = [body?.errorCode, body?.error].filter(Boolean).join('：');
+        throw new Error(detail || `HTTP_${response.status}：DM 圖片上傳失敗。`);
+      }
+      if (!body.asset?.id) throw new Error('TRAVEL_PROMOTION_DM_ASSET_INVALID：上傳完成但未取得圖片資產。');
       setForm(value => ({ ...value, safeAssetReferences: [...value.safeAssetReferences, body.asset.id].slice(0, 8) }));
     } catch (cause) {
-      setError(travelPromotionErrorMessage(cause.message));
+      setError(cause instanceof Error ? cause.message : 'TRAVEL_PROMOTION_DM_IMAGE_UPLOAD_FAILED：DM 圖片上傳失敗。');
     } finally {
       setUploading(false);
     }

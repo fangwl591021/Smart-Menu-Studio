@@ -120,9 +120,22 @@ test('asset upload persists actual width and height without a migration backfill
   assert.match(source, /size_bytes, width, height, status/);
   assert.match(source, /readImageDimensions\(imageBuffer, image\.type/);
   assert.equal(source.includes("['image/png', 'image/jpeg', 'image/webp']"), false);
-  assert.equal(source.includes("if (image.size > 1024 * 1024)"), true);
+  assert.equal(source.includes("image.size < 1 || image.size > 1024 * 1024"), true);
 });
 
+test('travel promotion DM upload keeps image field, MIME and size limits, R2 persistence, and skips only Rich Menu dimensions', () => {
+  const start = source.indexOf("app.post('/api/templates/upload-image'");
+  const end = source.indexOf("app.get('/api/assets/:assetId'", start);
+  const uploadRoute = source.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.ok(uploadRoute.includes("isPromotionDm = body.purpose === 'travel-promotion-dm'"));
+  assert.ok(uploadRoute.includes('const image = body.image'));
+  assert.ok(uploadRoute.includes("['image/png', 'image/jpeg'].includes(image.type)"));
+  assert.ok(uploadRoute.includes('image.size < 1 || image.size > 1024 * 1024'));
+  assert.ok(uploadRoute.includes('if (!isPromotionDm) validateRichMenuImageDimensions'));
+  assert.ok(uploadRoute.includes('c.env.smart_menu_assets.put'));
+  assert.ok(uploadRoute.includes('TRAVEL_PROMOTION_DM_IMAGE_UPLOAD_FAILED'));
+});
 test('LINE publish payload uses project image dimensions', () => {
   assert.match(source, /size:\s*\{\s*width:\s*dimensions\.width,\s*height:\s*dimensions\.height/);
   assert.doesNotMatch(source, /size:\s*\{\s*width:\s*2500,\s*height:\s*1686/);
