@@ -16,7 +16,21 @@ import {
 } from '../travel-promotion-presentation';
 
 const json = body => ({ headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-async function requestJson(request, path, options) { const response = await request(path, options); const body = await response.json().catch(() => ({})); if (!response.ok || !body?.success) throw new Error(body?.error || 'REQUEST_FAILED'); return body; }
+async function requestJson(request, path, options) {
+  const response = await request(path, options);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || !body?.success) {
+    const error = new Error(body?.error || '操作失敗');
+    error.errorCode = body?.errorCode || 'REQUEST_FAILED';
+    error.backendError = body?.error || '操作失敗';
+    throw error;
+  }
+  return body;
+}
+const requestErrorDetail = cause => {
+  if (!(cause instanceof Error)) return 'REQUEST_FAILED：操作失敗';
+  return (cause.errorCode || 'REQUEST_FAILED') + '：' + (cause.backendError || cause.message || '操作失敗');
+};
 const localDateTime = value => value ? String(value).slice(0, 16) : '';
 const toForm = promotion => { const draft = promotion?.draft || {}; return { title: draft.title || '', summary: draft.summary || '', destination: draft.destination || '', region: draft.region || '', days: draft.days ?? '', departureLocation: draft.departureLocation || '', dateTexts: promotionListText(draft.dateTexts), pricingTexts: promotionListText(draft.pricingTexts), promotionTerms: promotionListText(draft.promotionTerms), highlights: promotionListText(draft.highlights), keywords: promotionListText(draft.keywords), faq: (draft.faq || []).map(item => `${item.question}｜${item.answer}`).join('\n'), replyTemplate: draft.replyTemplate || '', socialCopy: draft.socialCopy || '', expiresAt: localDateTime(promotion?.expiresAt) }; };
 const fromForm = form => ({ title: form.title.trim(), summary: form.summary.trim(), destination: form.destination.trim(), region: form.region.trim(), days: form.days === '' ? null : Number(form.days), departureLocation: form.departureLocation.trim(), dateTexts: parsePromotionListText(form.dateTexts, 20), pricingTexts: parsePromotionListText(form.pricingTexts, 20), promotionTerms: parsePromotionListText(form.promotionTerms, 20), highlights: parsePromotionListText(form.highlights, 20), keywords: parsePromotionListText(form.keywords, 30), faq: parsePromotionListText(form.faq, 12).map(row => { const [question, ...answer] = row.split('｜'); return { question: question?.trim() || '', answer: answer.join('｜').trim() }; }).filter(item => item.question && item.answer), replyTemplate: form.replyTemplate.trim(), socialCopy: form.socialCopy.trim(), expiresAt: form.expiresAt ? new Date(form.expiresAt).toISOString() : null });
@@ -93,7 +107,7 @@ function CreateDm({ request, onCreated, aiEnabled }) {
       });
       onCreated(extractedBody.promotion);
     } catch (cause) {
-      setError(travelPromotionErrorMessage(cause.message));
+      setError(requestErrorDetail(cause));
     } finally {
       setBusy(false);
     }

@@ -22,6 +22,22 @@ test('new DM requires an image, creates without a manual label, and immediately 
   assert.ok(createFlow.includes('const created = createdBody.promotion'));
   assert.ok(createFlow.includes('onCreated(extractedBody.promotion)'));
 });
+test('DM create and extract preserve backend error code and readable error', () => {
+  const requestStart = workspace.indexOf('async function requestJson');
+  const requestEnd = workspace.indexOf('const localDateTime', requestStart);
+  const requestFlow = workspace.slice(requestStart, requestEnd);
+  assert.ok(requestFlow.includes("error.errorCode = body?.errorCode || 'REQUEST_FAILED'"));
+  assert.ok(requestFlow.includes("error.backendError = body?.error || '操作失敗'"));
+  assert.ok(requestFlow.includes("(cause.errorCode || 'REQUEST_FAILED') + '：' + (cause.backendError || cause.message || '操作失敗')"));
+
+  const createStart = workspace.indexOf('function CreateDm');
+  const createEnd = workspace.indexOf('function FormalLink', createStart);
+  const createFlow = workspace.slice(createStart, createEnd);
+  assert.ok(createFlow.includes("requestJson(request, '/api/travel/promotions'"));
+  assert.ok(createFlow.includes('/extract'));
+  assert.ok(createFlow.includes('setError(requestErrorDetail(cause))'));
+  assert.doesNotMatch(createFlow, /setError\(travelPromotionErrorMessage\(cause\.message\)\)/);
+});
 test('DM image upload uses the backend contract, updates the selected count, and exposes backend errors', () => {
   const start = workspace.indexOf('function CreateDm');
   const end = workspace.indexOf('function FormalLink', start);
