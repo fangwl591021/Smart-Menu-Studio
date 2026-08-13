@@ -10,8 +10,10 @@ import {
   validatePromotionDraft,
 } from '../src/travel/promotion.ts';
 import {
+  OPENAI_TRAVEL_PROMOTION_MODEL,
   classifyTravelPromotionProviderFailure,
   travelPromotionGeminiSchema,
+  travelPromotionOpenAiSchema,
 } from '../src/travel/promotion-routes.ts';
 
 const file = relative => new URL(relative, import.meta.url);
@@ -74,6 +76,11 @@ test('approved versions, approved evidence, and knowledge entries are immutable 
 test('strict extraction schema normalizes the fixed DM JSON and preserves a compatible draft projection', () => {
   assert.equal(TRAVEL_PROMOTION_EXTRACT_SCHEMA.additionalProperties, false);
   assert.equal(TRAVEL_PROMOTION_EXTRACT_SCHEMA.properties.title.maxLength, 120);
+  const openAiSchema = travelPromotionOpenAiSchema(TRAVEL_PROMOTION_EXTRACT_SCHEMA);
+  assert.equal(openAiSchema.type, 'object');
+  assert.deepEqual(openAiSchema.properties.travelDays.type, ['integer', 'null']);
+  assert.equal(openAiSchema.properties.title.maxLength, 120);
+  assert.equal(OPENAI_TRAVEL_PROMOTION_MODEL, 'gpt-5.6-terra');
   assert.equal(TRAVEL_PROMOTION_EXTRACT_SCHEMA.properties.promotionHighlights.maxItems, 20);
   assert.equal(TRAVEL_PROMOTION_EXTRACT_SCHEMA.properties.itinerarySummary.maxItems, 30);
   assert.deepEqual(TRAVEL_PROMOTION_EXTRACT_SCHEMA.properties.price.properties.currency.enum, ['TWD']);
@@ -133,13 +140,24 @@ test('Gemini provider schema and failures preserve safe, actionable diagnostics'
   const providerSchema = travelPromotionGeminiSchema(TRAVEL_PROMOTION_EXTRACT_SCHEMA);
   assert.equal(providerSchema.properties.title.maxLength, undefined);
   assert.equal(TRAVEL_PROMOTION_EXTRACT_SCHEMA.properties.title.maxLength, 120);
+  const openAiSchema = travelPromotionOpenAiSchema(TRAVEL_PROMOTION_EXTRACT_SCHEMA);
+  assert.equal(openAiSchema.type, 'object');
+  assert.deepEqual(openAiSchema.properties.travelDays.type, ['integer', 'null']);
+  assert.equal(openAiSchema.properties.title.maxLength, 120);
+  assert.equal(OPENAI_TRAVEL_PROMOTION_MODEL, 'gpt-5.6-terra');
   assert.equal(classifyTravelPromotionProviderFailure(401, { error: { status: 'UNAUTHENTICATED', message: 'bad key' } }).errorCode, 'TRAVEL_PROMOTION_AI_AUTH_FAILED');
   assert.equal(classifyTravelPromotionProviderFailure(403, { error: { status: 'PERMISSION_DENIED' } }).errorCode, 'TRAVEL_PROMOTION_AI_ACCESS_DENIED');
   assert.equal(classifyTravelPromotionProviderFailure(429, { error: { status: 'RESOURCE_EXHAUSTED' } }).errorCode, 'TRAVEL_PROMOTION_AI_QUOTA_EXCEEDED');
   assert.equal(classifyTravelPromotionProviderFailure(400, { error: { status: 'INVALID_ARGUMENT' } }).errorCode, 'TRAVEL_PROMOTION_AI_REQUEST_INVALID');
   assert.equal(classifyTravelPromotionProviderFailure(500, null).errorCode, 'TRAVEL_PROMOTION_AI_PROVIDER_FAILED');
-  assert.match(routes, /upstreamMessage:providerFailure\.upstreamMessage/);
-  assert.doesNotMatch(routes, /console\.(?:log|error)[^\n]*(?:GEMINI_API_KEY|apiKey)/);
+  assert.match(routes, /upstreamMessage: input\.failure\.upstreamMessage/);
+  assert.doesNotMatch(routes, /console\.(?:log|error)[^\n]*(?:GEMINI_API_KEY|OPENAI_API_KEY|apiKey)/);
+  assert.match(routes, /if\(c\.env\.GEMINI_API_KEY\)/);
+  assert.match(routes, /if\(!extraction&&c\.env\.OPENAI_API_KEY\)/);
+  assert.ok(routes.indexOf('if(c.env.GEMINI_API_KEY)') < routes.indexOf('if(!extraction&&c.env.OPENAI_API_KEY)'));
+  assert.match(routes, /https:\/\/api\.openai\.com\/v1\/responses/);
+  assert.match(routes, /type:'input_image'/);
+  assert.match(routes, /provider:'openai',model:OPENAI_TRAVEL_PROMOTION_MODEL/);
 });
 
 test('manual draft, source revision guard, next draft, activation batch, and deterministic entries are explicit', () => {
