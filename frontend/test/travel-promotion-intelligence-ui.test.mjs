@@ -65,8 +65,8 @@ test('8F-UI review mirrors exact backend fields, explicit activation, archive, a
 });
 
 test('8F-UI library provides safe filters and no internal identifiers', () => {
-  for (const label of ['搜尋標題或目的地','全部狀態','全部目的地','全部有效期','正式行程連結','更新時間','操作','重算／封存','目前沒有推廣素材。']) assert.ok(promotion.includes(label));
-  assert.match(promotion, /item\.status !== 'ARCHIVED' \? <button[^>]*onClick=\{\(\) => open\(item\.safePromotionReference\)\}[^>]*>重算／封存<\/button> : '—'/);
+  for (const label of ['搜尋標題或目的地','全部狀態','全部目的地','全部有效期','正式行程連結','重算／封存','目前沒有推廣素材。']) assert.ok(promotion.includes(label));
+  assert.match(promotion, /canManage && item\.status !== 'ARCHIVED' \? <button[^>]*onClick=\{\(\) => open\(item\.safePromotionReference\)\}[^>]*>重算／封存<\/button> : '—'/);
   assert.match(promotion, /safePromotionReference/);
   assert.doesNotMatch(promotion, /promotionId|versionId|knowledgeEntryId|workspaceId|crmPersonId|memberId|dealerId|campaignId|r2Key|storageKey/);
 });
