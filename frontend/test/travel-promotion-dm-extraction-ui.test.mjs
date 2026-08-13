@@ -8,6 +8,20 @@ const [workspace, editor] = await Promise.all([
   read('../src/components/TravelPromotionExtractionEditor.jsx'),
 ]);
 
+test('new DM requires an image, creates without a manual label, and immediately enters AI review', () => {
+  const start = workspace.indexOf('function CreateDm');
+  const end = workspace.indexOf('function FormalLink', start);
+  const createFlow = workspace.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.doesNotMatch(createFlow, /素材名稱|displayLabel/);
+  assert.match(createFlow, /貼上 DM 文字（選填）/);
+  assert.match(createFlow, /請先上傳 DM 圖片。/);
+  const createAt = createFlow.indexOf("requestJson(request, '/api/travel/promotions'");
+  const extractAt = createFlow.indexOf('/extract');
+  assert.ok(createAt >= 0 && extractAt > createAt);
+  assert.ok(createFlow.includes('const created = createdBody.promotion'));
+  assert.ok(createFlow.includes('onCreated(extractedBody.promotion)'));
+});
 test('DM extraction review keeps original image beside structured manual correction', () => {
   assert.match(workspace, /alt="原始 DM"/);
   assert.match(workspace, /max-h-\[70vh\][^"']*object-contain/);

@@ -6,6 +6,7 @@ import {
   TRAVEL_PROMOTION_EXTRACTION_INSTRUCTION,
   extractionToPromotionDraft,
   parsePromotionAiPayload,
+  unnamedPromotionDisplayLabel,
   validatePromotionDraft,
 } from '../src/travel/promotion.ts';
 
@@ -80,6 +81,11 @@ test('strict extraction schema normalizes the fixed DM JSON and preserves a comp
   assert.throws(() => validatePromotionDraft(complete({ title: 'x'.repeat(121) })), /TRAVEL_PROMOTION_INPUT_INVALID/);
 });
 
+test('promotion display label uses the AI title with a Taiwan-time unnamed fallback', () => {
+  assert.equal(unnamedPromotionDisplayLabel(new Date('2026-08-13T04:34:00.000Z')), '未命名推廣素材 20260813-1234');
+  assert.ok(promotion.includes("body.displayLabel === undefined ? unnamedPromotionDisplayLabel() : bounded(body.displayLabel, 160) || unnamedPromotionDisplayLabel()"));
+  assert.ok(promotion.includes("display_label=CASE WHEN ?<>'' THEN ? ELSE display_label END"));
+});
 test('prompt injection is isolated and unknown image facts remain empty-capable', () => {
   assert.match(TRAVEL_PROMOTION_EXTRACTION_INSTRUCTION, /untrusted document content/i);
   assert.match(TRAVEL_PROMOTION_EXTRACTION_INSTRUCTION, /DM images as the primary source/i);

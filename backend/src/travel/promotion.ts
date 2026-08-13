@@ -107,6 +107,14 @@ const nullableDate = (value: unknown) => {
   if (!Number.isFinite(timestamp)) throw new Error('TRAVEL_PROMOTION_INPUT_INVALID');
   return new Date(timestamp).toISOString();
 };
+export const unnamedPromotionDisplayLabel = (now = new Date()) => {
+  const parts: Record<string, string> = {};
+  for (const part of new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(now)) parts[part.type] = part.value;
+  return `未命名推廣素材 ${parts.year}${parts.month}${parts.day}-${parts.hour}${parts.minute}`;
+};
 const strings = (value: unknown, count: number, maximum: number, code = 'TRAVEL_PROMOTION_AI_OUTPUT_INVALID') => {
   if (!Array.isArray(value) || value.length > count) throw new Error(code);
   return value.map(item => bounded(item, maximum, code));
@@ -351,8 +359,7 @@ export async function createPromotion(db: Db, input: { workspaceId: string; user
   const references = assetReferences(body.safeAssetReferences);
   if (!sourceText && !references.length) throw new Error('TRAVEL_PROMOTION_SOURCE_REQUIRED');
   const assets = await resolveAssets(db, input.workspaceId, references);
-  const displayLabel = bounded(body.displayLabel, 160);
-  if (!displayLabel) throw new Error('TRAVEL_PROMOTION_INPUT_INVALID');
+  const displayLabel = body.displayLabel === undefined ? unnamedPromotionDisplayLabel() : bounded(body.displayLabel, 160) || unnamedPromotionDisplayLabel();
   const expiresAt = nullableDate(body.expiresAt);
   const id = makeId('tpd'), reference = makeReference(), versionId = makeId('tpv');
   const sourceType = sourceText && assets.length ? 'MIXED' : sourceText ? 'TEXT' : 'ASSET';

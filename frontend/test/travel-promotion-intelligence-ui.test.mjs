@@ -39,8 +39,8 @@ test('8F-UI stays inside Travel with the approved three subflows', () => {
 });
 
 test('8F-UI ingest uses existing safe image upload and bounded transient text', () => {
-  for (const value of ['新增宣傳 DM', '上傳 DM 圖片', '貼上 DM 文字', 'image/jpeg,image/png', 'maxLength={20000}', '/ 20,000', '請勿上傳含身分證、護照、健康或金融個資的文件。', '/api/templates/upload-image', 'safeAssetReferences']) assert.ok(promotion.includes(value), `missing ${value}`);
-  assert.doesNotMatch(promotion, /PDF|application\/pdf|storage_key|bucket|Wasabi|base64|localStorage|sessionStorage|indexedDB/i);
+  for (const value of ['新增宣傳 DM', '上傳 DM 圖片', '貼上 DM 文字（選填）', '請先上傳 DM 圖片。', 'image/jpeg,image/png', 'maxLength={20000}', '/ 20,000', '請勿上傳含身分證、護照、健康或金融個資的文件。', '/api/templates/upload-image', 'safeAssetReferences']) assert.ok(promotion.includes(value), `missing ${value}`);
+  assert.doesNotMatch(promotion, /素材名稱|PDF|application\/pdf|storage_key|bucket|Wasabi|base64|localStorage|sessionStorage|indexedDB/i);
   assert.match(promotion, /DM 是推廣素材，不是正式行程/);
   assert.doesNotMatch(promotion, />新增行程</);
 });
