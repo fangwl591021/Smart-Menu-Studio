@@ -96,6 +96,10 @@ test('success notes that LINE chat may need to be reopened', () => assert.match(
 
 test('智慧導引 has an expanded state', () => assert.match(guide, /aria-expanded="true"/));
 test('智慧導引 has a visible collapse control', () => assert.match(guide, /aria-label="收合智慧導引"/));
+test('智慧導引 stays within the viewport and scrolls internally', () => {
+  assert.match(guide, /max-h-\[calc\(100dvh-2\.5rem\)\]/);
+  assert.match(guide, /overflow-y-auto/);
+});
 test('智慧導引 has a collapsed state', () => assert.match(guide, /data-guide-collapsed="true"/));
 test('collapsed guide is a small right-edge tab', () => assert.match(guide, /rounded-l-xl[\s\S]*border-r-0/));
 test('collapsed guide can re-expand', () => assert.match(guide, /onClick=\{\(\) => changeCollapsed\(false\)\}/));

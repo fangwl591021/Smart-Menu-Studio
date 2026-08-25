@@ -144,7 +144,7 @@ export default function SmartGuide({
   }
 
   return (
-    <aside data-guide-state={guide?.status || (state.loading ? 'loading' : 'error')} className={`fixed bottom-5 right-5 z-40 w-[min(380px,calc(100vw-2.5rem))] rounded-2xl border p-4 shadow-xl ${STATUS_STYLES[guide?.status] || 'border-gray-200 bg-white text-gray-900'}`}>
+    <aside data-guide-state={guide?.status || (state.loading ? 'loading' : 'error')} className={`fixed bottom-5 right-5 z-40 max-h-[calc(100dvh-2.5rem)] w-[min(380px,calc(100vw-2.5rem))] overflow-y-auto overscroll-contain rounded-2xl border p-4 shadow-xl ${STATUS_STYLES[guide?.status] || 'border-gray-200 bg-white text-gray-900'}`}>
       {toast && (
         <div className="absolute bottom-[calc(100%+10px)] left-0 right-0 whitespace-pre-line rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-900 shadow-lg">
           {toast}
