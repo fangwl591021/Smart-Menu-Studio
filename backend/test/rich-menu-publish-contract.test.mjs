@@ -14,10 +14,12 @@ const publishInput = fetcher => ({
   imageBody: new Uint8Array([1, 2, 3]),
   imageContentType: 'image/png',
   richMenuAliasId: 'project-a',
+  waitForDefaultVerification: async () => {},
 });
 
 const lineFetcher = ({ failAt = '', mismatch = false, providerBody = '' } = {}) => {
   const calls = [];
+  let defaultReads = 0;
   const fetcher = async (url, options = {}) => {
     calls.push({ url, options });
     if (url === 'https://api.line.me/v2/bot/richmenu' && options.method === 'POST') {
@@ -34,9 +36,13 @@ const lineFetcher = ({ failAt = '', mismatch = false, providerBody = '' } = {}) 
       return failAt === 'default' ? response(403, providerBody) : response(200);
     }
     if (url.endsWith('/user/all/richmenu') && !options.method) {
+      defaultReads += 1;
+      if (defaultReads === 1) return response(200, JSON.stringify({ richMenuId: 'richmenu-old' }));
       if (failAt === 'verify') return response(500, providerBody);
       return response(200, JSON.stringify({ richMenuId: mismatch ? 'richmenu-other' : 'richmenu-new' }));
     }
+    if (url.endsWith('/richmenu/alias/list') && !options.method) return response(200, JSON.stringify({ aliases: [] }));
+    if (url.endsWith('/richmenu/richmenu-old') && options.method === 'DELETE') return response(200, '{}');
     throw new Error(`Unexpected request: ${options.method || 'GET'} ${url}`);
   };
   return { fetcher, calls };
@@ -55,7 +61,7 @@ const expectFailure = async (options, expectedCode, expectedProgress) => {
   );
 };
 
-test('draft publish executes create, upload, alias, default, and verification in order', async () => {
+test('draft publish replaces and then retires an unaliased prior default in order', async () => {
   const mock = lineFetcher();
   const result = await publishRichMenuToLine(publishInput(mock.fetcher));
 
@@ -65,13 +71,17 @@ test('draft publish executes create, upload, alias, default, and verification in
     aliasAssigned: result.aliasAssigned,
     defaultAssigned: result.defaultAssigned,
   }, { created: true, imageUploaded: true, aliasAssigned: true, defaultAssigned: true });
+  assert.equal(result.priorDefaultRetired, true);
   assert.deepEqual(mock.calls.map(call => `${call.options.method || 'GET'} ${call.url}`), [
+    'GET https://api.line.me/v2/bot/user/all/richmenu',
     'POST https://api.line.me/v2/bot/richmenu',
     'POST https://api-data.line.me/v2/bot/richmenu/richmenu-new/content',
     'GET https://api.line.me/v2/bot/richmenu/alias/project-a',
     'POST https://api.line.me/v2/bot/richmenu/alias',
     'POST https://api.line.me/v2/bot/user/all/richmenu/richmenu-new',
     'GET https://api.line.me/v2/bot/user/all/richmenu',
+    'GET https://api.line.me/v2/bot/richmenu/alias/list',
+    'DELETE https://api.line.me/v2/bot/richmenu/richmenu-old',
   ]);
   assert.ok(mock.calls.every(call => call.options.headers.Authorization === 'Bearer workspace-token'));
 });
@@ -80,7 +90,21 @@ test('published project uses the same unconditional publish orchestration', asyn
   const mock = lineFetcher();
   const result = await publishRichMenuToLine(publishInput(mock.fetcher));
   assert.equal(result.defaultAssigned, true);
-  assert.equal(mock.calls.filter(call => call.url.includes('/user/all/richmenu')).length, 2);
+  assert.equal(mock.calls.filter(call => call.url.includes('/user/all/richmenu')).length, 3);
+});
+
+test('an aliased prior default is retained after the verified replacement', async () => {
+  const mock = lineFetcher();
+  const originalFetcher = mock.fetcher;
+  mock.fetcher = async (url, options = {}) => {
+    if (url.endsWith('/richmenu/alias/list')) return response(200, JSON.stringify({ aliases: [{ richMenuAliasId: 'legacy-page', richMenuId: 'richmenu-old' }] }));
+    return originalFetcher(url, options);
+  };
+
+  const result = await publishRichMenuToLine(publishInput(mock.fetcher));
+  assert.equal(result.defaultAssigned, true);
+  assert.equal(result.priorDefaultRetired, false);
+  assert.equal(mock.calls.some(call => call.url.endsWith('/richmenu/richmenu-old') && call.options.method === 'DELETE'), false);
 });
 
 test('create failure exposes no completed publish stage', async () => {

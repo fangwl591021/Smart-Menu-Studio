@@ -7,6 +7,7 @@ import {
   setDefaultRichMenu,
   upsertRichMenuAlias,
   verifyDefaultRichMenu,
+  verifyDefaultRichMenuWithRetry,
 } from '../src/line-rich-menu.mjs';
 
 const response = (status, body = '') => new Response(body, {
@@ -84,6 +85,24 @@ test('reads and verifies the current default through the official LINE endpoint'
   assert.equal(request.options.headers.Authorization, 'Bearer token');
   assert.equal(await verifyDefaultRichMenu(fetcher, 'token', 'richmenu-home'), true);
   assert.equal(await verifyDefaultRichMenu(fetcher, 'token', 'richmenu-other'), false);
+});
+
+test('retries a delayed default replacement before reporting verification failure', async () => {
+  let reads = 0;
+  let waits = 0;
+  const verified = await verifyDefaultRichMenuWithRetry(
+    async () => {
+      reads += 1;
+      return response(200, JSON.stringify({ richMenuId: reads === 1 ? 'richmenu-old' : 'richmenu-new' }));
+    },
+    'token',
+    'richmenu-new',
+    { wait: async () => { waits += 1; } },
+  );
+
+  assert.equal(verified, true);
+  assert.equal(reads, 2);
+  assert.equal(waits, 1);
 });
 
 test('LINE helper errors do not include raw provider response bodies', async () => {

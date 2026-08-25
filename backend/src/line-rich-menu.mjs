@@ -58,6 +58,27 @@ export async function deleteRichMenuAlias(fetcher, channelAccessToken, aliasId) 
   return { deleted: true, aliasId };
 }
 
+export async function listRichMenuAliases(fetcher, channelAccessToken) {
+  const response = await fetcher(`${LINE_API_BASE}/richmenu/alias/list`, {
+    headers: authorizationHeaders(channelAccessToken),
+  });
+
+  if (!response.ok) throw lineError(response, 'LINE_ALIAS_LIST_FAILED', '讀取 LINE Rich Menu Alias 清單失敗');
+  const data = await response.json();
+  return Array.isArray(data?.aliases) ? data.aliases : [];
+}
+
+export async function deleteRichMenu(fetcher, channelAccessToken, richMenuId) {
+  const response = await fetcher(`${LINE_API_BASE}/richmenu/${encodeURIComponent(richMenuId)}`, {
+    method: 'DELETE',
+    headers: authorizationHeaders(channelAccessToken),
+  });
+
+  if (response.status === 404) return { deleted: false, richMenuId };
+  if (!response.ok) throw lineError(response, 'LINE_RICH_MENU_DELETE_FAILED', '刪除 LINE Rich Menu 失敗');
+  return { deleted: true, richMenuId };
+}
+
 export async function setDefaultRichMenu(fetcher, channelAccessToken, richMenuId) {
   const response = await fetcher(`${LINE_API_BASE}/user/all/richmenu/${encodeURIComponent(richMenuId)}`, {
     method: 'POST',
@@ -82,6 +103,34 @@ export async function verifyDefaultRichMenu(fetcher, channelAccessToken, expecte
   return Boolean(current.richMenuId) && current.richMenuId === String(expectedRichMenuId ?? '').trim();
 }
 
+export async function verifyDefaultRichMenuWithRetry(fetcher, channelAccessToken, expectedRichMenuId, {
+  attempts = 3,
+  wait = () => new Promise(resolve => setTimeout(resolve, 250)),
+} = {}) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      if (await verifyDefaultRichMenu(fetcher, channelAccessToken, expectedRichMenuId)) return true;
+    } catch {
+      // The provider can briefly lag immediately after a successful replacement.
+    }
+    if (attempt + 1 < attempts) await wait();
+  }
+  return false;
+}
+
+async function retirePriorDefaultRichMenu(fetcher, channelAccessToken, priorRichMenuId, currentRichMenuId) {
+  if (!priorRichMenuId || priorRichMenuId === currentRichMenuId) return false;
+
+  try {
+    const aliases = await listRichMenuAliases(fetcher, channelAccessToken);
+    if (aliases.some(alias => String(alias?.richMenuId ?? '').trim() === priorRichMenuId)) return false;
+    return Boolean((await deleteRichMenu(fetcher, channelAccessToken, priorRichMenuId)).deleted);
+  } catch {
+    // Cleanup is intentionally best-effort: it must never undo a verified replacement.
+    return false;
+  }
+}
+
 const emptyPublishProgress = () => ({
   created: false,
   imageUploaded: false,
@@ -103,8 +152,16 @@ export async function publishRichMenuToLine({
   imageBody,
   imageContentType,
   richMenuAliasId,
+  waitForDefaultVerification,
 }) {
   const progress = emptyPublishProgress();
+  let priorDefaultRichMenuId = '';
+  try {
+    priorDefaultRichMenuId = (await getDefaultRichMenu(fetcher, channelAccessToken)).richMenuId;
+  } catch {
+    // A pre-existing menu may be managed outside this channel. Continue safely without cleanup.
+  }
+
   const createResponse = await fetcher(`${LINE_API_BASE}/richmenu`, {
     method: 'POST',
     headers: authorizationHeaders(channelAccessToken, true),
@@ -162,12 +219,21 @@ export async function publishRichMenuToLine({
 
   let verified = false;
   try {
-    verified = await verifyDefaultRichMenu(fetcher, channelAccessToken, richMenuId);
+    verified = await verifyDefaultRichMenuWithRetry(fetcher, channelAccessToken, richMenuId, {
+      wait: waitForDefaultVerification,
+    });
   } catch {
     throw publishError('LINE_DEFAULT_VERIFY_FAILED', progress);
   }
   if (!verified) throw publishError('LINE_DEFAULT_VERIFY_FAILED', progress);
   progress.defaultAssigned = true;
 
-  return { ...progress, richMenuId };
+  const priorDefaultRetired = await retirePriorDefaultRichMenu(
+    fetcher,
+    channelAccessToken,
+    priorDefaultRichMenuId,
+    richMenuId,
+  );
+
+  return { ...progress, richMenuId, priorDefaultRetired };
 }
