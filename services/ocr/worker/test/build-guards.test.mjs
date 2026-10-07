@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { runPredeploy } from '../scripts/predeploy.mjs';
 import { runBuild } from '../scripts/build-ci.mjs';
 import bootstrap from '../src/bootstrap.ts';
+import { dockerBuildNetworkArgs } from '../scripts/docker-build-network.mjs';
 
 const reviewed = () => JSON.stringify({ nativeThirdPartyNoticesReviewed: true });
 const quiet = () => {};
@@ -64,4 +65,22 @@ test('bootstrap is private, closed and has no resources or secrets', async () =>
   for (const key of ['services', 'containers', 'durable_objects', 'd1_databases', 'r2_buckets', 'vars'])
     assert.equal(config[key], undefined);
   assert.equal(bootstrap.fetch().status, 404);
+});
+
+test('Cloudflare CI network override applies to builds only, never test/native runtime', () => {
+  assert.deepEqual(dockerBuildNetworkArgs({}), []);
+  assert.deepEqual(dockerBuildNetworkArgs({ WRANGLER_CI_OVERRIDE_NETWORK_MODE_HOST: 'true' }), ['--network', 'host']);
+  const env = { WRANGLER_CI_OVERRIDE_NETWORK_MODE_HOST: 'true' };
+  const calls = [];
+  assert.equal(runBuild({ env, report: quiet, spawn: (command, args) => {
+    calls.push({ command, args }); return { status: 0 };
+  } }), 0);
+  assert.deepEqual(calls[3].args.slice(0, 3), ['build', '--network', 'host']);
+  assert.equal(calls[4].args[calls[4].args.indexOf('--network') + 1], 'none');
+  const nativeCalls = [];
+  assert.equal(runPredeploy({ env, read: reviewed, report: quiet, spawn: (command, args) => {
+    nativeCalls.push({ command, args }); return { status: 0, stdout: 'linux\n' };
+  } }), 0);
+  assert.deepEqual(nativeCalls[1].args.slice(0, 3), ['build', '--network', 'host']);
+  assert.equal(nativeCalls[2].args[nativeCalls[2].args.indexOf('--network') + 1], 'none');
 });

@@ -17,7 +17,7 @@
 - 非 OCR 分支預覽建置關閉；不要讓這個 Worker 跟著 SaaS main 更新。
 - 沿用既有 GitHub 安裝與 Workers Builds 權杖。缺權限時停止，不擴權或新增權杖。
 
-`build:ci` 檢查 Worker 型別、10 項 Worker／guard 測試，並建置 Docker 的
+`build:ci` 檢查 Worker 型別、11 項 Worker／guard 測試，並建置 Docker 的
 `unit-tests` stage 執行 24 項合成 Python 測試。該 stage 不包含／下載原生引擎，
 測試容器不連外、不掛載租戶儲存。source checks 成功不代表原生 OCR 可用。
 
@@ -58,12 +58,17 @@ root 是 backend，非生產分支啟用且命令為 `wrangler versions upload`�
 - Cloudflare dashboard 已儲存 GitHub Builds 連線、上述 root／command／Node
   設定與監看路徑；OCR Worker 的非生產分支預覽建置已關閉。
 - 沿用既有 Builds 權杖；未新增權杖、擴大權限或安裝本機 Docker。
-- 本機 Worker／guard 10 項、Python 合成測試 24 項通過，工具鏈 npm audit 0 項。
-  雲端 Docker stage 尚待第一次實際建置，不能以本機測試替代。
+- 本機 Worker／guard 11 項、Python 合成測試 24 項通過，工具鏈 npm audit 0 項。
+  雲端 Docker stage 尚待完整實際建置，不能以本機測試替代。
+- 首次雲端建置 `6c0d775c-decf-4e5a-8b22-be564f88c72d` 已確實執行 Docker，
+  但 Python 套件安裝遭遇 Docker-in-Docker DNS 失敗。建置腳本已改為沿用
+  Wrangler 的既有 `WRANGLER_CI_OVERRIDE_NETWORK_MODE_HOST` 設定；沒有新增
+  dashboard 網路權限／變數，也沒有改動 runtime 的 `--network none`。
 
 原生函式庫告示核對仍未完成：詳見 `licenses/NATIVE-DEPENDENCIES.md`。
 不可將註冊 bootstrap、source checks 或成功 push 當作正式 OCR 已啟用。
 
 官方依據：
 [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/)、
-[Container 部署](https://developers.cloudflare.com/containers/guides/deploy/)。
+[Container 部署](https://developers.cloudflare.com/containers/guides/deploy/)、
+[Docker-in-Docker 建置網路](https://developers.cloudflare.com/containers/faq/#can-i-run-docker-inside-a-container-docker-in-docker)。
