@@ -75,7 +75,7 @@ test('Cloudflare CI network override applies to builds only, never test/native r
   const calls = [];
   assert.equal(runBuild({ env, report: quiet, spawn: (command, args) => {
     calls.push({ command, args });
-    return { status: 0, stdout: JSON.stringify({ MemoryLimit: true, CPUCfsQuota: false, PidsLimit: true }) };
+    return { status: 0, stdout: 'true|false|true\n' };
   } }), 0);
   assert.deepEqual(calls[4].args.slice(0, 3), ['build', '--network', 'host']);
   assert.equal(calls[5].args[calls[5].args.indexOf('--network') + 1], 'none');
@@ -84,8 +84,8 @@ test('Cloudflare CI network override applies to builds only, never test/native r
   const nativeCalls = [];
   assert.equal(runPredeploy({ env, read: reviewed, report: quiet, spawn: (command, args) => {
     nativeCalls.push({ command, args });
-    return { status: 0, stdout: args[1] === '--format' && args[2] === '{{json .}}'
-      ? JSON.stringify({ MemoryLimit: true, CPUCfsQuota: false, PidsLimit: true }) : 'linux\n' };
+    return { status: 0, stdout: args[1] === '--format' && args[2].includes('MemoryLimit')
+      ? 'true|false|true\n' : 'linux\n' };
   } }), 0);
   assert.deepEqual(nativeCalls[2].args.slice(0, 3), ['build', '--network', 'host']);
   assert.equal(nativeCalls[3].args[nativeCalls[3].args.indexOf('--network') + 1], 'none');
@@ -95,7 +95,9 @@ test('CI controller capabilities are explicit; unknown or failed probe blocks', 
   const env = { WRANGLER_CI_OVERRIDE_NETWORK_MODE_HOST: 'true' };
   assert.deepEqual(dockerRuntimeLimitArgs({ env: {}, spawn: () => { throw new Error('unexpected probe'); },
     report: quiet, memory: '1g', cpus: '1' }), ['--memory', '1g', '--cpus', '1', '--pids-limit', '64']);
-  for (const result of [{ status: 1, stdout: '{}' }, { status: 0, stdout: 'invalid' }, { status: 0, stdout: '{}' }]) {
+  assert.deepEqual(dockerRuntimeLimitArgs({ env, spawn: () => ({ status: 0, stdout: 'false|false|false\n' }),
+    report: quiet, memory: '1g', cpus: '1' }), []);
+  for (const result of [{ status: 1, stdout: '' }, { status: 0, stdout: 'invalid' }, { status: 0, stdout: '{}' }]) {
     const spawn = () => result;
     assert.equal(dockerRuntimeLimitArgs({ env, spawn, report: quiet, memory: '1g', cpus: '1' }), null);
     assert.equal(runBuild({ env, spawn, report: quiet }), 1);

@@ -4,12 +4,13 @@
 export function dockerRuntimeLimitArgs({ env, spawn, report, memory, cpus, docker = 'docker' }) {
   if (!env.WRANGLER_CI_OVERRIDE_NETWORK_MODE_HOST)
     return ['--memory', memory, '--cpus', cpus, '--pids-limit', '64'];
-  const result = spawn(docker, ['info', '--format', '{{json .}}'],
+  // Ask for explicit false values: Docker's whole-info JSON may omit them.
+  const result = spawn(docker, ['info', '--format', '{{.MemoryLimit}}|{{.CPUCfsQuota}}|{{.PidsLimit}}'],
     { encoding: 'utf8', windowsHide: true, timeout: 30_000 });
-  let capabilities;
-  try { capabilities = JSON.parse(result.stdout); } catch { return null; }
-  if (result.status !== 0 || ['MemoryLimit', 'CPUCfsQuota', 'PidsLimit']
-    .some(key => typeof capabilities[key] !== 'boolean')) return null;
+  const flags = typeof result.stdout === 'string' && result.stdout.trim();
+  if (result.status !== 0 || !/^(true|false)\|(true|false)\|(true|false)$/.test(flags)) return null;
+  const [MemoryLimit, CPUCfsQuota, PidsLimit] = flags.split('|').map(flag => flag === 'true');
+  const capabilities = { MemoryLimit, CPUCfsQuota, PidsLimit };
   report(`OCR_CI_INNER_LIMITS: memory=${capabilities.MemoryLimit}, cpu=${capabilities.CPUCfsQuota}, pids=${capabilities.PidsLimit}; outer job limits remain.`);
   return [
     ...(capabilities.MemoryLimit ? ['--memory', memory] : []),

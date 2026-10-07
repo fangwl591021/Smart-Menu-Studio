@@ -69,6 +69,9 @@ root 是 backend，非生產分支啟用且命令為 `wrangler versions upload`�
   只設定實際可用的內層資源限制；外層 Workers Builds 配額仍由平台管理。
   未知／失敗的探測會停止。正式 Container 規格、禁網路、唯讀、cap-drop、
   no-new-privileges 均不變；此 CI 測試不掛載客戶資料或 AI 金鑰。
+- 第三輪 `348fa8ba-63e8-40b1-a29e-0e5e44b293f2` 的 whole-info JSON 探測
+  未通過嚴格檢查而安全停止。改以明確格式只讀取三個 true／false，避免
+  整份 JSON 的欄位呈現差異；格式異常仍停止，不能把未知當作不支援。
 
 原生函式庫告示核對仍未完成：詳見 `licenses/NATIVE-DEPENDENCIES.md`。
 不可將註冊 bootstrap、source checks 或成功 push 當作正式 OCR 已啟用。
