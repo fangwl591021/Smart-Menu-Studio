@@ -58,7 +58,7 @@
 
 ## 尚未完成／部署阻擋
 
-1. **映像建置**：Windows 與既有 Ubuntu 都未找到 Docker／Podman。雲端已執行合成測試 stage 的 Docker build，首輪遭遇 Docker-in-Docker DNS 失敗；已修正建置網路接線，仍需核對完整建置結果。完整原生映像／container smoke test 尚未執行，也未驗證 Cloudflare CPU 上的 AVX／模型相容性。已在既有 Ubuntu 使用本次下載、驗證 SHA256 的官方原生引擎及繁體模型跑通合成圖；不是已部署的 Cloudflare 驗證。
+1. **映像建置**：Windows 與既有 Ubuntu 都未找到 Docker／Podman。雲端已建出合成測試映像；DNS 接線已修正，但內層 `docker run` 不可用，因此合成測試改在非 root、禁網路的 BuildKit RUN step 執行，仍需核對完整結果。完整原生映像／container smoke test 尚未執行，也未驗證 Cloudflare CPU 上的 AVX／模型相容性。已在既有 Ubuntu 使用本次下載、驗證 SHA256 的官方原生引擎及繁體模型跑通合成圖；不是已部署的 Cloudflare 驗證。
 2. **建置方式已確認**：使用者已同意獨立 Cloudflare Workers Builds，只發布 `services/ocr/` 的程式、授權及合成測試；不安裝系統 Docker、不發布整個 dirty checkout、不合併至 SaaS 的 main。CI 使用既有 GitHub 安裝與既有建置權杖，不複製 AI 金鑰。
 3. **帳號與部署**：既有 Wrangler OAuth 能列出 containers（目前 0 個），但這不是付費方案／資源配額的完整驗證。只有封閉 bootstrap 已註冊，沒有 native container／租戶繫結、方案升級或正式 OCR 部署；正式 OCR 開關仍未開啟。
 4. **PDF 工作**：容器目前只做圖片；先前 PDF HTTP adapter 僅供完整 Umi doc provider 使用。私有圖片 binding 明確拒絕 PDF，尚無 PDF 上傳入口、解析背景工作或持久任務。
@@ -84,7 +84,7 @@ Python 24 項通過，含原版排序、真實圖片解碼、原生程序模擬�
 
 另外執行 `tests/linux_native_smoke.py`：官方真實 PaddleOCR-json v1.4.1、繁體模型與抽出的 Umi 排序，在既有 Ubuntu 辨識出合成圖片中的 `123`，輸出 1 個區塊。該次啟動約 3,009ms、辨識約 328ms；只是單次合成圖／本機 CPU 數字，不能當作名片準確率、Cloudflare 延遲或省費證明。
 
-本機 SaaS 整合的後端指定 50 項（含私有 binding／Workers runtime 測試）、前端指定 10 項通過；這些混有其他既有變更的整合檔未一起提交到獨立服務分支。獨立服務自身的 Worker 12 項測試（含 CI 建置網路、controller 探測與 runtime 禁網路分離）、型別檢查及僅 Worker 的 dry-run 通過；完整 container dry-run 因缺 Docker 受阻。新增 Worker 使用獨立 Wrangler 4.148.0／Miniflare 5 runtime，以測試今日相容日期；現有後端 Wrangler／相容日期未升級。較廣名片回歸的 3 項尚未解決，不能宣稱全站回歸全數通過。
+本機 SaaS 整合的後端指定 50 項（含私有 binding／Workers runtime 測試）、前端指定 10 項通過；這些混有其他既有變更的整合檔未一起提交到獨立服務分支。獨立服務自身的 Worker 12 項測試（含 CI 建置網路與非 root／離線 build-stage 檢查）、型別檢查及僅 Worker 的 dry-run 通過；完整 container dry-run 因缺 Docker 受阻。新增 Worker 使用獨立 Wrangler 4.148.0／Miniflare 5 runtime，以測試今日相容日期；現有後端 Wrangler／相容日期未升級。較廣名片回歸的 3 項尚未解決，不能宣稱全站回歸全數通過。
 
 獨立工具鏈以 `overrides` 固定 sharp 0.35.5，修復 GHSA-wq5f-xc86-pv6w；2026-10-07 重跑 audit 為 0 項，Worker 測試現為 12／12 通過。沒有套用 `audit fix --force` 或更動現有 SaaS 的 lockfile。
 

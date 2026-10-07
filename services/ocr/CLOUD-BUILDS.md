@@ -18,11 +18,14 @@
 - 沿用既有 GitHub 安裝與 Workers Builds 權杖。缺權限時停止，不擴權或新增權杖。
 
 `build:ci` 檢查 Worker 型別、12 項 Worker／guard 測試，並建置 Docker 的
-`unit-tests` stage 執行 24 項合成 Python 測試。該 stage 不包含／下載原生引擎，
-測試容器不連外、不掛載租戶儲存。source checks 成功不代表原生 OCR 可用。
+`unit-tests` stage 以非 root、`RUN --network=none` 執行 24 項合成 Python 測試。
+該 stage 不包含／下載原生引擎，不掛載租戶儲存。Cloudflare Builds 無法直接
+使用內層 `docker run`，因此檢查放在 BuildKit 建置階段，並由外層建置配額
+管理資源；沒有修改主機 cgroup／權限。source checks 成功不代表原生 OCR 可用。
 
-真正的 `deploy` 先檢查原生第三方告示、Docker、建置正式映像，並在禁網路的
-合成圖片測試中跑真實引擎；全部通過才呼叫 Wrangler。告示仍未核對完成，
+真正的 `deploy` 先檢查原生第三方告示、Docker、建置正式映像；最終映像的
+非 root、禁網路 RUN step 使用合成圖片跑真實引擎，全部通過才呼叫 Wrangler。
+這仍不是正式 Container 執行環境的驗證。告示仍未核對完成，
 目前部署應被 `OCR_DEPLOY_BLOCKED` 阻擋，而不是假裝辨識成功。
 
 ## 初始化
@@ -72,6 +75,10 @@ root 是 backend，非生產分支啟用且命令為 `wrangler versions upload`�
 - 第三輪 `348fa8ba-63e8-40b1-a29e-0e5e44b293f2` 的 whole-info JSON 探測
   未通過嚴格檢查而安全停止。改以明確格式只讀取三個 true／false，避免
   整份 JSON 的欄位呈現差異；格式異常仍停止，不能把未知當作不支援。
+- 第四輪 `d45b8a95-915f-492d-8b3f-e03c518f2d19` 明確證實三個內層
+  controller 均 false；即使未設定內層限額，`docker run` 仍因 cgroup 路徑
+  不存在失敗。因此移除這條不適用的執行方式與探測 helper，改由 BuildKit
+  的離線／非 root RUN step 驗證。沒有更改主機權限或嘗試 cgroupns 繞過。
 
 原生函式庫告示核對仍未完成：詳見 `licenses/NATIVE-DEPENDENCIES.md`。
 不可將註冊 bootstrap、source checks 或成功 push 當作正式 OCR 已啟用。
