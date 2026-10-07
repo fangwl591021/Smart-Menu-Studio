@@ -2,6 +2,8 @@
 
 這是從官方 GitHub 抽出程式碼的移植，不需要使用者安裝 Umi 桌面軟體。已完成核心來源、受監督的無介面 HTTP 層、Cloudflare 私有 Worker 接線及容器建置程式；**尚未發布原生容器映像或啟用正式 OCR**。獨立建置的設定與狀態見 [CLOUD-BUILDS.md](./CLOUD-BUILDS.md)；只有返回 404 的 bootstrap 不代表 OCR 可用。
 
+最新檢點（2026-10-07）：使用者提供的完整 PocketFFT ZIP 已保留並驗證 Git archive comment／全部檔案雜湊；GCC runtime 與 Debian 套件逐位元一致；Paddle 和 ONNX Runtime 兩個 Eigen 版本的來源 include 範圍核對完成。58 份告示、原始 ZIP、4 個對應來源 archive 的固定下載計畫納入檢點，映像內再次驗證完整來源。這是工程來源檢查，不是通用法律認證。本機 Worker 21 項通過，Python 44 項跑完（Windows 符號連結測試 2 項跳過）；新的雲端原生映像與實際服務仍待驗證，正式 SaaS OCR 開關未開啟。
+
 ## 實際匯入的來源
 
 | 來源 | 專案位置 | 用途 |
@@ -63,7 +65,7 @@
 3. **帳號與部署**：既有 Wrangler OAuth 能列出 containers（目前 0 個），但這不是付費方案／資源配額的完整驗證。只有封閉 bootstrap 已註冊，沒有 native container／租戶繫結、方案升級或正式 OCR 部署；正式 OCR 開關仍未開啟。
 4. **PDF 工作**：容器目前只做圖片；先前 PDF HTTP adapter 僅供完整 Umi doc provider 使用。私有圖片 binding 明確拒絕 PDF，尚無 PDF 上傳入口、解析背景工作或持久任務。
 5. **真實素材比較**：還需要同批名片／海報核對錯誤率、暖機／冷啟動總延遲、AI tokens 和容器費。沒有驗證省費或準確率改善，低品質或冷啟動 fallback 可能增加耗時。商品外觀判斷仍需視覺 AI。
-6. **原生附帶第三方授權**：已比對官方 Paddle 2.3.2 與 Intel 套件，並保留 51 份告示／授權檔及來源、SHA256。仍有 FFT 原始來源人工驗證、Eigen 編譯範圍／來源義務及 bundled libgomp 檢點，guard 繼續阻擋；不能只改布林開關放行。完整檢點見 `licenses/NATIVE-DEPENDENCIES.md` 與 `licenses/native-review.json`。
+6. **原生依賴檢點**：本輪已完成三個來源檢點並保留 58 份告示／紀錄。GCC 保留原始 runtime；完整 GCC 原始碼／Debian patches 和兩個 Eigen source archive 在建置時以固定大小／SHA256 取得，隨最終映像保留，執行時不下載。部署仍必須通過來源與真實引擎 smoke test，不能只改布林开關放行。詳細證據與限制見 `licenses/NATIVE-DEPENDENCIES.md`、`Paddle.Eigen.Scope.txt`、`native-review.json`。
 
 只安裝專案目錄內的 Python venv／Node 依賴，下載並驗證官方 binary／models，以現有 Ubuntu 做離線合成圖測試；未安裝桌面 Umi／系統 Docker、修改 AI 金鑰、處理使用者檔案或修改正式會員資料。建置資產 cache 受 `.gitignore`／`.dockerignore` 排除，不能直接提交其中的二進位或測試暫存。
 

@@ -9,11 +9,39 @@
     "bytes": 124171144,
     "sha256": "92a8e5bfe668e1ddec161cd3525c90756cc4c7c608e451a7a2872eb9066d456b",
     "hashProvenance": "Measured locally from the official release download on 2026-10-07; publisher digest is unavailable.",
-    "localChanges": ["Byte-identical config_chinese_cht.txt alias named config_chinese_cht(v2).txt"]
+    "localChanges": [
+      "Byte-identical config_chinese_cht.txt alias named config_chinese_cht(v2).txt"
+    ]
   },
   "pythonImage": {
     "tag": "python:3.12-slim-bookworm",
     "digest": "sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258"
   },
-  "nativeThirdPartyNoticesReviewed": false
+  "nativeThirdPartyNoticesReviewed": true,
+  "sourceArchives": [
+    {
+      "name": "Eigen.Paddle.f612df.tar.gz",
+      "url": "https://codeload.github.com/eigen-mirror/eigen/tar.gz/f612df273689a19d25b45ca4f8269463207c4fee",
+      "bytes": 2721573,
+      "sha256": "e3fe5cac59763b7419af2de39840b5342d77624ddf8b181fb9f9f532615ec518"
+    },
+    {
+      "name": "Eigen.ONNXRuntime.d10b27.tar.gz",
+      "url": "https://codeload.github.com/eigen-mirror/eigen/tar.gz/d10b27fe37736d2944630ecd7557cefa95cf87c9",
+      "bytes": 2640035,
+      "sha256": "a3c10a8c14f55e9f09f98b0a0ac6874c21bda91f65b7469d9b1f6925990e867b"
+    },
+    {
+      "name": "gcc-10_10.2.1.orig.tar.xz",
+      "url": "https://deb.debian.org/debian/pool/main/g/gcc-10/gcc-10_10.2.1.orig.tar.xz",
+      "bytes": 84547844,
+      "sha256": "ea3c05faa381486e6b859c047dc14977418bf1ccda4567064e016493fd6fffec"
+    },
+    {
+      "name": "gcc-10_10.2.1-6.debian.tar.xz",
+      "url": "https://deb.debian.org/debian/pool/main/g/gcc-10/gcc-10_10.2.1-6.debian.tar.xz",
+      "bytes": 2366560,
+      "sha256": "a95d6b9da2be83f9751850b002021281411ff1003d9feb77298b131da47820b3"
+    }
+  ]
 }

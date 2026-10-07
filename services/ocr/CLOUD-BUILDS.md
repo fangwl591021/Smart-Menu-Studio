@@ -17,16 +17,16 @@
 - 非 OCR 分支預覽建置關閉；不要讓這個 Worker 跟著 SaaS main 更新。
 - 沿用既有 GitHub 安裝與 Workers Builds 權杖。缺權限時停止，不擴權或新增權杖。
 
-`build:ci` 檢查 Worker 型別、12 項 Worker／guard 測試，並建置 Docker 的
-`unit-tests` stage 以非 root、`RUN --network=none` 執行 24 項合成 Python 測試。
+`build:ci` 檢查 Worker 型別、21 項 Worker／guard 測試，並建置 Docker 的
+`unit-tests` stage 以非 root、`RUN --network=none` 執行 44 項 Python 測試。
 該 stage 不包含／下載原生引擎，不掛載租戶儲存。Cloudflare Builds 無法直接
 使用內層 `docker run`，因此檢查放在 BuildKit 建置階段，並由外層建置配額
 管理資源；沒有修改主機 cgroup／權限。source checks 成功不代表原生 OCR 可用。
 
 真正的 `deploy` 先檢查原生第三方告示、Docker、建置正式映像；最終映像的
 非 root、禁網路 RUN step 使用合成圖片跑真實引擎，全部通過才呼叫 Wrangler。
-這仍不是正式 Container 執行環境的驗證。告示仍未核對完成，
-目前部署應被 `OCR_DEPLOY_BLOCKED` 阻擋，而不是假裝辨識成功。
+這仍不是正式 Container 執行環境的驗證。告示與來源計畫已有核對紀錄；
+映像建置仍須驗證來源 archive 並跑真實引擎，任何失敗都在 Wrangler 前停止。
 
 ## 初始化
 
@@ -50,7 +50,7 @@ root 是 backend，非生產分支啟用且命令為 `wrangler versions upload`�
 也不包含工作目錄內其他 CRM、會員、點數、LINE 或管理介面變更。
 既有 SaaS 的混合 adapter 仍為本機接線，正式 OCR switch 尚未開啟。
 
-## 狀態
+## 前階段狀態（歷史紀錄）
 
 2026-10-07 已完成：
 
@@ -99,3 +99,21 @@ root 是 backend，非生產分支啟用且命令為 `wrangler versions upload`�
 沒有繞過。另有 Eigen 來源義務及 bundled GCC runtime 尚待核對。
 因此正式部署仍應停止，沒有 native image 或 SaaS binding。不要把 local test／
 source build 或補齊告示數量當作可對正式會員開啟 OCR 的證據。
+
+## 2026-10-07 使用者供應來源後的最新檢點
+
+- 完整 PocketFFT source ZIP 28818 bytes，SHA256
+  `d3b88763e7e069bab2041e952990c677acda83a19e85ea015eefb1816d7a3344`，
+  Git archive comment `ea778e37710c07723435b1be58235996d1d43a5a`。
+  不執行／抽取其中程式，保留原始來源和兩份完整著作權告示。
+- GCC 的原始隨附 libgomp 與官方 Debian 10.2.1-6 binary package 逐位元一致；
+  不替換 runtime。完整原始碼與 Debian patches／build scripts 隨映像保留。
+- 兩個 Eigen 原始來源 pin 分別對應 Paddle 與 ONNX Runtime，原始與官方 mirror
+  commit／tree 相符；保守 include closure 分別 344／400 檔，沒有可達的
+  LGPL／NonMPL2 headers。這是來源層檢查，不宣稱可重現 publisher build。
+- inventory 共 58 份完整文字／來源紀錄，source ZIP 和 4 個下載 archive 計畫
+  均固定雜湊；修改下載計畫、來源或告示就不能沿用完成的檢點。
+- 本機 Worker 21／21、TypeScript 通過；Python 44 項跑完，2 項 Windows
+  符號連結權限不足而跳過。雲端 Linux 必須重新執行，不把跳過當作通過。
+- 目前準備發布並檢查原生 image。尚未以新雲端結果證明可用，SaaS binding／
+  正式 switch 仍未開啟；沒有處理會員圖片、PDF、點數或 AI 金鑰。

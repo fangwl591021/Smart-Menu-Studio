@@ -1,22 +1,9 @@
 {
   "format": 1,
   "engineSha256": "92a8e5bfe668e1ddec161cd3525c90756cc4c7c608e451a7a2872eb9066d456b",
-  "completed": false,
+  "completed": true,
   "reviewedOn": "2026-10-07",
-  "unresolved": [
-    {
-      "id": "pocketfft-source",
-      "reason": "The original release_for_eigen source currently requires a manual anti-bot verification. No bypass attempted; exact source/notice remains unverified."
-    },
-    {
-      "id": "eigen-compiled-scope",
-      "reason": "Full pinned license texts retained; MPL/LGPL compiled-use scope and source availability obligations must still be checked against this inference build."
-    },
-    {
-      "id": "bundled-gcc-runtime",
-      "reason": "The release includes libgomp.so.1 without origin/source notices. Match its source/runtime exception obligations, or explicitly use the distribution-provided runtime with a verified smoke test."
-    }
-  ],
+  "unresolved": [],
   "evidence": [
     {
       "source": "https://paddle-inference-lib.bj.bcebos.com/2.3.2/cxx_c/Linux/CPU/gcc8.2_avx_mkl/paddle_inference.tgz",
@@ -37,9 +24,35 @@
       "sha256": "86c53ddd40c2889f6bc1040bcbd95db9b49b7ecf5321c08907ef8465f3053a7a",
       "publisherMd5": "0f2745ff705ecae31176dad437608f6f",
       "method": "Version 2021.11.0 matches embedded OpenCV build information and pinned OpenCV 4.10.0 build recipe; full EULA/third-party file retained."
+    },
+    {
+      "source": "https://raw.githubusercontent.com/PaddlePaddle/Paddle/4596b9a22540fb0ea5d369c3c804544de61d03d0/cmake/external/pocketfft.cmake",
+      "revision": "ea778e37710c07723435b1be58235996d1d43a5a",
+      "method": "Exact matched inference package records Paddle commit 4596b9; its build recipe uses release_for_eigen without patches. User supplied complete named Git archive with this revision comment; full source/member hashes verified without extraction or execution."
+    },
+    {
+      "source": "https://deb.debian.org/debian/pool/main/g/gcc-10/libgomp1_10.2.1-6_amd64.deb",
+      "bytes": 99912,
+      "sha256": "4530c95aefa48e33fd8cf4acbe5c4b559dbe7bdf4c56469986c83a203982cef1",
+      "archiveMember": "./usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0",
+      "engineBinarySha256": "e80b85fef97ff22f2ce71b5438ba6effada3d635498336d836df95647f7325b9",
+      "buildId": "3229a2b10c5fa4607b8e4b95539ff012ebf87ca1",
+      "method": "Byte-identical match to the original bundled runtime and published Debian package checksum. No library replacement or modification."
+    },
+    {
+      "source": "https://deb.debian.org/debian/pool/main/g/gcc-10/gcc-10-base_10.2.1-6_amd64.deb",
+      "bytes": 201332,
+      "sha256": "be65535e94f95fbf04b104e8ab36790476f063374430f7dfc6c516cbe2d2cd1e",
+      "archiveMember": "./usr/share/doc/gcc-10-base/copyright",
+      "method": "Complete matching copyright bytes retained. libgomp1 package's doc directory symlink points to gcc-10-base."
     }
   ],
   "notices": [
+    {
+      "file": "licenses/Paddle.Eigen.Scope.txt",
+      "source": "https://github.com/fangwl591021/Smart-Menu-Studio/tree/codex/umi-ocr-cloud-builds/services/ocr",
+      "sha256": "18942d00584a9c92b26715148b6976c2f2a7b2e84f3abda0bde1c561452245a9"
+    },
     {
       "file": "licenses/Intel.IPPICV-2021.11.EULA.txt",
       "source": "https://raw.githubusercontent.com/opencv/opencv_3rdparty/fd27188235d85e552de31425e7ea0f53ba73ba53/ippicv/ippicv_2021.11.0_lnx_intel64_20240201_general.tgz",
@@ -302,6 +315,72 @@
       "file": "licenses/Umi-OCR.MIT.txt",
       "source": "https://raw.githubusercontent.com/hiroi-sora/Umi-OCR/83173efc4f4453b41223ea96d63d44534bf0505c/LICENSE",
       "sha256": "04033bb31326a4eeb50f06c71c77dfa80ed3ccf48cf15b715b1e275028321eab"
+    },
+    {
+      "file": "licenses/GCC.Debian.Copyright.txt",
+      "sha256": "719dd73912334e65a64c63fb1f7ccdacf70c27258570de0fb123b33d490eddf5",
+      "source": "https://deb.debian.org/debian/pool/main/g/gcc-10/gcc-10-base_10.2.1-6_amd64.deb"
+    },
+    {
+      "file": "licenses/GCC.GPL-3.0.txt",
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+      "source": "https://raw.githubusercontent.com/gcc-mirror/gcc/releases/gcc-10.2.0/COPYING3"
+    },
+    {
+      "file": "licenses/GCC.RuntimeException-3.1.txt",
+      "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74",
+      "source": "https://raw.githubusercontent.com/gcc-mirror/gcc/releases/gcc-10.2.0/COPYING.RUNTIME"
+    },
+    {
+      "file": "licenses/NativeSources.SourceAvailability.txt",
+      "sha256": "565f1963acf9046540eb44832464b2f60ec66e20788a01f9ebc346b52cf5e0b8",
+      "source": "https://github.com/fangwl591021/Smart-Menu-Studio/tree/codex/umi-ocr-cloud-builds/services/ocr"
+    },
+    {
+      "file": "licenses/PocketFFT.BSD-3-Clause.txt",
+      "sha256": "a85ca13fdf90160b64a0698215868c13b74d835ad0a4e2ba44713b8c5058a056",
+      "source": "https://gitlab.mpcdf.mpg.de/mtr/pocketfft/-/blob/ea778e37710c07723435b1be58235996d1d43a5a/LICENSE.md"
+    },
+    {
+      "file": "licenses/PocketFFT.Header.Notice.txt",
+      "sha256": "fc0332ea7515ee81d3ff557cd7a6a7594fbf7160c9de52749dfb7572b8384dbb",
+      "source": "https://gitlab.mpcdf.mpg.de/mtr/pocketfft/-/blob/ea778e37710c07723435b1be58235996d1d43a5a/pocketfft_hdronly.h"
+    }
+  ],
+  "sourceArchives": [
+    {
+      "name": "Eigen.Paddle.f612df.tar.gz",
+      "url": "https://codeload.github.com/eigen-mirror/eigen/tar.gz/f612df273689a19d25b45ca4f8269463207c4fee",
+      "bytes": 2721573,
+      "sha256": "e3fe5cac59763b7419af2de39840b5342d77624ddf8b181fb9f9f532615ec518"
+    },
+    {
+      "name": "Eigen.ONNXRuntime.d10b27.tar.gz",
+      "url": "https://codeload.github.com/eigen-mirror/eigen/tar.gz/d10b27fe37736d2944630ecd7557cefa95cf87c9",
+      "bytes": 2640035,
+      "sha256": "a3c10a8c14f55e9f09f98b0a0ac6874c21bda91f65b7469d9b1f6925990e867b"
+    },
+    {
+      "name": "gcc-10_10.2.1.orig.tar.xz",
+      "url": "https://deb.debian.org/debian/pool/main/g/gcc-10/gcc-10_10.2.1.orig.tar.xz",
+      "bytes": 84547844,
+      "sha256": "ea3c05faa381486e6b859c047dc14977418bf1ccda4567064e016493fd6fffec"
+    },
+    {
+      "name": "gcc-10_10.2.1-6.debian.tar.xz",
+      "url": "https://deb.debian.org/debian/pool/main/g/gcc-10/gcc-10_10.2.1-6.debian.tar.xz",
+      "bytes": 2366560,
+      "sha256": "a95d6b9da2be83f9751850b002021281411ff1003d9feb77298b131da47820b3"
+    }
+  ],
+  "sources": [
+    {
+      "file": "licenses/sources/PocketFFT.release_for_eigen.zip",
+      "bytes": 28818,
+      "sha256": "d3b88763e7e069bab2041e952990c677acda83a19e85ea015eefb1816d7a3344",
+      "gitArchiveComment": "ea778e37710c07723435b1be58235996d1d43a5a",
+      "source": "https://gitlab.mpcdf.mpg.de/mtr/pocketfft",
+      "provenance": "Complete source archive supplied by the user; Git archive comment is metadata, not a signed publisher attestation."
     }
   ]
 }

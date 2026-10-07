@@ -1,0 +1,204 @@
+Eigen source/provenance checkpoint -- 2026-10-07
+
+This is an engineering evidence record, not a legal certification. It does not
+authorize publication merely because source/license texts have been collected.
+
+Matched binary package
+----------------------
+The previously verified official Paddle Inference archive is:
+https://paddle-inference-lib.bj.bcebos.com/2.3.2/cxx_c/Linux/CPU/gcc8.2_avx_mkl/paddle_inference.tgz
+Archive SHA256:
+f09d5082b167e8301dc741b629baa0ab30e0342a8d7b62c322fde324f9404dbf
+The archive's paddle_inference/version.txt records Paddle commit:
+4596b9a22540fb0ea5d369c3c804544de61d03d0
+Its CMakeCache.txt records ON_INFER=ON, WITH_GPU=OFF, WITH_ROCM=OFF,
+WITH_MKL=ON, WITH_POCKETFFT=ON, and GCC 8.2.0. The default CXX flags are
+empty; the release CXX flags are -O3 -DNDEBUG.
+
+The exact source build recipe pins Eigen to:
+f612df273689a19d25b45ca4f8269463207c4fee
+https://raw.githubusercontent.com/PaddlePaddle/Paddle/4596b9a22540fb0ea5d369c3c804544de61d03d0/cmake/external/eigen.cmake
+The recipe's two Eigen header replacements apply only when WITH_ROCM is on;
+the matched CPU package records WITH_ROCM=OFF. This establishes the recorded
+unmodified CPU recipe, not an independently reproducible binary build.
+
+Verified complete Eigen sources
+-------------------------------
+The official GitHub mirror organization identifies itself as the Eigen project's
+official mirror: https://github.com/eigen-mirror
+No source website challenge was solved, replayed, or evaded. A normal GitLab
+archive request returned HTTP 406; accessible original GitLab metadata/raw files
+and the normal public official mirror were used for identity verification.
+
+Paddle Eigen source archive:
+https://codeload.github.com/eigen-mirror/eigen/tar.gz/f612df273689a19d25b45ca4f8269463207c4fee
+Bytes: 2721573
+SHA256: e3fe5cac59763b7419af2de39840b5342d77624ddf8b181fb9f9f532615ec518
+Commit: f612df273689a19d25b45ca4f8269463207c4fee
+Git commit tree: e2ac42271047c9718e807e56987727741ebf22b6
+Parent: 14b7ebea11808b2e44995e4a5cd668f1da4071c0
+Commit date: 2021-03-15T20:00:32Z
+
+Original GitLab metadata:
+https://gitlab.com/api/v4/projects/libeigen%2Feigen/repository/commits/f612df273689a19d25b45ca4f8269463207c4fee
+https://gitlab.com/api/v4/projects/libeigen%2Feigen/repository/tree?ref=f612df273689a19d25b45ca4f8269463207c4fee&recursive=true&per_page=100
+Original and mirror subtree IDs match exactly:
+Eigen: de998860bb8b24e7c1b39ba415a2a83c6a26f046
+unsupported: e4d50ad4e66d155b42a869ea8d6e96cf2f3db7a9
+Mirror COPYING.README blob: de5b6321582327d85c88749388edf2576cd242c8
+
+ONNX Runtime 1.11.1 has a separate Eigen submodule pin, not the Paddle pin:
+d10b27fe37736d2944630ecd7557cefa95cf87c9
+https://api.github.com/repos/microsoft/onnxruntime/contents/cmake/external/eigen?ref=v1.11.1
+https://raw.githubusercontent.com/microsoft/onnxruntime/v1.11.1/cmake/external/eigen.cmake
+Its recipe uses that submodule unless preinstalled Eigen is explicitly selected;
+an additional patch is conditional on the ACL backend. The publisher's actual
+ONNX Runtime CMake cache/include trace has not been retained by this audit.
+
+ONNX Runtime Eigen source archive:
+https://codeload.github.com/eigen-mirror/eigen/tar.gz/d10b27fe37736d2944630ecd7557cefa95cf87c9
+Bytes: 2640035
+SHA256: a3c10a8c14f55e9f09f98b0a0ac6874c21bda91f65b7469d9b1f6925990e867b
+Commit: d10b27fe37736d2944630ecd7557cefa95cf87c9
+Git commit tree: 91a13a0c266733a8170eb24ba111613193d34ed4
+Parent: d4a727d0926fc6ff1f1aa309613eb9680ec2fab3
+Commit date: 2020-08-14T17:51:04Z
+This second pin's entire source archive was hash-checked. Original GitLab public
+metadata confirms the same commit, parent and date. Original and mirror subtree
+IDs match exactly:
+Eigen: af169a70ef0376fbe3cceaa7f01d0fe1b472fa9c
+unsupported: 2b960b6a2caa8438770b53f7e402959ec3441fd7
+COPYING.README: de5b6321582327d85c88749388edf2576cd242c8
+https://gitlab.com/api/v4/projects/libeigen%2Feigen/repository/commits/d10b27fe37736d2944630ecd7557cefa95cf87c9
+https://gitlab.com/api/v4/projects/libeigen%2Feigen/repository/tree?ref=d10b27fe37736d2944630ecd7557cefa95cf87c9&per_page=100
+
+Both complete source trees contain these two LGPL-licensed headers:
+unsupported/Eigen/src/IterativeSolvers/ConstrainedConjGrad.h
+unsupported/Eigen/src/IterativeSolvers/IterationController.h
+Both refer to Eigen/src/Core/util/NonMPL2.h. The top-level
+unsupported/Eigen/IterativeSolvers module conditionally includes them when
+EIGEN_MPL2_ONLY is not defined. The pinned COPYING.README describes that macro
+as the compile-time guarantee against including LGPL-covered Eigen code.
+
+Paddle static include audit
+---------------------------
+Complete matched Paddle source archive:
+https://codeload.github.com/PaddlePaddle/Paddle/tar.gz/4596b9a22540fb0ea5d369c3c804544de61d03d0
+Bytes: 10835109
+SHA256: 59dd84c6e6c8b8abdf3ce58459ebb56bbf139dfbcfc69840c66ee8fbd52ecaf0
+
+Literal C/C++/CUDA include directives were inspected across source and tests.
+Direct Eigen include roots:
+Eigen/Cholesky
+Eigen/Core
+Eigen/Dense
+Eigen/LU
+Eigen/SVD
+Eigen/src/Core/arch/HIP/hcc/math_constants.h
+Eigen/src/Core/util/Constants.h
+unsupported/Eigen/CXX11/Tensor
+unsupported/Eigen/SpecialFunctions
+
+All conditional literal includes were traversed conservatively against the
+exact f612df source tree, rather than only traversing the known CPU paths:
+344 reachable Eigen files; 0 unresolved literal Eigen roots;
+0 reachable LGPL-licensed/NonMPL2 headers; 0 direct IterativeSolvers references.
+This is source-level evidence for the recorded recipe, not a compiler-generated
+include trace or proof that an unknown publisher made no additional changes.
+Macro/plugin-generated includes are not resolved by this static audit.
+
+Paddle2ONNX source audit
+------------------------
+Paddle2ONNX v1.0.0rc2 resolves to:
+64c5280a8fd37f17dddfb9e4a88ecaaed64ce874
+Tree: 9dfb93bf1b1d7abe89661b34df8cf471001a666d
+https://codeload.github.com/PaddlePaddle/Paddle2ONNX/tar.gz/v1.0.0rc2
+Bytes: 2264948
+SHA256: 693fd6919fdcc732595d46bdcdee7823be26268a2a7a3792af9c66352a58c860
+202 C/C++ source/header files inspected; 0 literal Eigen include references.
+
+Pinned ONNX submodule:
+https://codeload.github.com/onnx/onnx/tar.gz/5b1346e30d66e4ec550f6b63c3883b258a2e8e3e
+Bytes: 9503658
+SHA256: f306c8e066bef5849ca5227cdd48b65694e159276a521e51216d089ba9830879
+148 C/C++ source/header files inspected; 0 literal Eigen include references.
+
+Pinned optimizer submodule:
+https://codeload.github.com/onnx/optimizer/tar.gz/a37748b2c3a80dad4274401c45c5026c7a506730
+Bytes: 50260
+SHA256: f999fb15212cb753d5c13f70c550e145e68b3ecab348d02e24bf20a369036ce9
+35 C/C++ source/header files inspected; 0 literal Eigen include references.
+
+Pinned pybind11 submodule:
+https://codeload.github.com/pybind/pybind11/tar.gz/f306012b55beccf93ffa5ce63d3a21450620eb61
+Bytes: 704449
+SHA256: a37893aa356f7e58ef9b3620b74ce529e42a9a341711e0f9fa21e83f040a662a
+80 C/C++ source/header files inspected. Optional include/pybind11/eigen.h uses
+Eigen/Core and Eigen/SparseCore; tests/test_eigen.cpp uses Eigen/Cholesky.
+The optional Eigen wrapper is not a direct Paddle2ONNX Eigen dependency proven
+to be compiled by the above evidence.
+
+ONNX Runtime static include audit
+----------------------------------
+ONNX Runtime v1.11.1 resolves to:
+366f4ebcb425b6a47c2b0decd3b39fa14eb9dbf6
+Tree: e3409bdddca6ae2a63b0dc3a4a53f5226688e762
+A complete ONNX Runtime source archive request timed out. A bounded memory-only
+stream inspection intended to stop before large test models did not produce a
+trustworthy receipt. Neither partial attempt is counted as verified evidence.
+
+A subsequent bounded normal public Git partial clone succeeded:
+https://github.com/microsoft/onnxruntime.git
+Options: --filter=blob:none --sparse --depth=1 --branch v1.11.1
+Only onnxruntime/core, include, cmake and Git's default root source files were
+materialized in a uniquely named ignored local source cache. The checkout HEAD
+and tree match the exact values above and git diff --quiet succeeds. No test
+model directory was materialized; no source/native program was executed.
+
+1736 C/C++/CUDA source/header files were inspected (13912736 checkout bytes,
+which may include Git checkout line-ending conversion). They contain 12 literal
+Eigen include references and these 10 unique roots:
+Eigen/Core
+Eigen/Dense
+Eigen/Sparse
+Eigen/src/Core/Map.h
+Eigen/src/Core/arch/Default/BFloat16.h
+Eigen/src/Core/arch/Default/Half.h
+unsupported/Eigen/CXX11/Tensor
+unsupported/Eigen/CXX11/ThreadPool
+unsupported/Eigen/CXX11/src/ThreadPool/ThreadPoolInterface.h
+unsupported/Eigen/SpecialFunctions
+
+The conservative traversal of all conditional literal header includes in the
+exact d10b27 Eigen tree reaches 400 files, with 0 unresolved literal Eigen roots
+and 0 reachable LGPL-licensed/NonMPL2 headers. The inspected ONNX Runtime sources
+contain no ConstrainedConjGrad, IterationController, NonMPL2,
+EIGEN_CORE_PLUGIN, EIGEN_MATRIX_PLUGIN or unsupported/Eigen/IterativeSolvers
+references. Core includes all provider source directories, not just CPU files;
+this deliberately over-approximates the recorded CPU inference use.
+
+This establishes a source-level include-scope audit, not a publisher-generated
+compile trace. The actual publisher's ONNX Runtime build flags, any local source
+modifications and preinstalled-Eigen override remain unverified. The complete
+source archive hash is not claimed because the bounded sparse checkout, exact
+commit/tree IDs and inspected-source scope are the audit evidence instead.
+
+Source delivery and limitations
+-------------------------------
+
+Conservative implementation direction: preserve both unmodified complete Eigen
+source archives, their hashes, all COPYING files (including APACHE), all file
+copyright/license notices, and an explicit source-availability notice alongside
+the distributed image. Match any actual Eigen source modifications and expose
+those modifications under their applicable source license. This addresses the
+source-delivery portion; it does not by itself establish compliance if LGPL
+code was compiled. In that case, determine the applicable relinking/build/source
+requirements or replace/rebuild only with separately verified authorization.
+
+Primary guidance:
+https://gitlab.com/libeigen/eigen/-/raw/f612df273689a19d25b45ca4f8269463207c4fee/COPYING.README
+https://www.mozilla.org/en-US/MPL/2.0/ (Sections 3.1, 3.2 and 3.4)
+https://www.mozilla.org/en-US/MPL/2.0/FAQ/ (Q7, Q8, Q10 and Q17)
+
+No runtime library/header was changed, no native source was compiled or executed,
+and no production/customer document was processed by this evidence audit.

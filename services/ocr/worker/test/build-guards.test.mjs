@@ -116,7 +116,12 @@ test('Python unit and native smoke checks are non-root offline image build steps
   const dockerfile = readFileSync(new URL('../../Dockerfile', import.meta.url), 'utf8');
   const unitStage = dockerfile.split(' AS unit-tests')[1].split(' AS assets')[0];
   assert.match(unitStage, /USER 10001:10001\s+RUN --network=none python -m unittest discover -s tests -v/);
-  assert.match(dockerfile, /USER 10001:10001\s+RUN --network=none python \/app\/tests\/native_smoke\.py/);
+  const nativeStage = dockerfile.split(/\nFROM /).at(-1);
+  assert.match(nativeStage, /USER 10001:10001\s+RUN --network=none python audit_pocketfft\.py/);
+  assert.match(nativeStage, /RUN --network=none python \/app\/tests\/native_smoke\.py/);
+  const afterUser = nativeStage.split('USER 10001:10001')[1];
+  assert.doesNotMatch(afterUser, /\nUSER /);
+  assert.match(afterUser, /verify_sources/);
   assert.match(dockerfile, /PYTHONPATH=\/app/);
   assert.ok(!dockerfile.includes('--privileged'));
 });

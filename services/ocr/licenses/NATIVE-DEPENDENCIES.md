@@ -1,5 +1,15 @@
 # Native release redistribution checkpoint
 
+Latest engineering checkpoint, 2026-10-07: the three historical items below now
+have source/provenance records and a corresponding-source delivery plan.
+See PocketFFT's retained original ZIP, Paddle.Eigen.Scope.txt and
+NativeSources.SourceAvailability.txt. The inventory pins 58 notices/records,
+the source ZIP and four source downloads. Its completed flag records this
+engineering review, not a legal certification or a native deployment result.
+The final image must verify all retained source bytes and pass real native smoke
+before Wrangler publication. The historical unresolved sections below describe
+the earlier failure; they are not the current pending-item list.
+
 Umi Python files retain both upstream MIT licenses. PaddleOCR-json itself retains
 its upstream Apache 2.0 license. Pillow's installed distribution retains its
 MIT-CMU license and notices in site-packages.

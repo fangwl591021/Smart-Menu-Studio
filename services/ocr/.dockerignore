@@ -4,6 +4,8 @@
 !native-artifacts.json
 !fetch_engine.py
 !audit_archive.py
+!audit_pocketfft.py
+!fetch_sources.py
 !UPSTREAM.json
 !umi_core/**
 !licenses/**

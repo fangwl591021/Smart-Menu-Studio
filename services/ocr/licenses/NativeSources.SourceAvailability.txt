@@ -1,0 +1,40 @@
+Corresponding source availability for the pinned OCR container
+
+The complete, unmodified PocketFFT source archive supplied on 2026-10-07 is
+included at /app/licenses/sources/PocketFFT.release_for_eigen.zip. Its Git archive
+comment records ea778e37710c07723435b1be58235996d1d43a5a. This is archive metadata,
+not a publisher signature. Paddle's recorded inference build references the
+release_for_eigen ref without patches. Both LICENSE.md and the expanded copyright
+notice in pocketfft_hdronly.h are retained separately in /app/licenses.
+
+The final image also includes complete corresponding source archives under
+/app/licenses/sources/remote, downloaded only during the build and checked for
+exact size and SHA256. The running service never downloads or executes them.
+
+Eigen used by Paddle Inference:
+  revision f612df273689a19d25b45ca4f8269463207c4fee
+  https://codeload.github.com/eigen-mirror/eigen/tar.gz/f612df273689a19d25b45ca4f8269463207c4fee
+Eigen used by ONNX Runtime 1.11.1:
+  revision d10b27fe37736d2944630ecd7557cefa95cf87c9
+  https://codeload.github.com/eigen-mirror/eigen/tar.gz/d10b27fe37736d2944630ecd7557cefa95cf87c9
+These source archives retain all original file copyright and license headers.
+Eigen source remains available under its original file-specific licenses,
+including the MPL 2.0. Complete COPYING texts are in /app/licenses.
+
+The bundled libgomp.so.1 is byte-identical to Debian libgomp1 10.2.1-6 amd64.
+Its complete GCC 10.2.1 original source plus Debian patches and build scripts are:
+  https://deb.debian.org/debian/pool/main/g/gcc-10/gcc-10_10.2.1.orig.tar.xz
+  https://deb.debian.org/debian/pool/main/g/gcc-10/gcc-10_10.2.1-6.debian.tar.xz
+Both complete archives are included in the remote source directory, not merely
+linked here. GCC GPLv3 text, Runtime Library Exception 3.1, and the complete
+matching Debian copyright file are retained in /app/licenses. The runtime has
+not been replaced or modified. Consult these complete original license texts
+for your rights to copy, modify and redistribute the corresponding source.
+
+Image recipients can obtain the source from these bundled paths. All original
+rights to the corresponding source are preserved; application terms must not
+restrict those rights. This technical provenance record is not legal advice
+or a warranty that an upstream publisher complied with every obligation.
+
+Exact source names, byte sizes, URLs and SHA256 pins are in native-artifacts.json.
+Build-time validation rejects incomplete downloads or any changed source bytes.

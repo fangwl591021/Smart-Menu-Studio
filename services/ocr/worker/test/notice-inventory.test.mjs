@@ -49,11 +49,45 @@ test('missing notice files fail with a sanitized diagnostic', () => {
   } }), error => error.message === 'OCR_NOTICE_INVENTORY_INVALID');
 });
 
-test('real retained notices match all hashes; native publication remains blocked', () => {
+test('retained source archive bytes are pinned and cannot escape their directory', () => {
+  const review = fixture();
+  review.sources = [{ file: 'licenses/sources/Synthetic.zip', bytes: body.length,
+    sha256: createHash('sha256').update(body).digest('hex') }];
+  validateNoticeInventory({ artifact, read: readFor(review) });
+  for (const change of [
+    item => { item.file = 'licenses/sources/../../secret.zip'; },
+    item => { item.bytes++; },
+    item => { item.sha256 = '0'.repeat(64); },
+  ]) {
+    const changed = structuredClone(review); change(changed.sources[0]);
+    assert.throws(() => validateNoticeInventory({ artifact,
+      read: readFor(changed) }), /OCR_NOTICE_(INVENTORY_INVALID|HASH_MISMATCH)/);
+  }
+});
+
+test('changed build-time source plan cannot reuse the completed review', () => {
+  const entry = { name: 'Source.tar.gz', url: 'https://codeload.github.com/official/repository/tar.gz/pin',
+    bytes: 123, sha256: '3'.repeat(64) };
+  const review = { ...fixture(), sourceArchives: [entry] };
+  const planned = { ...artifact, sourceArchives: [entry] };
+  validateNoticeInventory({ artifact: planned, read: readFor(review) });
+  for (const alter of [
+    item => { item.sha256 = '4'.repeat(64); },
+    item => { item.url = 'https://unreviewed.invalid/source'; },
+    item => { item.name = '../Source.tar.gz'; },
+    item => { item.bytes = 101 * 1024 * 1024; },
+  ]) {
+    const changed = structuredClone(review); alter(changed.sourceArchives[0]);
+    assert.throws(() => validateNoticeInventory({ artifact: planned,
+      read: readFor(changed) }), /OCR_NOTICE_INVENTORY_INVALID/);
+  }
+});
+
+test('real completed review pins notices, retained sources and the build-time source plan', () => {
   const result = validateNoticeInventory();
-  assert.equal(result.noticeCount, 51);
-  assert.equal(result.completed, false);
-  assert.deepEqual(result.unresolved, ['pocketfft-source', 'eigen-compiled-scope', 'bundled-gcc-runtime']);
+  assert.equal(result.noticeCount, 58);
+  assert.equal(result.completed, true);
+  assert.deepEqual(result.unresolved, []);
   const pinned = JSON.parse(readFileSync(new URL('../../native-artifacts.json', import.meta.url)));
-  assert.equal(pinned.nativeThirdPartyNoticesReviewed, false);
+  assert.equal(pinned.nativeThirdPartyNoticesReviewed, true);
 });
