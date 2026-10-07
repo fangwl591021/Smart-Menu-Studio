@@ -84,9 +84,9 @@ Python 24 項通過，含原版排序、真實圖片解碼、原生程序模擬�
 
 另外執行 `tests/linux_native_smoke.py`：官方真實 PaddleOCR-json v1.4.1、繁體模型與抽出的 Umi 排序，在既有 Ubuntu 辨識出合成圖片中的 `123`，輸出 1 個區塊。該次啟動約 3,009ms、辨識約 328ms；只是單次合成圖／本機 CPU 數字，不能當作名片準確率、Cloudflare 延遲或省費證明。
 
-本機 SaaS 整合的後端指定 50 項（含私有 binding／Workers runtime 測試）、前端指定 10 項通過；這些混有其他既有變更的整合檔未一起提交到獨立服務分支。獨立服務自身的 Worker 11 項測試（含 CI 建置網路與 runtime 禁網路分離）、型別檢查及僅 Worker 的 dry-run 通過；完整 container dry-run 因缺 Docker 受阻。新增 Worker 使用獨立 Wrangler 4.148.0／Miniflare 5 runtime，以測試今日相容日期；現有後端 Wrangler／相容日期未升級。較廣名片回歸的 3 項尚未解決，不能宣稱全站回歸全數通過。
+本機 SaaS 整合的後端指定 50 項（含私有 binding／Workers runtime 測試）、前端指定 10 項通過；這些混有其他既有變更的整合檔未一起提交到獨立服務分支。獨立服務自身的 Worker 12 項測試（含 CI 建置網路、controller 探測與 runtime 禁網路分離）、型別檢查及僅 Worker 的 dry-run 通過；完整 container dry-run 因缺 Docker 受阻。新增 Worker 使用獨立 Wrangler 4.148.0／Miniflare 5 runtime，以測試今日相容日期；現有後端 Wrangler／相容日期未升級。較廣名片回歸的 3 項尚未解決，不能宣稱全站回歸全數通過。
 
-獨立工具鏈以 `overrides` 固定 sharp 0.35.5，修復 GHSA-wq5f-xc86-pv6w；2026-10-07 重跑 audit 為 0 項，Worker 測試現為 11／11 通過。沒有套用 `audit fix --force` 或更動現有 SaaS 的 lockfile。
+獨立工具鏈以 `overrides` 固定 sharp 0.35.5，修復 GHSA-wq5f-xc86-pv6w；2026-10-07 重跑 audit 為 0 項，Worker 測試現為 12／12 通過。沒有套用 `audit fix --force` 或更動現有 SaaS 的 lockfile。
 
 ## 官方參考
 

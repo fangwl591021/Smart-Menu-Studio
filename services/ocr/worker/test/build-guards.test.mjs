@@ -5,6 +5,7 @@ import { runPredeploy } from '../scripts/predeploy.mjs';
 import { runBuild } from '../scripts/build-ci.mjs';
 import bootstrap from '../src/bootstrap.ts';
 import { dockerBuildNetworkArgs } from '../scripts/docker-build-network.mjs';
+import { dockerRuntimeLimitArgs } from '../scripts/docker-runtime-limits.mjs';
 
 const reviewed = () => JSON.stringify({ nativeThirdPartyNoticesReviewed: true });
 const quiet = () => {};
@@ -27,7 +28,7 @@ test('missing, stopped or non-Linux Docker blocks image build', () => {
 test('predeploy build and smoke failures stop; smoke is offline and nonprivileged', () => {
   for (const failAt of [1, 2, -1]) {
     const calls = [];
-    const result = runPredeploy({ read: reviewed, report: quiet, spawn: (command, args, options) => {
+    const result = runPredeploy({ env: {}, read: reviewed, report: quiet, spawn: (command, args, options) => {
       calls.push({ command, args, options });
       return { status: calls.length - 1 === failAt ? 1 : 0, stdout: 'linux\n' };
     } });
@@ -45,7 +46,7 @@ test('predeploy build and smoke failures stop; smoke is offline and nonprivilege
 
 test('CI source checks never run deploy, native assets or production tests', () => {
   const calls = [];
-  assert.equal(runBuild({ report: quiet, spawn: (command, args, options) => {
+  assert.equal(runBuild({ env: {}, report: quiet, spawn: (command, args, options) => {
     calls.push({ command, args, options }); return { status: 0 };
   } }), 0);
   assert.equal(calls.length, 5);
@@ -53,7 +54,7 @@ test('CI source checks never run deploy, native assets or production tests', () 
   assert.ok(calls[3].args.includes('unit-tests'));
   assert.ok(calls[4].args.includes('none'));
   assert.ok(calls.every(call => !call.args.includes('deploy') && !call.args.includes('preflight')));
-  assert.equal(runBuild({ report: quiet, spawn: () => ({ status: 1 }) }), 1);
+  assert.equal(runBuild({ env: {}, report: quiet, spawn: () => ({ status: 1 }) }), 1);
 });
 
 test('bootstrap is private, closed and has no resources or secrets', async () => {
@@ -73,14 +74,36 @@ test('Cloudflare CI network override applies to builds only, never test/native r
   const env = { WRANGLER_CI_OVERRIDE_NETWORK_MODE_HOST: 'true' };
   const calls = [];
   assert.equal(runBuild({ env, report: quiet, spawn: (command, args) => {
-    calls.push({ command, args }); return { status: 0 };
+    calls.push({ command, args });
+    return { status: 0, stdout: JSON.stringify({ MemoryLimit: true, CPUCfsQuota: false, PidsLimit: true }) };
   } }), 0);
-  assert.deepEqual(calls[3].args.slice(0, 3), ['build', '--network', 'host']);
-  assert.equal(calls[4].args[calls[4].args.indexOf('--network') + 1], 'none');
+  assert.deepEqual(calls[4].args.slice(0, 3), ['build', '--network', 'host']);
+  assert.equal(calls[5].args[calls[5].args.indexOf('--network') + 1], 'none');
+  assert.ok(!calls[5].args.includes('--cpus'));
+  assert.ok(calls[5].args.includes('--memory'));
   const nativeCalls = [];
   assert.equal(runPredeploy({ env, read: reviewed, report: quiet, spawn: (command, args) => {
-    nativeCalls.push({ command, args }); return { status: 0, stdout: 'linux\n' };
+    nativeCalls.push({ command, args });
+    return { status: 0, stdout: args[1] === '--format' && args[2] === '{{json .}}'
+      ? JSON.stringify({ MemoryLimit: true, CPUCfsQuota: false, PidsLimit: true }) : 'linux\n' };
   } }), 0);
-  assert.deepEqual(nativeCalls[1].args.slice(0, 3), ['build', '--network', 'host']);
-  assert.equal(nativeCalls[2].args[nativeCalls[2].args.indexOf('--network') + 1], 'none');
+  assert.deepEqual(nativeCalls[2].args.slice(0, 3), ['build', '--network', 'host']);
+  assert.equal(nativeCalls[3].args[nativeCalls[3].args.indexOf('--network') + 1], 'none');
+});
+
+test('CI controller capabilities are explicit; unknown or failed probe blocks', () => {
+  const env = { WRANGLER_CI_OVERRIDE_NETWORK_MODE_HOST: 'true' };
+  assert.deepEqual(dockerRuntimeLimitArgs({ env: {}, spawn: () => { throw new Error('unexpected probe'); },
+    report: quiet, memory: '1g', cpus: '1' }), ['--memory', '1g', '--cpus', '1', '--pids-limit', '64']);
+  for (const result of [{ status: 1, stdout: '{}' }, { status: 0, stdout: 'invalid' }, { status: 0, stdout: '{}' }]) {
+    const spawn = () => result;
+    assert.equal(dockerRuntimeLimitArgs({ env, spawn, report: quiet, memory: '1g', cpus: '1' }), null);
+    assert.equal(runBuild({ env, spawn, report: quiet }), 1);
+    let nativeProbeCalls = 0;
+    assert.equal(runPredeploy({ env, read: reviewed, spawn: () => {
+      nativeProbeCalls++;
+      return nativeProbeCalls === 1 ? { status: 0, stdout: 'linux\n' } : result;
+    }, report: quiet }), 1);
+    assert.equal(nativeProbeCalls, 2);
+  }
 });

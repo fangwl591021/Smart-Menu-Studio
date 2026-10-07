@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { dockerBuildNetworkArgs } from './docker-build-network.mjs';
+import { dockerRuntimeLimitArgs } from './docker-runtime-limits.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -20,12 +21,14 @@ export function runPredeploy({ spawn = spawnSync, read = readFileSync,
     report('OCR_DEPLOY_BLOCKED: a working Linux Docker engine is required. No deployment was started.');
     return 1;
   }
+  const limits = dockerRuntimeLimitArgs({ env, spawn, report, docker, memory: '4g', cpus: '0.5' });
+  if (!limits) { report('OCR_DEPLOY_BLOCKED: cannot determine CI Docker limit support'); return 1; }
   // Wrangler deployment is non-transactional: build and smoke-test first.
   const built = spawn(docker, ['build', ...dockerBuildNetworkArgs(env), '--platform', 'linux/amd64', '-t', 'smart-menu-ocr:preflight', '.'],
     { cwd: root, stdio: 'inherit', windowsHide: true });
   if (built.status !== 0) return 1;
-  const smoke = spawn(docker, ['run', '--rm', '--network', 'none', '--memory', '4g', '--cpus', '0.5',
-    '--read-only', '--tmpfs', '/tmp:rw,noexec,nosuid,size=32m', '--cap-drop', 'ALL', '--pids-limit', '64',
+  const smoke = spawn(docker, ['run', '--rm', '--network', 'none', ...limits,
+    '--read-only', '--tmpfs', '/tmp:rw,noexec,nosuid,size=32m', '--cap-drop', 'ALL',
     '--security-opt', 'no-new-privileges', 'smart-menu-ocr:preflight', 'python', '/app/tests/native_smoke.py'],
     { stdio: 'inherit', windowsHide: true });
   return smoke.status === 0 ? 0 : 1;
