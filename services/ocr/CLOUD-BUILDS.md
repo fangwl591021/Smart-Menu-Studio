@@ -13,6 +13,7 @@
 - Build command：`npm run build:ci`。
 - Deploy command：`npm run deploy`（保留 npm 的 predeploy 檢查，不直接呼叫 Wrangler 跳過）。
 - Build variable：`NODE_VERSION=24.14.1`，不設定 AI 金鑰／會員資料。
+- Include watch path：`services/ocr/*`（已移除 `*`）；只監看新 OCR 模組。
 - 非 OCR 分支預覽建置關閉；不要讓這個 Worker 跟著 SaaS main 更新。
 - 沿用既有 GitHub 安裝與 Workers Builds 權杖。缺權限時停止，不擴權或新增權杖。
 
@@ -48,8 +49,19 @@ root 是 backend，非生產分支啟用且命令為 `wrangler versions upload`�
 
 ## 狀態
 
-設定與檢查程式已準備；遠端分支與 Builds 連線需以實際提交／dashboard 證據
-補記。原生函式庫告示核對仍未完成：詳見 `licenses/NATIVE-DEPENDENCIES.md`。
+2026-10-07 已完成：
+
+- 來源提交 `4d5dc02fe6595e06499b60185792894be370630e` 已推送到 OCR 專用分支，
+  只新增 `services/ocr/` 的 43 個檔案；未改 main／目前 checkout／原索引。
+- 封閉 bootstrap 已註冊，版本 `16f43fe0-1358-408a-9862-a3c68271c720`；
+  所有入口 404，沒有 native container 或租戶資源連線。
+- Cloudflare dashboard 已儲存 GitHub Builds 連線、上述 root／command／Node
+  設定與監看路徑；OCR Worker 的非生產分支預覽建置已關閉。
+- 沿用既有 Builds 權杖；未新增權杖、擴大權限或安裝本機 Docker。
+- 本機 Worker／guard 10 項、Python 合成測試 24 項通過，工具鏈 npm audit 0 項。
+  雲端 Docker stage 尚待第一次實際建置，不能以本機測試替代。
+
+原生函式庫告示核對仍未完成：詳見 `licenses/NATIVE-DEPENDENCIES.md`。
 不可將註冊 bootstrap、source checks 或成功 push 當作正式 OCR 已啟用。
 
 官方依據：
