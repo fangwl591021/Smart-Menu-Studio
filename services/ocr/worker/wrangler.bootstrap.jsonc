@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "smart-menu-ocr",
+  "account_id": "8058cf61f0cd44c4edd78080b193033a",
+  "main": "src/bootstrap.ts",
+  "compatibility_date": "2026-10-07",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [],
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.01 }
+  }
+}

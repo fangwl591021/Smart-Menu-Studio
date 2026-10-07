@@ -1,0 +1,32 @@
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
+
+const workerRoot = fileURLToPath(new URL('../', import.meta.url));
+const serviceRoot = fileURLToPath(new URL('../../', import.meta.url));
+
+export function runBuild({ spawn = spawnSync, report = console.error } = {}) {
+  // Source validation only: no deployment, native asset download or customer file.
+  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const steps = [
+    [npm, ['run', 'types'], workerRoot],
+    [npm, ['run', 'check'], workerRoot],
+    [npm, ['test'], workerRoot],
+    ['docker', ['build', '--platform', 'linux/amd64', '--target', 'unit-tests',
+      '-t', 'smart-menu-ocr:unit-tests', '.'], serviceRoot],
+    ['docker', ['run', '--rm', '--network', 'none', '--read-only', '--memory', '1g', '--cpus', '1',
+      '--tmpfs', '/tmp:rw,noexec,nosuid,size=32m', '--cap-drop', 'ALL', '--pids-limit', '64',
+      '--security-opt', 'no-new-privileges', 'smart-menu-ocr:unit-tests'], serviceRoot],
+  ];
+  for (const [command, args, cwd] of steps) {
+    const result = spawn(command, args, { cwd, stdio: 'inherit', windowsHide: true });
+    if (result.status !== 0) {
+      report(`OCR_BUILD_FAILED: ${command}`);
+      return 1;
+    }
+  }
+  return 0;
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))
+  process.exitCode = runBuild();

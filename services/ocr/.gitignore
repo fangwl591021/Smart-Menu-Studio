@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+.venv-linux/
+models/
+native/
+.env
+tmp/
+.build-cache/
+worker/node_modules/
+worker/.wrangler/
+worker/worker-configuration.d.ts

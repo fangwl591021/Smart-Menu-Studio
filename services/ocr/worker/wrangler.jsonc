@@ -1,0 +1,30 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "smart-menu-ocr",
+  "account_id": "8058cf61f0cd44c4edd78080b193033a",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-07",
+  "compatibility_flags": ["enable_request_signal"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [],
+  "durable_objects": {
+    "bindings": [{ "name": "OCR_CONTAINER", "class_name": "OcrContainer" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["OcrContainer"] }],
+  "containers": [{
+    "class_name": "OcrContainer",
+    "image": "../Dockerfile",
+    "image_build_context": "..",
+    "scheduling_policy": "default",
+    "instance_type": "standard-1",
+    "max_instances": 1,
+    "constraints": { "regions": ["APAC"] },
+    "ssh": { "enabled": false }
+  }],
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.01 }
+  }
+}

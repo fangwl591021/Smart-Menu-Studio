@@ -1,0 +1,11 @@
+**
+!Dockerfile
+!requirements.txt
+!native-artifacts.json
+!fetch_engine.py
+!UPSTREAM.json
+!umi_core/**
+!licenses/**
+!tests/**
+**/__pycache__/
+**/*.py[cod]

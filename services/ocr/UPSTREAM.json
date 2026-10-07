@@ -1,0 +1,60 @@
+{
+  "format": 1,
+  "extractedOn": "2026-10-07",
+  "upstream": [
+    {
+      "repository": "https://github.com/hiroi-sora/Umi-OCR",
+      "revision": "83173efc4f4453b41223ea96d63d44534bf0505c"
+    },
+    {
+      "repository": "https://github.com/hiroi-sora/Umi-OCR_plugins",
+      "revision": "a07d80adf4e4612240db4e9dba19bde188729edd"
+    }
+  ],
+  "files": [
+    {
+      "local": "umi_core/vendor/tbpu/tbpu.py",
+      "source": "https://raw.githubusercontent.com/hiroi-sora/Umi-OCR/83173efc4f4453b41223ea96d63d44534bf0505c/UmiOCR-data/py_src/ocr/tbpu/tbpu.py",
+      "modified": false,
+      "changes": []
+    },
+    {
+      "local": "umi_core/vendor/tbpu/parser_multi_line.py",
+      "source": "https://raw.githubusercontent.com/hiroi-sora/Umi-OCR/83173efc4f4453b41223ea96d63d44534bf0505c/UmiOCR-data/py_src/ocr/tbpu/parser_multi_line.py",
+      "modified": false,
+      "changes": []
+    },
+    {
+      "local": "umi_core/vendor/tbpu/parser_tools/line_preprocessing.py",
+      "source": "https://raw.githubusercontent.com/hiroi-sora/Umi-OCR/83173efc4f4453b41223ea96d63d44534bf0505c/UmiOCR-data/py_src/ocr/tbpu/parser_tools/line_preprocessing.py",
+      "modified": true,
+      "changes": [
+        "Replaced desktop umi_log logger import with Python standard logging."
+      ]
+    },
+    {
+      "local": "umi_core/vendor/tbpu/parser_tools/gap_tree.py",
+      "source": "https://raw.githubusercontent.com/hiroi-sora/Umi-OCR/83173efc4f4453b41223ea96d63d44534bf0505c/UmiOCR-data/py_src/ocr/tbpu/parser_tools/gap_tree.py",
+      "modified": false,
+      "changes": []
+    },
+    {
+      "local": "umi_core/vendor/paddle/PPOCR_api.py",
+      "source": "https://raw.githubusercontent.com/hiroi-sora/Umi-OCR_plugins/a07d80adf4e4612240db4e9dba19bde188729edd/win_linux_PaddleOCR-json/PPOCR_api.py",
+      "modified": false,
+      "changes": []
+    },
+    {
+      "local": "licenses/Umi-OCR.MIT.txt",
+      "source": "https://raw.githubusercontent.com/hiroi-sora/Umi-OCR/83173efc4f4453b41223ea96d63d44534bf0505c/LICENSE",
+      "modified": false,
+      "changes": []
+    },
+    {
+      "local": "licenses/Umi-OCR_plugins.MIT.txt",
+      "source": "https://raw.githubusercontent.com/hiroi-sora/Umi-OCR_plugins/a07d80adf4e4612240db4e9dba19bde188729edd/LICENSE",
+      "modified": false,
+      "changes": []
+    }
+  ]
+}

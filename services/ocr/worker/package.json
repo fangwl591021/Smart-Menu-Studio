@@ -1,0 +1,25 @@
+{
+  "name": "smart-menu-ocr-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "types": "wrangler types --include-runtime",
+    "check": "tsc --noEmit",
+    "test": "node --test test/*.test.mjs",
+    "build:ci": "node scripts/build-ci.mjs",
+    "bundle:worker": "wrangler deploy --dry-run --containers-rollout=none --outdir .wrangler/bundle",
+    "predeploy": "node scripts/predeploy.mjs",
+    "deploy": "wrangler deploy --keep-vars"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1",
+    "typescript": "7.0.2",
+    "wrangler": "4.148.0"
+  },
+  "engines": {
+    "node": ">=24.14.1 <25"
+  },
+  "overrides": {
+    "sharp": "0.35.5"
+  }
+}

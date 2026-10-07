@@ -1,0 +1,57 @@
+# 獨立 OCR 雲端建置
+
+2026-10-07：使用者同意只推送 OCR 程式並設定 Cloudflare Workers Builds，
+不安裝系統 Docker、不更動正式 AI 金鑰與租戶資料。
+
+## 建置契約
+
+- Repository：`fangwl591021/Smart-Menu-Studio`。
+- OCR 分支：`codex/umi-ocr-cloud-builds`；不推送／合併到 `main`。
+- Worker：`smart-menu-ocr`，與 SaaS 的 `smart-menu-backend`／`smart-menu-frontend` 分開。
+- Cloudflare account：`8058cf61f0cd44c4edd78080b193033a`。
+- Root directory：`services/ocr/worker`。
+- Build command：`npm run build:ci`。
+- Deploy command：`npm run deploy`（保留 npm 的 predeploy 檢查，不直接呼叫 Wrangler 跳過）。
+- Build variable：`NODE_VERSION=24.14.1`，不設定 AI 金鑰／會員資料。
+- 非 OCR 分支預覽建置關閉；不要讓這個 Worker 跟著 SaaS main 更新。
+- 沿用既有 GitHub 安裝與 Workers Builds 權杖。缺權限時停止，不擴權或新增權杖。
+
+`build:ci` 檢查 Worker 型別、10 項 Worker／guard 測試，並建置 Docker 的
+`unit-tests` stage 執行 24 項合成 Python 測試。該 stage 不包含／下載原生引擎，
+測試容器不連外、不掛載租戶儲存。source checks 成功不代表原生 OCR 可用。
+
+真正的 `deploy` 先檢查原生第三方告示、Docker、建置正式映像，並在禁網路的
+合成圖片測試中跑真實引擎；全部通過才呼叫 Wrangler。告示仍未核對完成，
+目前部署應被 `OCR_DEPLOY_BLOCKED` 阻擋，而不是假裝辨識成功。
+
+## 初始化
+
+為在不使用 SaaS main 的情況下連接分支，可先用 `wrangler.bootstrap.jsonc`
+註冊封閉的 Worker。bootstrap 所有請求只回 404：沒有 container／DO／AI／
+D1／R2／secret／公開路由，不是 OCR 部署。初始化完成後，Cloudflare Builds
+必須指向上述 OCR 分支與正常 `wrangler.jsonc`，不得留用 bootstrap 作為正式 OCR。
+
+## 既有 SaaS 的 CI
+
+2026-10-07 唯讀核對：既有 `smart-menu-backend` 的 production branch 是 main，
+root 是 backend，非生產分支啟用且命令為 `wrangler versions upload`。
+因此新增 OCR 分支可能啟動既有 SaaS 的預覽建置，但不應提升為正式部署。
+本任務不改既有 SaaS 的分支／監看路徑／金鑰／資源設定；發布後需核對正式部署
+仍是原版本，不能把預覽建置誤認為 OCR 建置。
+
+## 發布範圍
+
+分支只加入 `services/ocr/` 下已列入 Git 的來源／授權／合成測試／設定。
+不包含本機下載的 native binary／models／cache／venv／node_modules／環境檔，
+也不包含工作目錄內其他 CRM、會員、點數、LINE 或管理介面變更。
+既有 SaaS 的混合 adapter 仍為本機接線，正式 OCR switch 尚未開啟。
+
+## 狀態
+
+設定與檢查程式已準備；遠端分支與 Builds 連線需以實際提交／dashboard 證據
+補記。原生函式庫告示核對仍未完成：詳見 `licenses/NATIVE-DEPENDENCIES.md`。
+不可將註冊 bootstrap、source checks 或成功 push 當作正式 OCR 已啟用。
+
+官方依據：
+[Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/)、
+[Container 部署](https://developers.cloudflare.com/containers/guides/deploy/)。
