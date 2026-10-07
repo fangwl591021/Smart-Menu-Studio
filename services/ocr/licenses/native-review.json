@@ -1,0 +1,307 @@
+{
+  "format": 1,
+  "engineSha256": "92a8e5bfe668e1ddec161cd3525c90756cc4c7c608e451a7a2872eb9066d456b",
+  "completed": false,
+  "reviewedOn": "2026-10-07",
+  "unresolved": [
+    {
+      "id": "pocketfft-source",
+      "reason": "The original release_for_eigen source currently requires a manual anti-bot verification. No bypass attempted; exact source/notice remains unverified."
+    },
+    {
+      "id": "eigen-compiled-scope",
+      "reason": "Full pinned license texts retained; MPL/LGPL compiled-use scope and source availability obligations must still be checked against this inference build."
+    },
+    {
+      "id": "bundled-gcc-runtime",
+      "reason": "The release includes libgomp.so.1 without origin/source notices. Match its source/runtime exception obligations, or explicitly use the distribution-provided runtime with a verified smoke test."
+    }
+  ],
+  "evidence": [
+    {
+      "source": "https://paddle-inference-lib.bj.bcebos.com/2.3.2/cxx_c/Linux/CPU/gcc8.2_avx_mkl/paddle_inference.tgz",
+      "bytes": 221186817,
+      "sha256": "f09d5082b167e8301dc741b629baa0ab30e0342a8d7b62c322fde324f9404dbf",
+      "method": "Exact SHA256 matches for libpaddle_inference, libdnnl, ONNX Runtime, Paddle2ONNX, Intel OpenMP and MKLML."
+    },
+    {
+      "source": "https://paddlepaddledeps.bj.bcebos.com/csrmm_mklml_lnx_2019.0.5.tgz",
+      "bytes": 72019387,
+      "sha256": "8b190a13cc21be6030363d119b3a8e0830dd8601902900fa0c05d1129d55b5ab",
+      "publisherMd5": "bc6a7faea6a2a9ad31752386f3ae87da",
+      "method": "All file-backed SHF_ALLOC ELF sections match the stripped release copies. Full-file hashes differ, consistent with omitted non-runtime debug/symbol data; this does not certify licensing."
+    },
+    {
+      "source": "https://raw.githubusercontent.com/opencv/opencv_3rdparty/fd27188235d85e552de31425e7ea0f53ba73ba53/ippicv/ippicv_2021.11.0_lnx_intel64_20240201_general.tgz",
+      "bytes": 32853743,
+      "sha256": "86c53ddd40c2889f6bc1040bcbd95db9b49b7ecf5321c08907ef8465f3053a7a",
+      "publisherMd5": "0f2745ff705ecae31176dad437608f6f",
+      "method": "Version 2021.11.0 matches embedded OpenCV build information and pinned OpenCV 4.10.0 build recipe; full EULA/third-party file retained."
+    }
+  ],
+  "notices": [
+    {
+      "file": "licenses/Intel.IPPICV-2021.11.EULA.txt",
+      "source": "https://raw.githubusercontent.com/opencv/opencv_3rdparty/fd27188235d85e552de31425e7ea0f53ba73ba53/ippicv/ippicv_2021.11.0_lnx_intel64_20240201_general.tgz",
+      "archiveMember": "ippicv_lnx/EULA.txt",
+      "archiveSha256": "86c53ddd40c2889f6bc1040bcbd95db9b49b7ecf5321c08907ef8465f3053a7a",
+      "sha256": "c1bf7165226036081d5cbe4baca565eb5e817fe56b9cf1ac7247688feb32b3e4"
+    },
+    {
+      "file": "licenses/Intel.IPPICV-2021.11.ThirdPartyNotices.txt",
+      "source": "https://raw.githubusercontent.com/opencv/opencv_3rdparty/fd27188235d85e552de31425e7ea0f53ba73ba53/ippicv/ippicv_2021.11.0_lnx_intel64_20240201_general.tgz",
+      "archiveMember": "ippicv_lnx/third-party-programs.txt",
+      "archiveSha256": "86c53ddd40c2889f6bc1040bcbd95db9b49b7ecf5321c08907ef8465f3053a7a",
+      "sha256": "9e7cade36cdf1681de1258004472823acf4e09c8e9e5f7cbe810c0ccea232415"
+    },
+    {
+      "file": "licenses/Intel.MKLML-2019.License.txt",
+      "source": "https://paddlepaddledeps.bj.bcebos.com/csrmm_mklml_lnx_2019.0.5.tgz",
+      "archiveMember": "mklml_lnx_2019.0.5.20190502/license.txt",
+      "archiveSha256": "8b190a13cc21be6030363d119b3a8e0830dd8601902900fa0c05d1129d55b5ab",
+      "sha256": "203fdbf14e4e7ff8fc8c2e2bde99d88f4ece1fe3e6841a672fdfaf2c96cf7821"
+    },
+    {
+      "file": "licenses/Intel.MKLML-2019.ThirdPartyNotices.txt",
+      "source": "https://paddlepaddledeps.bj.bcebos.com/csrmm_mklml_lnx_2019.0.5.tgz",
+      "archiveMember": "mklml_lnx_2019.0.5.20190502/third-party-programs.txt",
+      "archiveSha256": "8b190a13cc21be6030363d119b3a8e0830dd8601902900fa0c05d1129d55b5ab",
+      "sha256": "231eeb31dc4f8df14607e26bc47ed438bf090b7a1147afc1022d7b0446359076"
+    },
+    {
+      "file": "licenses/oneDNN.Apache-2.0.txt",
+      "source": "https://raw.githubusercontent.com/uxlfoundation/oneDNN/9a35435c18722ff17a48fb60bceac42bfdf78754/LICENSE",
+      "sha256": "dd12452e1ae11e3282271aa5895d8175296b83e936a027209f9399d26a407d0f"
+    },
+    {
+      "file": "licenses/oneDNN.ThirdPartyNotices.txt",
+      "source": "https://raw.githubusercontent.com/uxlfoundation/oneDNN/9a35435c18722ff17a48fb60bceac42bfdf78754/THIRD-PARTY-PROGRAMS",
+      "sha256": "d181095b47416ed93d393083c5d23fa7c2e2dd64d87474a42ac5c0e7fe7e09a3"
+    },
+    {
+      "file": "licenses/ONNXRuntime.MIT.txt",
+      "source": "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.11.1/LICENSE",
+      "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"
+    },
+    {
+      "file": "licenses/ONNXRuntime.ThirdPartyNotices.txt",
+      "source": "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.11.1/ThirdPartyNotices.txt",
+      "sha256": "d3e99d1b7ca55c42637d962075ee33fce87b4489dbcbd6ab673ec2b8b8a05f21"
+    },
+    {
+      "file": "licenses/OpenCV.Apache-2.0.txt",
+      "source": "https://raw.githubusercontent.com/opencv/opencv/4.10.0/LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "file": "licenses/OpenCV.flatbuffers.txt",
+      "source": "https://raw.githubusercontent.com/opencv/opencv/4.10.0/3rdparty/flatbuffers/LICENSE.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "file": "licenses/OpenCV.ITT-BSD.txt",
+      "source": "https://raw.githubusercontent.com/opencv/opencv/4.10.0/3rdparty/ittnotify/src/ittnotify/LICENSE.BSD",
+      "sha256": "1535fde9c7909e0e8c158867b96e88283f6e89175af7e49abcfc52e50f30af32"
+    },
+    {
+      "file": "licenses/OpenCV.libjpeg-IJG.txt",
+      "source": "https://raw.githubusercontent.com/opencv/opencv/4.10.0/3rdparty/libjpeg-turbo/README.ijg",
+      "sha256": "5c1f9094835d21f66ee0e9ce81c57264d2dd50801b19832d6723dc8cdbda080e"
+    },
+    {
+      "file": "licenses/OpenCV.libjpeg-turbo.txt",
+      "source": "https://raw.githubusercontent.com/opencv/opencv/4.10.0/3rdparty/libjpeg-turbo/LICENSE.md",
+      "sha256": "e548c96c0c09397c94b5c5531836c02ff2c403f1f2b130cad8e3ec9439b5a7cc"
+    },
+    {
+      "file": "licenses/OpenCV.libpng.txt",
+      "source": "https://raw.githubusercontent.com/opencv/opencv/4.10.0/3rdparty/libpng/LICENSE",
+      "sha256": "7317e078e2d3b5d7ba5a6159e650945153262b44b76f6700f8e9edb261c5143e"
+    },
+    {
+      "file": "licenses/OpenCV.libtiff.txt",
+      "source": "https://raw.githubusercontent.com/opencv/opencv/4.10.0/3rdparty/libtiff/COPYRIGHT",
+      "sha256": "fbd6fed7938541d2c809c0826225fc85e551fdbfa8732b10f0c87e0847acafd7"
+    },
+    {
+      "file": "licenses/OpenCV.libwebp.txt",
+      "source": "https://raw.githubusercontent.com/opencv/opencv/4.10.0/3rdparty/libwebp/COPYING",
+      "sha256": "e293d1dddc9785200b1f58a4f5293543cf8566d9e0b8a3c02fad955035b19f42"
+    },
+    {
+      "file": "licenses/OpenCV.OpenCL.txt",
+      "source": "https://raw.githubusercontent.com/opencv/opencv/4.10.0/3rdparty/include/opencl/LICENSE.txt",
+      "sha256": "cfaceadff07c2c9458283079cd0166872aa2d93d5c480f1f417be321aa7e0f4d"
+    },
+    {
+      "file": "licenses/OpenCV.openexr.txt",
+      "source": "https://raw.githubusercontent.com/opencv/opencv/4.10.0/3rdparty/openexr/LICENSE",
+      "sha256": "597001ec40e9a9c8d298e9c1e5ea6ba5178f381a457826d2ef1e64d3d6b1bd12"
+    },
+    {
+      "file": "licenses/OpenCV.openjpeg.txt",
+      "source": "https://raw.githubusercontent.com/opencv/opencv/4.10.0/3rdparty/openjpeg/LICENSE",
+      "sha256": "a6af136f3e15038a666b61f376612a07d9a4e48cb7c01adbf3e33b3f14ab49b6"
+    },
+    {
+      "file": "licenses/OpenCV.protobuf.txt",
+      "source": "https://raw.githubusercontent.com/opencv/opencv/4.10.0/3rdparty/protobuf/LICENSE",
+      "sha256": "6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d"
+    },
+    {
+      "file": "licenses/OpenCV.zlib.txt",
+      "source": "https://raw.githubusercontent.com/opencv/opencv/4.10.0/3rdparty/zlib/LICENSE",
+      "sha256": "845efc77857d485d91fb3e0b884aaa929368c717ae8186b66fe1ed2495753243"
+    },
+    {
+      "file": "licenses/Paddle.Boost.BSL-1.0.txt",
+      "source": "https://raw.githubusercontent.com/boostorg/boost/boost-1.41.0/LICENSE_1_0.txt",
+      "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566"
+    },
+    {
+      "file": "licenses/Paddle.cryptopp.License.txt",
+      "source": "https://raw.githubusercontent.com/weidai11/cryptopp/CRYPTOPP_8_2_0/License.txt",
+      "sha256": "b690623f25df14fa80580241d7e5590e3ef04d23e1d845878578239faa1ea972"
+    },
+    {
+      "file": "licenses/Paddle.DLPack.Apache-2.0.txt",
+      "source": "https://raw.githubusercontent.com/dmlc/dlpack/v0.4/LICENSE",
+      "sha256": "3e8f6bc39276a586d60c8c5aaece2ff989262181cf2b3d2a128db58f97a9300c"
+    },
+    {
+      "file": "licenses/Paddle.Eigen.BSD.txt",
+      "source": "https://gitlab.com/libeigen/eigen/-/raw/f612df273689a19d25b45ca4f8269463207c4fee/COPYING.BSD",
+      "sha256": "51928dce36213c5333ba3172e847d735d4c6e9b7ff2722a326c49067155b82eb"
+    },
+    {
+      "file": "licenses/Paddle.Eigen.Copying.Readme.txt",
+      "source": "https://gitlab.com/libeigen/eigen/-/raw/f612df273689a19d25b45ca4f8269463207c4fee/COPYING.README",
+      "sha256": "c83230b770f17ef1386ea1fd3681271dd98aa93646bdbfb5bff3a1b7050fff9d"
+    },
+    {
+      "file": "licenses/Paddle.Eigen.GPL-3.0.txt",
+      "source": "https://gitlab.com/libeigen/eigen/-/raw/f612df273689a19d25b45ca4f8269463207c4fee/COPYING.GPL",
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+    },
+    {
+      "file": "licenses/Paddle.Eigen.LGPL-2.1.txt",
+      "source": "https://gitlab.com/libeigen/eigen/-/raw/f612df273689a19d25b45ca4f8269463207c4fee/COPYING.LGPL",
+      "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551"
+    },
+    {
+      "file": "licenses/Paddle.Eigen.MINPACK.txt",
+      "source": "https://gitlab.com/libeigen/eigen/-/raw/f612df273689a19d25b45ca4f8269463207c4fee/COPYING.MINPACK",
+      "sha256": "c87b7f8ee88f6195e91743820c00354833583aef091b72e2d4a49c8e28e798a0"
+    },
+    {
+      "file": "licenses/Paddle.Eigen.MPL-2.0.txt",
+      "source": "https://gitlab.com/libeigen/eigen/-/raw/f612df273689a19d25b45ca4f8269463207c4fee/COPYING.MPL2",
+      "sha256": "fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85"
+    },
+    {
+      "file": "licenses/Paddle.gflags.BSD.txt",
+      "source": "https://raw.githubusercontent.com/gflags/gflags/v2.2.2/COPYING.txt",
+      "sha256": "90d1f3701813c3cd65eee2dc736746fe46b465918f3f7d6d31463a2018b33fa5"
+    },
+    {
+      "file": "licenses/Paddle.glog.BSD.txt",
+      "source": "https://raw.githubusercontent.com/google/glog/v0.4.0/COPYING",
+      "sha256": "0fc497129c5c69ff6f22da6933c7e4aaef082fde8437fd57680c2780100772a4"
+    },
+    {
+      "file": "licenses/Paddle.gloo.BSD.txt",
+      "source": "https://raw.githubusercontent.com/sandyhouse/gloo/v0.0.2/LICENSE",
+      "sha256": "2afbc572cf7f60888159bc2ca48ba58f8adec06682ae5de820d61449d1eeea81"
+    },
+    {
+      "file": "licenses/Paddle.LAPACK.BSD.txt",
+      "source": "https://raw.githubusercontent.com/Reference-LAPACK/lapack/v3.10.0/LICENSE",
+      "sha256": "66246b7d3e6736aea46e63fd5e087659474d07edfe2f9b051d085d9b42aaac61"
+    },
+    {
+      "file": "licenses/Paddle.protobuf.BSD.txt",
+      "source": "https://raw.githubusercontent.com/protocolbuffers/protobuf/v3.8.0/LICENSE",
+      "sha256": "6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d"
+    },
+    {
+      "file": "licenses/Paddle.protobuf.Pinned.BSD.txt",
+      "source": "https://raw.githubusercontent.com/protocolbuffers/protobuf/9f75c5aa851cd877fb0d93ccc31b8567a6706546/LICENSE",
+      "sha256": "af67c58de2e18677a0b8cb5fffbe2232aabb8eb2930e8cd684769cef3d74a262"
+    },
+    {
+      "file": "licenses/Paddle.ThreadPool.Zlib.txt",
+      "source": "https://raw.githubusercontent.com/progschj/ThreadPool/9a42ec1329f259a5f4881a291db1dcb8f2ad9040/COPYING",
+      "sha256": "8afbc5160151ecc1fc27dce6cb03e4af8fb1033d59848107ce7561161242b0c7"
+    },
+    {
+      "file": "licenses/Paddle.utf8proc.MIT.txt",
+      "source": "https://raw.githubusercontent.com/JuliaStrings/utf8proc/v2.6.1/LICENSE.md",
+      "sha256": "fbc720fcc90fb44396985646f67e4d19be03e0c0539f7138ed9dc6efba49dc49"
+    },
+    {
+      "file": "licenses/Paddle.warp-ctc.Apache-2.0.txt",
+      "source": "https://raw.githubusercontent.com/baidu-research/warp-ctc/37ece0e1bbe8a0019a63ac7e6462c36591c66a5b/LICENSE",
+      "sha256": "eed59efb1855b4bd0e33b9b3326dfa3ccc9ad8020db3c9d057f38594bde6850b"
+    },
+    {
+      "file": "licenses/Paddle.Xbyak.BSD.txt",
+      "source": "https://raw.githubusercontent.com/herumi/xbyak/v5.81/COPYRIGHT",
+      "sha256": "f8ddc1b38c2ba3d472abe83d66bd5bad6206e9fe50ac33ea3872069056beb8e2"
+    },
+    {
+      "file": "licenses/Paddle.xxhash.BSD.txt",
+      "source": "https://raw.githubusercontent.com/Cyan4973/xxHash/v0.6.5/LICENSE",
+      "sha256": "86ec6953794503942b70fcd4f35b565d44f63f703b7037ce44dad965c4aaae91"
+    },
+    {
+      "file": "licenses/Paddle.zlib.txt",
+      "source": "https://raw.githubusercontent.com/madler/zlib/v1.2.8/README",
+      "sha256": "53a466b504371dcdda1504c90d8121d4823921f03554c3526995fb2bae7159f9"
+    },
+    {
+      "file": "licenses/Paddle2ONNX.Apache-2.0.txt",
+      "source": "https://raw.githubusercontent.com/PaddlePaddle/Paddle2ONNX/v1.0.0rc2/LICENSE",
+      "sha256": "ba77dd623b6441638120d06f0426db80f9032c457dac18f4ad8f1f06fd97e2db"
+    },
+    {
+      "file": "licenses/Paddle2ONNX.ONNX.Apache-2.0.txt",
+      "source": "https://raw.githubusercontent.com/onnx/onnx/5b1346e30d66e4ec550f6b63c3883b258a2e8e3e/LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "file": "licenses/Paddle2ONNX.Optimizer.Apache-2.0.txt",
+      "source": "https://raw.githubusercontent.com/onnx/optimizer/a37748b2c3a80dad4274401c45c5026c7a506730/LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "file": "licenses/Paddle2ONNX.pybind11.BSD.txt",
+      "source": "https://raw.githubusercontent.com/pybind/pybind11/f306012b55beccf93ffa5ce63d3a21450620eb61/LICENSE",
+      "sha256": "83965b843b98f670d3a85bd041ed4b372c8ec50d7b4a5995a83ac697ba675dcb"
+    },
+    {
+      "file": "licenses/PaddleInference.Apache-2.0.txt",
+      "source": "https://raw.githubusercontent.com/PaddlePaddle/Paddle/v2.3.2/LICENSE",
+      "sha256": "ff6311c56c1b22c9209c96cc8afc16da91c24ee55a15e14ebc46fe1960dbd856"
+    },
+    {
+      "file": "licenses/PaddleOCR-json.Apache-2.0.txt",
+      "source": "https://raw.githubusercontent.com/hiroi-sora/PaddleOCR-json/828e3fd121de59799bd5934faa6b8858c4969ba5/LICENSE",
+      "sha256": "0455d1b0beac6e5b9e89c02ffb5c1f531eb7dff698a7df21cd029e81edbfc2a1"
+    },
+    {
+      "file": "licenses/PaddleOCR.Apache-2.0.txt",
+      "source": "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/v2.6.0/LICENSE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "file": "licenses/Umi-OCR_plugins.MIT.txt",
+      "source": "https://raw.githubusercontent.com/hiroi-sora/Umi-OCR_plugins/a07d80adf4e4612240db4e9dba19bde188729edd/LICENSE",
+      "sha256": "04033bb31326a4eeb50f06c71c77dfa80ed3ccf48cf15b715b1e275028321eab"
+    },
+    {
+      "file": "licenses/Umi-OCR.MIT.txt",
+      "source": "https://raw.githubusercontent.com/hiroi-sora/Umi-OCR/83173efc4f4453b41223ea96d63d44534bf0505c/LICENSE",
+      "sha256": "04033bb31326a4eeb50f06c71c77dfa80ed3ccf48cf15b715b1e275028321eab"
+    }
+  ]
+}

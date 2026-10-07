@@ -5,7 +5,7 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY umi_core ./umi_core
-COPY fetch_engine.py ./
+COPY fetch_engine.py audit_archive.py ./
 COPY tests ./tests
 RUN useradd --uid 10001 --no-create-home ocr-test
 USER 10001:10001

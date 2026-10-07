@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { dockerBuildNetworkArgs } from './docker-build-network.mjs';
+import { validateNoticeInventory } from './notice-inventory.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -12,6 +13,18 @@ export function runPredeploy({ spawn = spawnSync, read = readFileSync,
   const manifest = JSON.parse(read(new URL('../../native-artifacts.json', import.meta.url), 'utf8'));
   if (manifest.nativeThirdPartyNoticesReviewed !== true) {
     report('OCR_DEPLOY_BLOCKED: native third-party redistribution notices must be reviewed before publishing.');
+    return 1;
+  }
+  // A boolean alone cannot authorize publication: the inventory must correspond
+  // to this exact engine, retain all notice bytes, and have no unresolved items.
+  try {
+    const inventory = validateNoticeInventory({ read, artifact: manifest });
+    if (!inventory.completed || inventory.unresolved.length) {
+      report('OCR_DEPLOY_BLOCKED: native dependency review has unresolved items.');
+      return 1;
+    }
+  } catch {
+    report('OCR_DEPLOY_BLOCKED: native notice inventory is missing or does not match its pinned hashes.');
     return 1;
   }
   const checked = spawn(docker, ['info', '--format', '{{.OSType}}'],

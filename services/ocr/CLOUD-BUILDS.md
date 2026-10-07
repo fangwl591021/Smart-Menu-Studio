@@ -87,3 +87,15 @@ root 是 backend，非生產分支啟用且命令為 `wrangler versions upload`�
 [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/)、
 [Container 部署](https://developers.cloudflare.com/containers/guides/deploy/)、
 [Docker-in-Docker 建置網路](https://developers.cloudflare.com/containers/faq/#can-i-run-docker-inside-a-container-docker-in-docker)。
+
+## 2026-10-07 授權檢點續作
+
+已新增 45 份完整授權／告示，inventory 共 51 份；比對官方 Paddle 2.3.2
+套件的主要動態庫 SHA256、Intel MKLML 的可執行 ELF 區段、OpenCV IPPICV
+固定套件與完整 EULA。Worker 本機 19 項、Python 本機 28 項及型別檢查通過。
+
+新的 predeploy 不只看 nativeThirdPartyNoticesReviewed，還驗證對應引擎 SHA256、
+每個告示的內容雜湊、review completed 與未完成清單。FFT 來源目前要求人工驗證；
+沒有繞過。另有 Eigen 來源義務及 bundled GCC runtime 尚待核對。
+因此正式部署仍應停止，沒有 native image 或 SaaS binding。不要把 local test／
+source build 或補齊告示數量當作可對正式會員開啟 OCR 的證據。

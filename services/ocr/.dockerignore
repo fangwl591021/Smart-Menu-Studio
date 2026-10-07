@@ -3,6 +3,7 @@
 !requirements.txt
 !native-artifacts.json
 !fetch_engine.py
+!audit_archive.py
 !UPSTREAM.json
 !umi_core/**
 !licenses/**

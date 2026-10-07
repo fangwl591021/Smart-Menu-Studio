@@ -58,12 +58,12 @@
 
 ## 尚未完成／部署阻擋
 
-1. **映像建置**：Windows 與既有 Ubuntu 都未找到 Docker／Podman。雲端已建出合成測試映像；DNS 接線已修正，但內層 `docker run` 不可用，因此合成測試改在非 root、禁網路的 BuildKit RUN step 執行，仍需核對完整結果。完整原生映像／container smoke test 尚未執行，也未驗證 Cloudflare CPU 上的 AVX／模型相容性。已在既有 Ubuntu 使用本次下載、驗證 SHA256 的官方原生引擎及繁體模型跑通合成圖；不是已部署的 Cloudflare 驗證。
+1. **映像建置**：Windows 與既有 Ubuntu 都未找到 Docker／Podman。2026-10-07 的雲端 source build 已通過：Worker 12 項與非 root、禁網路 BuildKit RUN step 的 Python 24 項測試成功；deploy 由授權 guard 停止。本輪新增檢點的本機 Worker 19 項／Python 28 項也通過，但尚非新的雲端結果。完整原生映像／container smoke test 尚未執行，也未驗證 Cloudflare CPU 上的 AVX／模型相容性。已在既有 Ubuntu 使用本次下載、驗證 SHA256 的官方原生引擎及繁體模型跑通合成圖；不是已部署的 Cloudflare 驗證。
 2. **建置方式已確認**：使用者已同意獨立 Cloudflare Workers Builds，只發布 `services/ocr/` 的程式、授權及合成測試；不安裝系統 Docker、不發布整個 dirty checkout、不合併至 SaaS 的 main。CI 使用既有 GitHub 安裝與既有建置權杖，不複製 AI 金鑰。
 3. **帳號與部署**：既有 Wrangler OAuth 能列出 containers（目前 0 個），但這不是付費方案／資源配額的完整驗證。只有封閉 bootstrap 已註冊，沒有 native container／租戶繫結、方案升級或正式 OCR 部署；正式 OCR 開關仍未開啟。
 4. **PDF 工作**：容器目前只做圖片；先前 PDF HTTP adapter 僅供完整 Umi doc provider 使用。私有圖片 binding 明確拒絕 PDF，尚無 PDF 上傳入口、解析背景工作或持久任務。
 5. **真實素材比較**：還需要同批名片／海報核對錯誤率、暖機／冷啟動總延遲、AI tokens 和容器費。沒有驗證省費或準確率改善，低品質或冷啟動 fallback 可能增加耗時。商品外觀判斷仍需視覺 AI。
-6. **原生附帶第三方授權**：官方 binary archive 含 OpenCV、Intel MKL／OpenMP、ONNX 等 library，卻沒有相應 LICENSE／NOTICE 檔；不能視為都由 PaddleOCR-json 的 Apache 2.0 授權涵蓋。發布前仍需核對版本、補齊適用告示，guard 暫時阻擋發布。檢點見 `licenses/NATIVE-DEPENDENCIES.md`。
+6. **原生附帶第三方授權**：已比對官方 Paddle 2.3.2 與 Intel 套件，並保留 51 份告示／授權檔及來源、SHA256。仍有 FFT 原始來源人工驗證、Eigen 編譯範圍／來源義務及 bundled libgomp 檢點，guard 繼續阻擋；不能只改布林開關放行。完整檢點見 `licenses/NATIVE-DEPENDENCIES.md` 與 `licenses/native-review.json`。
 
 只安裝專案目錄內的 Python venv／Node 依賴，下載並驗證官方 binary／models，以現有 Ubuntu 做離線合成圖測試；未安裝桌面 Umi／系統 Docker、修改 AI 金鑰、處理使用者檔案或修改正式會員資料。建置資產 cache 受 `.gitignore`／`.dockerignore` 排除，不能直接提交其中的二進位或測試暫存。
 

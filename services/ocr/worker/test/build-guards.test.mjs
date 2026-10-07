@@ -1,12 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { runPredeploy } from '../scripts/predeploy.mjs';
 import { runBuild } from '../scripts/build-ci.mjs';
 import bootstrap from '../src/bootstrap.ts';
 import { dockerBuildNetworkArgs } from '../scripts/docker-build-network.mjs';
 
-const reviewed = () => JSON.stringify({ nativeThirdPartyNoticesReviewed: true });
+const notice = Buffer.from('Synthetic notice for isolated tests only.\n');
+const engineSha256 = '1'.repeat(64);
+const reviewed = (url) => {
+  if (url.pathname.endsWith('/native-artifacts.json')) return JSON.stringify({
+    nativeThirdPartyNoticesReviewed: true, engine: { sha256: engineSha256 } });
+  if (url.pathname.endsWith('/licenses/native-review.json')) return JSON.stringify({
+    format: 1, engineSha256, completed: true, unresolved: [], notices: [{
+      file: 'licenses/Synthetic.txt', source: 'https://example.invalid/LICENSE',
+      sha256: createHash('sha256').update(notice).digest('hex') }] });
+  if (url.pathname.endsWith('/licenses/Synthetic.txt')) return notice;
+  throw new Error('Unexpected test read');
+};
 const quiet = () => {};
 
 test('unreviewed native notices block before Docker or any deployment', () => {
@@ -21,6 +33,24 @@ test('missing, stopped or non-Linux Docker blocks image build', () => {
     let calls = 0;
     assert.equal(runPredeploy({ read: reviewed, spawn: () => { calls++; return result; }, report: quiet }), 1);
     assert.equal(calls, 1);
+  }
+});
+
+test('a reviewed boolean cannot bypass an incomplete or corrupt notice inventory', () => {
+  for (const kind of ['pending', 'mismatch', 'missing']) {
+    let calls = 0;
+    const read = (url, ...args) => {
+      if (url.pathname.endsWith('/licenses/native-review.json')) {
+        if (kind === 'missing') throw new Error('missing');
+        const review = JSON.parse(reviewed(url));
+        if (kind === 'pending') review.completed = false;
+        if (kind === 'mismatch') review.engineSha256 = '2'.repeat(64);
+        return JSON.stringify(review);
+      }
+      return reviewed(url, ...args);
+    };
+    assert.equal(runPredeploy({ read, report: quiet, spawn: () => { calls++; } }), 1);
+    assert.equal(calls, 0);
   }
 });
 
